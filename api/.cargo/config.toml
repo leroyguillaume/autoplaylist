@@ -1,0 +1,2 @@
+[env]
+LOG_FILTER = "warn,autoplaylist_api=trace"
