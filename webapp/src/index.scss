@@ -1,0 +1,18 @@
+@import "./vars.scss";
+@import "~bootstrap/scss/bootstrap";
+
+a {
+  svg {
+    margin-right: 5px;
+  }
+}
+
+button {
+  svg {
+    margin-right: 5px;
+  }
+}
+
+.v-offset {
+  margin-top: 20px;
+}

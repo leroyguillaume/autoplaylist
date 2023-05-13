@@ -13,3 +13,10 @@ repos:
       - id: cargo-check
       - id: clippy
         args: ["--tests", "--", "-D", "warnings"]
+  - repo: https://github.com/pre-commit/mirrors-prettier
+    rev: v2.7.1
+    hooks:
+      - id: prettier
+        additional_dependencies:
+          - prettier
+          - prettier-plugin-organize-imports
