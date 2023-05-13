@@ -4,10 +4,15 @@ edition.workspace = true
 version.workspace = true
 
 [dependencies]
+actix-cors = "0.6"
 actix-web = "4.3"
-config = "0.13"
+tracing-bunyan-formatter = "0.3"
 exitcode = "1.1"
+opentelemetry = { version = "0.17", features = ["rt-tokio-current-thread"] }
+opentelemetry-jaeger = { version = "0.16", features = ["rt-tokio-current-thread"] }
+rspotify = "0.11"
 serde = { version = "1.0", features = ["derive"] }
 tracing = "0.1"
-tracing-actix-web = "0.7"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-actix-web = { version = "0.7", features = ["opentelemetry_0_18"] }
+tracing-opentelemetry = "0.17"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }

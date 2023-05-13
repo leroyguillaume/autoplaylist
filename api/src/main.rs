@@ -1,9 +1,19 @@
-use std::{error::Error as StdError, process::exit};
+use std::{io::stdout, process::exit};
 
-use actix_web::{get, App, HttpResponse, HttpServer, Responder};
+use actix_cors::Cors;
+use actix_web::{get, http::header, web::Data, App, HttpResponse, HttpServer, Responder};
+use opentelemetry::{
+    global::{set_text_map_propagator, shutdown_tracer_provider},
+    runtime::TokioCurrentThread,
+    sdk::propagation::TraceContextPropagator,
+};
+use rspotify::{scopes, AuthCodeSpotify, Credentials, OAuth};
 use tracing::{debug, error, info};
 use tracing_actix_web::TracingLogger;
-use tracing_subscriber::EnvFilter;
+use tracing_bunyan_formatter::{BunyanFormattingLayer, JsonStorageLayer};
+use tracing_subscriber::{
+    filter::LevelFilter, prelude::__tracing_subscriber_SubscriberExt, EnvFilter, Registry,
+};
 
 use self::cfg::Config;
 
@@ -39,14 +49,27 @@ macro_rules! log_and_exit_on_error {
 async fn main() {
     init_tracing();
     let cfg = log_and_exit_on_error!(Config::from_env(), exitcode::CONFIG);
+    let server_addr = cfg.server_addr;
     debug!("starting server on {}", cfg.server_addr);
-    let res = HttpServer::new(|| App::new().wrap(TracingLogger::default()).service(health))
-        .bind(cfg.server_addr);
+    let res = HttpServer::new(move || {
+        let cors = Cors::default()
+            .allowed_origin(&cfg.webapp_url)
+            .allow_any_header()
+            .allow_any_method();
+        App::new()
+            .app_data(Data::new(cfg.clone()))
+            .wrap(TracingLogger::default())
+            .wrap(cors)
+            .service(health)
+            .service(spotify_redirect)
+    })
+    .bind(server_addr);
     let server = log_and_exit_on_error!(res, exitcode::IOERR);
     let server = server.run();
-    info!("server is listening connections on {}", cfg.server_addr);
+    info!("server is listening connections on {}", server_addr);
     log_and_exit_on_error!(server.await, exitcode::IOERR);
     info!("server shutdown");
+    shutdown_tracer_provider();
 }
 
 // Functions - Routes
@@ -56,25 +79,77 @@ async fn health() -> impl Responder {
     HttpResponse::NoContent()
 }
 
+#[get("/auth/spotify")]
+async fn spotify_redirect(cfg: Data<Config>) -> impl Responder {
+    let spotify = spotify_oauth_client(&cfg);
+    debug!("computing Spotify authorize URL");
+    match spotify.get_authorize_url(false) {
+        Ok(url) => {
+            debug!("sending redirect to {url}");
+            let mut resp = HttpResponse::TemporaryRedirect();
+            resp.insert_header((header::LOCATION, url));
+            resp
+        }
+        Err(err) => {
+            error!("unable to compute Spotify authorize URL: {err}");
+            HttpResponse::InternalServerError()
+        }
+    }
+}
+
 // Functions - Utils
 
 #[inline]
-fn box_error<E: StdError + 'static>(err: E) -> Box<dyn StdError> {
-    Box::new(err)
+fn init_tracing() {
+    let app_name = env!("CARGO_PKG_NAME");
+    set_text_map_propagator(TraceContextPropagator::new());
+    let tracer = opentelemetry_jaeger::new_pipeline()
+        .with_service_name(app_name)
+        .install_batch(TokioCurrentThread)
+        .expect("failed to install OpenTelemetry tracer");
+    let res = EnvFilter::builder()
+        .with_env_var("LOG_FILTER")
+        .with_default_directive(LevelFilter::INFO.into())
+        .from_env();
+    let env_filter = eprint_and_exit_on_error!(res, exitcode::CONFIG);
+    let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+    let formatting_layer = BunyanFormattingLayer::new(app_name.into(), stdout);
+    let subscriber = Registry::default()
+        .with(env_filter)
+        .with(telemetry)
+        .with(JsonStorageLayer)
+        .with(formatting_layer);
+    tracing::subscriber::set_global_default(subscriber)
+        .expect("failed to install `tracing` subscriber");
 }
 
 #[inline]
-fn init_tracing() {
-    let res = EnvFilter::builder()
-        .with_env_var("LOG_FILTER")
-        .with_default_directive("autoplaylist_api=info".parse().unwrap())
-        .from_env();
-    let env_filter = eprint_and_exit_on_error!(res, exitcode::CONFIG);
-    let res = tracing_subscriber::fmt()
-        .compact()
-        .with_env_filter(env_filter)
-        .try_init();
-    eprint_and_exit_on_error!(res, exitcode::SOFTWARE);
+fn spotify_oauth_client(cfg: &Config) -> AuthCodeSpotify {
+    let creds = Credentials {
+        id: cfg.spotify_client_id.clone(),
+        secret: Some(cfg.spotify_client_secret.clone()),
+    };
+    let oauth = OAuth {
+        redirect_uri: format!("{}/auth/spotify", cfg.webapp_url),
+        scopes: scopes!(
+            "playlist-modify-private",
+            "playlist-modify-public",
+            "playlist-read-collaborative",
+            "playlist-read-private",
+            "user-follow-read",
+            "user-library-read",
+            "user-modify-playback-state",
+            "user-read-currently-playing",
+            "user-read-playback-position",
+            "user-read-playback-state",
+            "user-read-recently-played",
+            "user-read-email",
+            "user-read-private",
+            "user-top-read"
+        ),
+        ..Default::default()
+    };
+    AuthCodeSpotify::new(creds, oauth)
 }
 
 // Mods
