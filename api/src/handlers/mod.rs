@@ -37,15 +37,11 @@ impl Display for Error {
 
 impl ResponseError for Error {
     fn error_response(&self) -> HttpResponse<BoxBody> {
-        match self {
-            Self::SpotifyClientFailed(_) => HttpResponse::InternalServerError().body(()),
-        }
+        HttpResponse::InternalServerError().into()
     }
 
     fn status_code(&self) -> StatusCode {
-        match self {
-            Self::SpotifyClientFailed(_) => StatusCode::INTERNAL_SERVER_ERROR,
-        }
+        StatusCode::INTERNAL_SERVER_ERROR
     }
 }
 

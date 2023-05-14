@@ -3,16 +3,17 @@ use rspotify::{scopes, AuthCodeSpotify, Credentials, OAuth};
 use tracing::debug;
 
 use crate::{
-    cfg::{Config, SpotifyConfig},
+    cfg::SpotifyConfig,
     handlers::{handle, Error},
+    Components,
 };
 
 // Funtions - Handlers
 
 #[get("/auth/spotify")]
-async fn spotify_redirect(cfg: Data<Config>) -> impl Responder {
+async fn spotify_redirect(cmpts: Data<Components>) -> impl Responder {
     handle(move || {
-        let spotify = spotify_oauth_client(cfg.spotify.clone());
+        let spotify = spotify_oauth_client(cmpts.spotify_cfg.clone());
         debug!("computing Spotify authorize URL");
         let url = spotify
             .get_authorize_url(false)

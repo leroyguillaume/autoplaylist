@@ -1,0 +1,16 @@
+version: "3"
+
+volumes:
+  db:
+
+services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: autoplaylist
+      POSTGRES_USER: autoplaylist
+      POSTGRES_PASSWORD: autoplaylist
+    ports:
+      - 5432:5432
+    volumes:
+      - db:/var/lib/postgresql/data
