@@ -1,13 +1,12 @@
 use std::{io::stdout, process::exit};
 
 use actix_cors::Cors;
-use actix_web::{get, http::header, web::Data, App, HttpResponse, HttpServer, Responder};
+use actix_web::{get, web::Data, App, HttpResponse, HttpServer, Responder};
 use opentelemetry::{
     global::{set_text_map_propagator, shutdown_tracer_provider},
     runtime::TokioCurrentThread,
     sdk::propagation::TraceContextPropagator,
 };
-use rspotify::{scopes, AuthCodeSpotify, Credentials, OAuth};
 use tracing::{debug, error, info};
 use tracing_actix_web::TracingLogger;
 use tracing_bunyan_formatter::{BunyanFormattingLayer, JsonStorageLayer};
@@ -15,7 +14,7 @@ use tracing_subscriber::{
     filter::LevelFilter, prelude::__tracing_subscriber_SubscriberExt, EnvFilter, Registry,
 };
 
-use self::cfg::Config;
+use self::{cfg::Config, handlers::auth::spotify_redirect};
 
 // Macros
 
@@ -79,24 +78,6 @@ async fn health() -> impl Responder {
     HttpResponse::NoContent()
 }
 
-#[get("/auth/spotify")]
-async fn spotify_redirect(cfg: Data<Config>) -> impl Responder {
-    let spotify = spotify_oauth_client(&cfg);
-    debug!("computing Spotify authorize URL");
-    match spotify.get_authorize_url(false) {
-        Ok(url) => {
-            debug!("sending redirect to {url}");
-            let mut resp = HttpResponse::TemporaryRedirect();
-            resp.insert_header((header::LOCATION, url));
-            resp
-        }
-        Err(err) => {
-            error!("unable to compute Spotify authorize URL: {err}");
-            HttpResponse::InternalServerError()
-        }
-    }
-}
-
 // Functions - Utils
 
 #[inline]
@@ -123,35 +104,7 @@ fn init_tracing() {
         .expect("failed to install `tracing` subscriber");
 }
 
-#[inline]
-fn spotify_oauth_client(cfg: &Config) -> AuthCodeSpotify {
-    let creds = Credentials {
-        id: cfg.spotify_client_id.clone(),
-        secret: Some(cfg.spotify_client_secret.clone()),
-    };
-    let oauth = OAuth {
-        redirect_uri: format!("{}/auth/spotify", cfg.webapp_url),
-        scopes: scopes!(
-            "playlist-modify-private",
-            "playlist-modify-public",
-            "playlist-read-collaborative",
-            "playlist-read-private",
-            "user-follow-read",
-            "user-library-read",
-            "user-modify-playback-state",
-            "user-read-currently-playing",
-            "user-read-playback-position",
-            "user-read-playback-state",
-            "user-read-recently-played",
-            "user-read-email",
-            "user-read-private",
-            "user-top-read"
-        ),
-        ..Default::default()
-    };
-    AuthCodeSpotify::new(creds, oauth)
-}
-
 // Mods
 
 mod cfg;
+mod handlers;
