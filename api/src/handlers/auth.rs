@@ -3,7 +3,7 @@ use rspotify::{scopes, AuthCodeSpotify, Credentials, OAuth};
 use tracing::debug;
 
 use crate::{
-    cfg::Config,
+    cfg::{Config, SpotifyConfig},
     handlers::{handle, Error},
 };
 
@@ -12,7 +12,7 @@ use crate::{
 #[get("/auth/spotify")]
 async fn spotify_redirect(cfg: Data<Config>) -> impl Responder {
     handle(move || {
-        let spotify = spotify_oauth_client(&cfg);
+        let spotify = spotify_oauth_client(cfg.spotify.clone());
         debug!("computing Spotify authorize URL");
         let url = spotify
             .get_authorize_url(false)
@@ -27,13 +27,13 @@ async fn spotify_redirect(cfg: Data<Config>) -> impl Responder {
 // Functions - Utils
 
 #[inline]
-fn spotify_oauth_client(cfg: &Config) -> AuthCodeSpotify {
+fn spotify_oauth_client(cfg: SpotifyConfig) -> AuthCodeSpotify {
     let creds = Credentials {
-        id: cfg.spotify_client_id.clone(),
-        secret: Some(cfg.spotify_client_secret.clone()),
+        id: cfg.id,
+        secret: Some(cfg.secret),
     };
     let oauth = OAuth {
-        redirect_uri: format!("{}/auth/spotify", cfg.webapp_url),
+        redirect_uri: cfg.redirect_url,
         scopes: scopes!(
             "playlist-modify-private",
             "playlist-modify-public",

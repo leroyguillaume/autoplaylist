@@ -1,12 +1,13 @@
 use std::{
     env::{var, VarError},
     error::Error as StdError,
-    fmt::{Debug, Display, Formatter, Result as FmtResult},
+    fmt::{Display, Formatter, Result as FmtResult},
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     result::Result as StdResult,
     str::FromStr,
 };
 
+use securefmt::Debug;
 use tracing::{debug, error, trace, warn};
 
 // Types
@@ -26,12 +27,19 @@ pub enum Error {
 
 // Structs
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Config {
     pub server_addr: SocketAddr,
-    pub spotify_client_id: String,
-    pub spotify_client_secret: String,
+    pub spotify: SpotifyConfig,
     pub webapp_url: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct SpotifyConfig {
+    pub id: String,
+    pub redirect_url: String,
+    #[sensitive]
+    pub secret: String,
 }
 
 // Impl - Error
@@ -61,13 +69,17 @@ impl StdError for Error {
 impl Config {
     pub fn from_env() -> Result<Self> {
         trace!("loading configuration");
+        let webapp_url = Self::env_var("WEBAPP_URL")?;
         let cfg = Config {
             server_addr: Self::env_var_or_default("SERVER_ADDRESS", || {
                 SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 8080))
             })?,
-            spotify_client_id: Self::env_var("SPOTIFY_CLIENT_ID")?,
-            spotify_client_secret: Self::env_var("SPOTIFY_CLIENT_SECRET")?,
-            webapp_url: Self::env_var("WEBAPP_URL")?,
+            spotify: SpotifyConfig {
+                id: Self::env_var("SPOTIFY_CLIENT_ID")?,
+                redirect_url: format!("{webapp_url}/auth/spotify"),
+                secret: Self::env_var("SPOTIFY_CLIENT_SECRET")?,
+            },
+            webapp_url,
         };
         debug!("configuration loaded: {cfg:?}");
         Ok(cfg)
@@ -100,15 +112,5 @@ impl Config {
             Err(Error::MissingEnvVar(_)) => Ok(default()),
             err => err,
         }
-    }
-}
-
-impl Debug for Config {
-    fn fmt(&self, f: &mut Formatter) -> FmtResult {
-        f.debug_struct("Config")
-            .field("server_address", &self.server_addr)
-            .field("spotify_client_id", &self.spotify_client_id)
-            .field("spotify_client_secret", &"****")
-            .finish()
     }
 }
