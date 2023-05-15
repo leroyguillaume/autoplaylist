@@ -28,7 +28,7 @@ use crate::{
 
 // Consts
 
-const ROLE_JWT_CLAIM_KEY: &str = "claim";
+const ROLE_JWT_CLAIM_KEY: &str = "role";
 
 // Functions - Handlers
 
