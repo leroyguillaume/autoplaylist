@@ -3,6 +3,7 @@ import { faSpinner } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useState } from "react";
 import { Container, Row } from "react-bootstrap";
+import Alert from "./Alert";
 import "./LogIn.scss";
 import logo from "./logo.webp";
 
@@ -19,7 +20,7 @@ export default function LogIn() {
   } else {
     btnChild = (
       <>
-        <FontAwesomeIcon icon={faSpotify} />
+        <FontAwesomeIcon className="inline" icon={faSpotify} />
         Log-in with Spotify
       </>
     );
@@ -27,6 +28,7 @@ export default function LogIn() {
 
   return (
     <>
+      <Alert></Alert>
       <Container className="text-center v-offset">
         <Row>
           <div className="logo">

@@ -1,5 +1,7 @@
 [env]
 DB_HOST = "localhost"
 DB_PASSWORD = "autoplaylist"
-LOG_FILTER = "autoplaylist_api=trace"
+DOMAIN = "localhost:8080"
+JWT_SECRET = "changeit"
+LOG_FILTER = "info,autoplaylist_api=trace"
 WEBAPP_URL = "http://localhost:3000"

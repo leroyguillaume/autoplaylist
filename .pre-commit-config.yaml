@@ -16,8 +16,13 @@ repos:
   - repo: https://github.com/sqlfluff/sqlfluff
     rev: 2.0.0
     hooks:
-      - id: sqlfluff-fix
-        args: ["--dialect", postgres]
+      - id: sqlfluff-lint
+        args:
+          - -n
+          - --ignore
+          - lexing,parsing
+          - --dialect
+          - postgres
   - repo: https://github.com/pre-commit/mirrors-prettier
     rev: v2.7.1
     hooks:

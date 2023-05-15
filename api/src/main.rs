@@ -2,7 +2,7 @@ use std::{error::Error as StdError, io::stdout, result::Result as StdResult};
 
 use actix_cors::Cors;
 use actix_web::{get, web::Data, App, HttpResponse, HttpServer, Responder};
-use cfg::{ServerConfig, SpotifyConfig};
+use cfg::{JwtConfig, ServerConfig, SpotifyConfig};
 use deadpool_postgres::{
     tokio_postgres::NoTls, Config as DeadpoolPostgresConfig, Pool as DeadpoolPostresPool,
 };
@@ -20,7 +20,11 @@ use tracing_subscriber::{
     filter::LevelFilter, prelude::__tracing_subscriber_SubscriberExt, EnvFilter, Registry,
 };
 
-use self::{cfg::Config, db::run_migrations, handlers::auth::spotify_redirect};
+use self::{
+    cfg::Config,
+    db::run_migrations,
+    handlers::auth::{auth_with_spotify, spotify_redirect},
+};
 
 // Types
 
@@ -31,6 +35,7 @@ type Result<T> = StdResult<T, Box<dyn StdError>>;
 #[derive(Clone)]
 struct Components {
     db_pool: DeadpoolPostresPool,
+    jwt_cfg: JwtConfig,
     spotify_cfg: SpotifyConfig,
 }
 
@@ -45,6 +50,7 @@ async fn main() -> Result<()> {
     let db_pool = db_pool_cfg.create_pool(None, NoTls).map_err(Box::new)?;
     let cmpts = Components {
         db_pool: db_pool.clone(),
+        jwt_cfg: cfg.jwt,
         spotify_cfg: cfg.spotify,
     };
     let res = run(cmpts, cfg.server).await;
@@ -102,6 +108,7 @@ async fn run(cmpts: Components, cfg: ServerConfig) -> Result<()> {
             .app_data(Data::new(cmpts.clone()))
             .wrap(TracingLogger::default())
             .wrap(cors)
+            .service(auth_with_spotify)
             .service(health)
             .service(spotify_redirect)
     })
@@ -118,4 +125,6 @@ async fn run(cmpts: Components, cfg: ServerConfig) -> Result<()> {
 
 mod cfg;
 mod db;
+mod domain;
+mod dto;
 mod handlers;

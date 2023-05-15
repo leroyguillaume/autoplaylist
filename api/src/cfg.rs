@@ -7,6 +7,7 @@ use std::{
     str::FromStr,
 };
 
+use chrono::Duration;
 use deadpool_postgres::Config as DeadpoolPostgresConfig;
 use securefmt::Debug;
 use tracing::{debug, error, trace, warn};
@@ -31,6 +32,7 @@ pub enum Error {
 #[derive(Debug, Clone)]
 pub struct Config {
     pub db: DatabaseConfig,
+    pub jwt: JwtConfig,
     pub server: ServerConfig,
     pub spotify: SpotifyConfig,
 }
@@ -43,6 +45,14 @@ pub struct DatabaseConfig {
     #[sensitive]
     pub pwd: String,
     pub user: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct JwtConfig {
+    pub issuer: String,
+    #[sensitive]
+    pub secret: String,
+    pub validity: Duration,
 }
 
 #[derive(Debug, Clone)]
@@ -95,6 +105,12 @@ impl Config {
                 port: Self::env_var_opt("DB_PORT")?,
                 pwd: Self::env_var("DB_PASSWORD")?,
                 user: Self::env_var_or_default("DB_USER", || "autoplaylist".into())?,
+            },
+            jwt: JwtConfig {
+                issuer: Self::env_var("DOMAIN")?,
+                secret: Self::env_var("JWT_SECRET")?,
+                validity: Self::env_var_or_default("JWT_VALIDITY", || 12 * 60 * 60)
+                    .map(Duration::seconds)?,
             },
             server: ServerConfig {
                 addr: Self::env_var_or_default("SERVER_ADDRESS", || {
