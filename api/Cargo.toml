@@ -11,8 +11,8 @@ concat-idents = "1.1"
 deadpool-postgres = "0.10"
 hmac = "0.12"
 jwt = "0.16"
-opentelemetry = { version = "0.17", features = ["rt-tokio-current-thread"] }
-opentelemetry-jaeger = { version = "0.16", features = ["rt-tokio-current-thread"] }
+opentelemetry = { version = "0.18", features = ["rt-tokio-current-thread"] }
+opentelemetry-jaeger = { version = "0.17", features = ["rt-tokio-current-thread"] }
 postgres-types = { version = "0.2", features = ["derive"] }
 refinery = { version = "0.8", features = ["tokio-postgres"] }
 rspotify = "0.11"
@@ -24,6 +24,6 @@ tokio-postgres = { version = "0.7", features = ["with-chrono-0_4", "with-uuid-0_
 tracing = "0.1"
 tracing-actix-web = { version = "0.7", features = ["opentelemetry_0_18"] }
 tracing-bunyan-formatter = "0.3"
-tracing-opentelemetry = "0.17"
+tracing-opentelemetry = "0.18"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 uuid = { version = "0.8", features = ["v4"] }
