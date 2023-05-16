@@ -9,39 +9,33 @@ use actix_web::{
     HttpResponse, Responder,
 };
 use chrono::Utc;
-use hmac::{Hmac, Mac};
 use jwt::{Claims, RegisteredClaims, SignWithKey};
 use rspotify::{prelude::OAuthClient, scopes, AuthCodeSpotify, Credentials, OAuth};
 use serde_json::json;
-use sha2::Sha512;
-use tracing::debug;
+use tracing::{debug, info, trace};
 use uuid::Uuid;
 
 use crate::{
     cfg::{JwtConfig, SpotifyConfig},
-    db::{client_from_pool, insert_user, upsert_spotify_auth, user_by_spotify_email},
+    db::{insert_user, upsert_spotify_auth, user_by_spotify_email},
     domain::{Role, SpotifyAuth, User},
     dto::{AuthWithSpotifyRequest, JwtResponse},
-    handlers::{Error, Result},
+    handlers::{generate_jwt_key, Error, Result, ROLE_JWT_CLAIM_KEY},
     Components,
 };
-
-// Consts
-
-const ROLE_JWT_CLAIM_KEY: &str = "role";
 
 // Functions - Handlers
 
 #[post("/auth/spotify")]
 async fn auth_with_spotify(
-    req: Json<AuthWithSpotifyRequest>,
+    payload: Json<AuthWithSpotifyRequest>,
     cmpts: Data<Components>,
 ) -> impl Responder {
     handle!(async {
         let spotify = spotify_oauth_client(cmpts.spotify_cfg.clone());
         debug!("requesting Spotify token");
         spotify
-            .request_token(&req.code)
+            .request_token(&payload.code)
             .await
             .map_err(Error::SpotifyClientFailed)?;
         debug!("requesting Spotify user");
@@ -49,6 +43,7 @@ async fn auth_with_spotify(
             .current_user()
             .await
             .map_err(Error::SpotifyClientFailed)?;
+        debug!("user: {user:?}");
         let token = spotify
             .token
             .lock()
@@ -57,19 +52,23 @@ async fn auth_with_spotify(
             .clone()
             .ok_or(Error::NoSpotifyToken)?;
         let email = user.email.ok_or(Error::NoSpotifyUserEmail)?;
-        let mut db_client = client_from_pool(&cmpts.db_pool)
+        trace!("getting database client from pool");
+        let mut db_client = cmpts
+            .db_pool
+            .get()
             .await
             .map_err(Error::DatabasePoolFailed)?;
         let tx = db_client
             .transaction()
             .await
             .map_err(Error::DatabaseClientFailed)?;
-        let user = transactional!(tx, async {
+        let (user, user_created) = transactional!(tx, async {
             let user = user_by_spotify_email(&email, tx.client())
                 .await
                 .map_err(Error::DatabaseClientFailed)?;
-            let user = match user {
-                Some(user) => user,
+            debug!("user fetched: {user:?}");
+            let (user, user_created) = match user {
+                Some(user) => (user, false),
                 None => {
                     let user = User {
                         creation_date: Utc::now(),
@@ -79,7 +78,7 @@ async fn auth_with_spotify(
                     insert_user(&user, tx.client())
                         .await
                         .map_err(Error::DatabaseClientFailed)?;
-                    user
+                    (user, true)
                 }
             };
             let auth = SpotifyAuth {
@@ -91,8 +90,11 @@ async fn auth_with_spotify(
             upsert_spotify_auth(&auth, tx.client())
                 .await
                 .map_err(Error::DatabaseClientFailed)?;
-            Ok::<User, Error>(user)
+            Ok::<(User, bool), Error>((user, user_created))
         })?;
+        if user_created {
+            info!("new user created");
+        }
         let jwt = generate_jwt(&user, &cmpts.jwt_cfg)?;
         Ok::<HttpResponse<BoxBody>, Error>(HttpResponse::Ok().json(JwtResponse { jwt }))
     })
@@ -136,11 +138,6 @@ fn generate_jwt(user: &User, cfg: &JwtConfig) -> Result<String> {
     claims
         .sign_with_key(&key)
         .map_err(Error::JwtGenerationFailed)
-}
-
-#[inline]
-fn generate_jwt_key(cfg: &JwtConfig) -> Result<Hmac<Sha512>> {
-    Hmac::new_from_slice(cfg.secret.as_bytes()).map_err(Error::JwtKeyGenerationFailed)
 }
 
 #[inline]

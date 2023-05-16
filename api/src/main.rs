@@ -25,6 +25,8 @@ use tracing_subscriber::{
     filter::LevelFilter, prelude::__tracing_subscriber_SubscriberExt, EnvFilter, Registry,
 };
 
+use crate::handlers::query::create_query;
+
 use self::{
     cfg::Config,
     db::run_migrations,
@@ -126,6 +128,7 @@ async fn run() -> Result<()> {
             .wrap(TracingLogger::default())
             .wrap(cors)
             .service(auth_with_spotify)
+            .service(create_query)
             .service(health)
             .service(spotify_redirect)
     })
