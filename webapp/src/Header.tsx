@@ -2,7 +2,9 @@ import { faRightFromBracket } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { Button, Container, Nav, Navbar } from "react-bootstrap";
 import { Link, useNavigate } from "react-router-dom";
+import "./Header.scss";
 import { JWT_LOCAL_STORAGE_KEY } from "./api";
+import logo from "./logo.webp";
 
 export default function Header() {
   const naviage = useNavigate();
@@ -17,6 +19,11 @@ export default function Header() {
       <Navbar expand="md">
         <Container fluid>
           <Navbar.Brand as={Link} to="/home">
+            <img
+              className="d-inline-block align-top inline"
+              src={logo}
+              height="30"
+            />
             AutoPlaylist
           </Navbar.Brand>
           <Navbar.Toggle aria-controls="menu" />
