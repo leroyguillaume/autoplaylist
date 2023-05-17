@@ -6,11 +6,20 @@ export enum HttpError {
   Unexpected,
 }
 
-export function post<T>(path: string, body: any): Promise<T> {
-  return api("POST", path, body);
+export function get<T>(path: string, query: any): Promise<T> {
+  return api("GET", path, query, null);
 }
 
-function api<T>(method: string, path: string, body: any | null): Promise<T> {
+export function post<T>(path: string, body: any): Promise<T> {
+  return api("POST", path, {}, body);
+}
+
+function api<T>(
+  method: string,
+  path: string,
+  query: any,
+  body: any | null
+): Promise<T> {
   let headers: any = {
     "Content-Type": "application/json",
   };
@@ -18,7 +27,8 @@ function api<T>(method: string, path: string, body: any | null): Promise<T> {
   if (jwt !== null) {
     headers["Authorization"] = `Bearer ${jwt}`;
   }
-  return fetch(`${process.env.REACT_APP_API_URL}/${path}`, {
+  const params = new URLSearchParams(query);
+  return fetch(`${process.env.REACT_APP_API_URL}/${path}?${params}`, {
     method,
     headers,
     body: body !== null ? JSON.stringify(body) : null,

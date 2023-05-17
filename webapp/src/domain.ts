@@ -1,5 +1,5 @@
 export interface Base {
-  creationDate: Date;
+  creationDate: string;
   id: string;
   kind: BaseKind;
   platform: Platform;
@@ -18,13 +18,18 @@ export enum Grouping {
   Decades = "decades",
 }
 
+export interface Page<T> {
+  content: T[];
+  total: number;
+}
+
 export enum Platform {
   Spotify = "spotify",
 }
 
 export interface Query {
-  base: BaseRequest;
-  creationDate: Date;
+  base: Base;
+  creationDate: string;
   grouping: Grouping;
   id: string;
   namePrefix: string;
