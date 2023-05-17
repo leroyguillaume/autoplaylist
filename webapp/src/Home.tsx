@@ -4,8 +4,8 @@ import { useContext, useEffect, useState } from "react";
 import { Button, Container, Pagination, Row, Table } from "react-bootstrap";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import Header from "./Header";
-import { HttpError, get } from "./api";
-import { Context, Error } from "./ctx";
+import { HttpError, doDelete, doGet } from "./api";
+import { Context, Error, Info } from "./ctx";
 import { Page, Query } from "./domain";
 
 const LIMIT = 10;
@@ -13,6 +13,7 @@ const LIMIT = 10;
 export default function Home() {
   const ctx = useContext(Context);
 
+  const [deleting, setDeleting] = useState<string[]>([]);
   const [fetching, setFetching] = useState(false);
   const [page, setPage] = useState<Page<Query> | null>(null);
   const [pageNb, setPageNb] = useState<number>(1);
@@ -20,9 +21,38 @@ export default function Home() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
 
-  const fetchPage = async (nb: number) => {
+  const deleteQuery = async (id: string) => {
+    setDeleting([...deleting, id]);
+    doDelete(`query/${id}`)
+      .then(() => {
+        ctx.setInfo(Info.QueryDeleted);
+        return fetchPage(pageNb);
+      })
+      .then((page) => {
+        const maxPageNb = Math.max(1, Math.ceil(page.total / LIMIT));
+        if (pageNb >= maxPageNb) {
+          fetchPage(maxPageNb);
+        }
+      })
+      .catch((err) => {
+        if (err === HttpError.Unauthorized) {
+          ctx.setError(Error.Unauthorized);
+          navigate("/");
+        } else {
+          ctx.setError(Error.Unexpected);
+        }
+      })
+      .finally(() => {
+        const idx = deleting.indexOf(id);
+        if (idx > -1) {
+          setDeleting([...deleting.slice(0, idx), ...deleting.slice(idx + 1)]);
+        }
+      });
+  };
+
+  const fetchPage = (nb: number): Promise<Page<Query>> => {
     setFetching(true);
-    await get<Page<Query>>("query", {
+    return doGet<Page<Query>>("query", {
       limit: LIMIT,
       offset: (nb - 1) * LIMIT,
     })
@@ -32,6 +62,7 @@ export default function Home() {
         setParams({
           page: nb.toString(),
         });
+        return page;
       })
       .catch((err) => {
         if (err === HttpError.Unauthorized) {
@@ -40,6 +71,7 @@ export default function Home() {
         } else {
           ctx.setError(Error.Unexpected);
         }
+        return Promise.reject(null);
       })
       .finally(() => {
         setFetching(false);
@@ -74,16 +106,31 @@ export default function Home() {
   } else {
     const trs = page.content.map((query) => {
       const creationDate = new Date(query.creationDate);
+      let deleteBtn;
+      if (deleting.indexOf(query.id) === -1) {
+        deleteBtn = (
+          <Button
+            className="btn-sm"
+            variant="danger"
+            onClick={() => deleteQuery(query.id)}
+          >
+            <FontAwesomeIcon icon={faTrash} className="inline" />
+            Delete
+          </Button>
+        );
+      } else {
+        deleteBtn = (
+          <Button className="btn-sm" variant="danger" disabled={true}>
+            <FontAwesomeIcon icon={faSpinner} spin className="inline" />
+            Deleting...
+          </Button>
+        );
+      }
       return (
         <tr key={query.id}>
           <td>{creationDate.toLocaleString()}</td>
           <td>{query.base.kind}</td>
-          <td>
-            <Button className="btn-sm" variant="danger">
-              <FontAwesomeIcon icon={faTrash} className="inline" />
-              Delete
-            </Button>
-          </td>
+          <td>{deleteBtn}</td>
         </tr>
       );
     });

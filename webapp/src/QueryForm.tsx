@@ -1,15 +1,17 @@
+import { faSpinner } from "@fortawesome/free-solid-svg-icons";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useContext, useState } from "react";
 import { Button, Container, Form, Row } from "react-bootstrap";
 import { useNavigate } from "react-router-dom";
 import Header from "./Header";
-import { post } from "./api";
+import { doPost } from "./api";
 import { Context, Info } from "./ctx";
 import { BaseKind, Grouping, Platform, Query, QueryRequest } from "./domain";
 
 export default function QueryForm() {
   const ctx = useContext(Context);
 
-  const [processing, setProcessing] = useState(false);
+  const [creating, setProcessing] = useState(false);
   const [validated, setValidated] = useState(false);
 
   const navigate = useNavigate();
@@ -31,7 +33,7 @@ export default function QueryForm() {
     const valid = event.currentTarget.checkValidity();
 
     if (valid) {
-      post<Query>("query", query)
+      doPost<Query>("query", query)
         .then((_resp) => {
           ctx.setInfo(Info.QueryCreated);
           navigate("/home");
@@ -44,6 +46,22 @@ export default function QueryForm() {
         });
     }
   };
+
+  let submitBtn;
+  if (creating) {
+    submitBtn = (
+      <Button variant="primary" type="submit" disabled={true}>
+        <FontAwesomeIcon icon={faSpinner} className="inline" spin />
+        Creating...
+      </Button>
+    );
+  } else {
+    submitBtn = (
+      <Button variant="primary" type="submit">
+        Create
+      </Button>
+    );
+  }
 
   return (
     <>
@@ -82,11 +100,7 @@ export default function QueryForm() {
                 onChange={(event) => (query.namePrefix = event.target.value)}
               />
             </Form.Group>
-            <div className="col-12 text-end">
-              <Button variant="primary" type="submit">
-                Create
-              </Button>
-            </div>
+            <div className="col-12 text-end">{submitBtn}</div>
           </Form>
         </Row>
       </Container>

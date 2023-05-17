@@ -8,6 +8,7 @@ export enum Error {
 
 export enum Info {
   QueryCreated,
+  QueryDeleted,
 }
 
 export interface ContextData {

@@ -3,7 +3,7 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useContext, useEffect } from "react";
 import { Container, Row } from "react-bootstrap";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { JWT_LOCAL_STORAGE_KEY, post } from "./api";
+import { JWT_LOCAL_STORAGE_KEY, doPost } from "./api";
 import { Context, Error } from "./ctx";
 
 export default function SpotifyAuth() {
@@ -18,7 +18,7 @@ export default function SpotifyAuth() {
       if (code === null) {
         navigate("/");
       } else {
-        post<{ jwt: string }>("auth/spotify", { code })
+        doPost<{ jwt: string }>("auth/spotify", { code })
           .then((resp) => {
             window.localStorage.setItem(JWT_LOCAL_STORAGE_KEY, resp.jwt);
             navigate("/home");

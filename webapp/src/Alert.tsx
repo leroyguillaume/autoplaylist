@@ -12,6 +12,8 @@ export default function Alert() {
       switch (info) {
         case Info.QueryCreated:
           return "Query successfully created! 🥳";
+        case Info.QueryDeleted:
+          return "Query successfully deleted! 🔥";
         default:
           return "It seems you find a bug! 😤";
       }

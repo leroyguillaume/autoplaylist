@@ -6,15 +6,19 @@ export enum HttpError {
   Unexpected,
 }
 
-export function get<T>(path: string, query: any): Promise<T> {
-  return api("GET", path, query, null);
+export function doDelete(path: string): Promise<void> {
+  return callApi("DELETE", path, {}, null);
 }
 
-export function post<T>(path: string, body: any): Promise<T> {
-  return api("POST", path, {}, body);
+export function doGet<T>(path: string, query: any): Promise<T> {
+  return callApi("GET", path, query, null);
 }
 
-function api<T>(
+export function doPost<T>(path: string, body: any): Promise<T> {
+  return callApi("POST", path, {}, body);
+}
+
+function callApi<T>(
   method: string,
   path: string,
   query: any,
@@ -43,6 +47,8 @@ function api<T>(
         return Promise.reject(HttpError.Unauthorized);
       } else if (resp.status === 409) {
         return Promise.reject(HttpError.Conflict);
+      } else if (resp.status === 204) {
+        return;
       } else if (200 <= resp.status && resp.status < 300) {
         return resp.json();
       } else {
