@@ -1,7 +1,7 @@
 use actix_web::{
     body::BoxBody,
-    get, post,
-    web::{Data, Json, Query as ActixQuery},
+    delete, get, post,
+    web::{Data, Json, Path, Query as ActixQuery},
     HttpRequest, HttpResponse, Responder,
 };
 use chrono::Utc;
@@ -9,7 +9,10 @@ use tracing::{debug, info, trace};
 use uuid::Uuid;
 
 use crate::{
-    db::{base, insert_base, insert_query, list_queries as list_queries_from_database, query},
+    db::{
+        base, delete_query as delete_query_from_database, insert_base, insert_query,
+        list_queries as list_queries_from_database, query, query_by_id,
+    },
     domain::{Base, Query},
     dto::{
         CreateQueryRequest, PageQuery, PageResponse, QueryResponse, DEFAULT_PAGE_LIMIT,
@@ -100,6 +103,41 @@ async fn create_query(
         info!("new query created");
         let resp: QueryResponse = query.into();
         Ok::<HttpResponse<BoxBody>, Error>(HttpResponse::Created().json(resp))
+    })
+}
+
+#[delete("/query/{id}")]
+async fn delete_query(
+    req: HttpRequest,
+    path: Path<Uuid>,
+    cmpts: Data<Components>,
+) -> impl Responder {
+    handle!(async {
+        trace!("getting database client from pool");
+        let db_client = cmpts
+            .db_pool
+            .get()
+            .await
+            .map_err(Error::DatabasePoolFailed)?;
+        let auth_user = current_user(&req, &cmpts.jwt_cfg, &db_client).await?;
+        let query = query_by_id(&path, &db_client)
+            .await
+            .map_err(Error::DatabaseClientFailed)?;
+        debug!("query fetched: {query:?}");
+        let query = match query {
+            Some(query) => query,
+            None => {
+                return Err(Error::QueryNotFound(*path));
+            }
+        };
+        if query.user_id != auth_user.id {
+            return Err(Error::QueryNotOwnedByAuthenticatedUser(query.id));
+        }
+        delete_query_from_database(&query.id, &db_client)
+            .await
+            .map_err(Error::DatabaseClientFailed)?;
+        info!("query {} deleted", query.id);
+        Ok::<HttpResponse<BoxBody>, Error>(HttpResponse::NoContent().into())
     })
 }
 

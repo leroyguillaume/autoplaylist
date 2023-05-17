@@ -120,6 +120,14 @@ pub async fn base(
     convert_opt_result(res)
 }
 
+pub async fn delete_query(id: &Uuid, client: &Client) -> Result<()> {
+    debug!("deleting query {id}");
+    client
+        .execute(include_str!("../db/queries/delete-query.sql"), &[id])
+        .await?;
+    Ok(())
+}
+
 pub async fn insert_base(base: &Base, client: &Client) -> Result<()> {
     debug!("inserting {base:?} into database");
     let (kind, platform_id) = kind_and_platform_id(&base.kind);
@@ -203,6 +211,14 @@ pub async fn query(
             include_str!("../db/queries/query.sql"),
             &[base_id, &name_prefix, &grouping],
         )
+        .await;
+    convert_opt_result(res)
+}
+
+pub async fn query_by_id(id: &Uuid, client: &Client) -> Result<Option<Query>> {
+    debug!("fetching query with ID {id}");
+    let res = client
+        .query_opt(include_str!("../db/queries/query-by-id.sql"), &[id])
         .await;
     convert_opt_result(res)
 }

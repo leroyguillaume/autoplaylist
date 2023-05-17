@@ -93,6 +93,8 @@ enum Error {
     NoSpotifyToken,
     NoSpotifyUserEmail,
     QueryAlreadyExists(Uuid),
+    QueryNotFound(Uuid),
+    QueryNotOwnedByAuthenticatedUser(Uuid),
     SpotifyClientFailed(ClientError),
     SpotifyClientTokenLockFailed,
     TimestampConversionFailed(TryFromIntError),
@@ -111,6 +113,8 @@ impl Error {
             Self::JwtSignatureVerificationFailed(_) => debug!("{self}"),
             Self::MissingAuthorizationHeader => debug!("{self}"),
             Self::QueryAlreadyExists(_) => debug!("{self}"),
+            Self::QueryNotFound(_) => debug!("{self}"),
+            Self::QueryNotOwnedByAuthenticatedUser(_) => debug!("{self}"),
             _ => error!("{self}"),
         }
     }
@@ -144,6 +148,10 @@ impl Display for Error {
             Self::NoSpotifyToken => write!(f, "Spotify client doesn't have token"),
             Self::NoSpotifyUserEmail => write!(f, "Spotify user doesn't have email"),
             Self::QueryAlreadyExists(id) => write!(f, "similar query already exists with ID {id}"),
+            Self::QueryNotFound(id) => write!(f, "query {id} doesn't exist"),
+            Self::QueryNotOwnedByAuthenticatedUser(id) => {
+                write!(f, "query {id} is not owned by authenticated user")
+            }
             Self::SpotifyClientFailed(err) => write!(f, "Spotify error: {err}"),
             Self::SpotifyClientTokenLockFailed => {
                 write!(f, "unable to acquire lock on Spotify client token")
@@ -170,6 +178,8 @@ impl ResponseError for Error {
             Self::QueryAlreadyExists(id) => {
                 HttpResponse::Conflict().json(ConflictResponse { id: *id })
             }
+            Self::QueryNotFound(_) => HttpResponse::NotFound().into(),
+            Self::QueryNotOwnedByAuthenticatedUser(_) => HttpResponse::Forbidden().into(),
             _ => HttpResponse::InternalServerError().into(),
         }
     }
@@ -184,6 +194,8 @@ impl ResponseError for Error {
             Self::JwtSignatureVerificationFailed(_) => StatusCode::UNAUTHORIZED,
             Self::MissingAuthorizationHeader => StatusCode::UNAUTHORIZED,
             Self::QueryAlreadyExists(_) => StatusCode::CONFLICT,
+            Self::QueryNotFound(_) => StatusCode::NOT_FOUND,
+            Self::QueryNotOwnedByAuthenticatedUser(_) => StatusCode::FORBIDDEN,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -206,6 +218,8 @@ impl StdError for Error {
             Self::NoSpotifyToken => None,
             Self::NoSpotifyUserEmail => None,
             Self::QueryAlreadyExists(_) => None,
+            Self::QueryNotFound(_) => None,
+            Self::QueryNotOwnedByAuthenticatedUser(_) => None,
             Self::SpotifyClientFailed(err) => Some(err),
             Self::SpotifyClientTokenLockFailed => None,
             Self::TimestampConversionFailed(err) => Some(err),
