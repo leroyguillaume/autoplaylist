@@ -25,12 +25,13 @@ use tracing_subscriber::{
     filter::LevelFilter, prelude::__tracing_subscriber_SubscriberExt, EnvFilter, Registry,
 };
 
-use crate::handlers::query::create_query;
-
 use self::{
     cfg::Config,
     db::run_migrations,
-    handlers::auth::{auth_with_spotify, spotify_redirect},
+    handlers::{
+        auth::{auth_with_spotify, spotify_redirect},
+        query::{create_query, list_queries},
+    },
 };
 
 // Types
@@ -130,6 +131,7 @@ async fn run() -> Result<()> {
             .service(auth_with_spotify)
             .service(create_query)
             .service(health)
+            .service(list_queries)
             .service(spotify_redirect)
     })
     .bind(cfg.server.addr)

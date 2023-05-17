@@ -73,12 +73,12 @@ const ROLE_JWT_CLAIM_KEY: &str = "role";
 
 // Types
 
-pub type Result<T> = StdResult<T, Error>;
+type Result<T> = StdResult<T, Error>;
 
 // Enums
 
 #[derive(Debug)]
-pub enum Error {
+enum Error {
     AuthenticatedUserNotFound(Uuid),
     DatabaseClientFailed(TokioPostgresError),
     DatabasePoolFailed(DeadpoolPostgresPoolError),

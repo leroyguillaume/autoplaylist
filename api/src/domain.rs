@@ -54,11 +54,12 @@ pub struct Base {
 
 #[derive(Debug)]
 pub struct Query {
-    pub base_id: Uuid,
+    pub base: Base,
     pub creation_date: DateTime<Utc>,
     pub grouping: Option<Grouping>,
     pub id: Uuid,
     pub name_prefix: Option<String>,
+    pub user_id: Uuid,
 }
 
 #[derive(Debug)]

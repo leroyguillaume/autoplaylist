@@ -16,6 +16,14 @@ use crate::domain::{Base, BaseKind, Grouping, Platform, Query, SpotifyAuth, User
 
 pub type Result<T> = StdResult<T, TokioPostgresError>;
 
+// Traits
+
+pub trait TryFromRow {
+    fn try_from_row(row: &Row) -> Result<Self>
+    where
+        Self: Sized;
+}
+
 // Enums
 
 #[derive(Debug, FromSql, ToSql)]
@@ -27,51 +35,68 @@ enum BaseKindSql {
     Playlist,
 }
 
+// Structs
+
+#[derive(Debug)]
+pub struct Page<T> {
+    pub content: Vec<T>,
+    pub total: i64,
+}
+
 // Impl - Base
 
-impl TryFrom<Row> for Base {
-    type Error = TokioPostgresError;
-
-    fn try_from(row: Row) -> StdResult<Self, Self::Error> {
+impl TryFromRow for Base {
+    fn try_from_row(row: &Row) -> Result<Self> {
         Ok(Self {
-            creation_date: row.try_get("creation_date")?,
-            id: row.try_get("id")?,
-            kind: match row.try_get("kind")? {
+            creation_date: row.try_get("base_creation_date")?,
+            id: row.try_get("base_id")?,
+            kind: match row.try_get("base_kind")? {
                 BaseKindSql::Likes => BaseKind::Likes,
-                BaseKindSql::Playlist => BaseKind::Playlist(row.try_get("platform_id")?),
+                BaseKindSql::Playlist => BaseKind::Playlist(row.try_get("base_platform_id")?),
             },
-            platform: row.try_get("platform")?,
-            user_id: row.try_get("user_id")?,
+            platform: row.try_get("base_platform")?,
+            user_id: row.try_get("base_user_id")?,
+        })
+    }
+}
+
+// Impl - Page
+
+impl<T: TryFromRow> Page<T> {
+    fn try_from_rows(rows: Vec<Row>, total: i64) -> Result<Self> {
+        Ok(Self {
+            content: rows
+                .iter()
+                .map(T::try_from_row)
+                .collect::<Result<Vec<T>>>()?,
+            total,
         })
     }
 }
 
 // Impl - Query
 
-impl TryFrom<Row> for Query {
-    type Error = TokioPostgresError;
-
-    fn try_from(row: Row) -> StdResult<Self, Self::Error> {
+impl TryFromRow for Query {
+    fn try_from_row(row: &Row) -> Result<Self> {
         Ok(Self {
-            base_id: row.try_get("base_id")?,
-            creation_date: row.try_get("creation_date")?,
-            grouping: row.try_get("grouping")?,
-            id: row.try_get("id")?,
-            name_prefix: row.try_get("name_prefix")?,
+            base: Base::try_from_row(row)?,
+            creation_date: row.try_get("query_creation_date")?,
+            grouping: row.try_get("query_grouping")?,
+            id: row.try_get("query_id")?,
+            name_prefix: row.try_get("query_name_prefix")?,
+            user_id: row.try_get("query_user_id")?,
         })
     }
 }
 
 // Impl - User
 
-impl TryFrom<Row> for User {
-    type Error = TokioPostgresError;
-
-    fn try_from(row: Row) -> StdResult<Self, Self::Error> {
+impl TryFromRow for User {
+    fn try_from_row(row: &Row) -> Result<Self> {
         Ok(Self {
-            creation_date: row.try_get("creation_date")?,
-            id: row.try_get("id")?,
-            role: row.try_get("role")?,
+            creation_date: row.try_get("user_creation_date")?,
+            id: row.try_get("user_id")?,
+            role: row.try_get("user_role")?,
         })
     }
 }
@@ -122,7 +147,8 @@ pub async fn insert_query(query: &Query, client: &Client) -> Result<()> {
             &[
                 &query.id,
                 &query.creation_date,
-                &query.base_id,
+                &query.user_id,
+                &query.base.id,
                 &query.name_prefix,
                 &query.grouping,
             ],
@@ -140,6 +166,29 @@ pub async fn insert_user(user: &User, client: &Client) -> Result<()> {
         )
         .await?;
     Ok(())
+}
+
+pub async fn list_queries(
+    user_id: &Uuid,
+    limit: i64,
+    offset: i64,
+    client: &Client,
+) -> Result<Page<Query>> {
+    debug!("listing queries of user {user_id} from offset {offset} limiting to {limit} entries");
+    let total: i64 = client
+        .query_one(
+            include_str!("../db/queries/list-queries-total.sql"),
+            &[user_id],
+        )
+        .await?
+        .get(0);
+    let rows = client
+        .query(
+            include_str!("../db/queries/list-queries-content.sql"),
+            &[user_id, &limit, &offset],
+        )
+        .await?;
+    Page::try_from_rows(rows, total)
 }
 
 pub async fn query(
@@ -196,11 +245,9 @@ pub async fn user_by_spotify_email(email: &str, client: &Client) -> Result<Optio
 // Functions - Utils
 
 #[inline]
-fn convert_opt_result<T: TryFrom<Row, Error = TokioPostgresError>>(
-    res: Result<Option<Row>>,
-) -> Result<Option<T>> {
+fn convert_opt_result<T: TryFromRow>(res: Result<Option<Row>>) -> Result<Option<T>> {
     match res {
-        Ok(Some(row)) => row.try_into().map(Some),
+        Ok(Some(row)) => T::try_from_row(&row).map(Some),
         Ok(None) => Ok(None),
         Err(err) => Err(err),
     }

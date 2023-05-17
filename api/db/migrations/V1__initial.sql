@@ -42,8 +42,9 @@ CREATE TABLE base (
 CREATE TABLE query (
     id UUID NOT NULL PRIMARY KEY,
     creation_date TIMESTAMP WITH TIME ZONE NOT NULL,
+    user_id UUID NOT NULL REFERENCES "user" ON DELETE CASCADE,
     base_id UUID NOT NULL REFERENCES base ON DELETE CASCADE,
     name_prefix VARCHAR (50),
     grouping "grouping",
-    UNIQUE NULLS NOT DISTINCT (base_id, name_prefix, grouping)
+    UNIQUE NULLS NOT DISTINCT (user_id, base_id, name_prefix, grouping)
 );

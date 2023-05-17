@@ -1,7 +1,7 @@
 use actix_web::{
     body::BoxBody,
-    post,
-    web::{Data, Json},
+    get, post,
+    web::{Data, Json, Query as ActixQuery},
     HttpRequest, HttpResponse, Responder,
 };
 use chrono::Utc;
@@ -9,9 +9,12 @@ use tracing::{debug, info, trace};
 use uuid::Uuid;
 
 use crate::{
-    db::{base, insert_base, insert_query, query},
+    db::{base, insert_base, insert_query, list_queries as list_queries_from_database, query},
     domain::{Base, Query},
-    dto::{CreateQueryRequest, QueryResponse},
+    dto::{
+        CreateQueryRequest, PageQuery, PageResponse, QueryResponse, DEFAULT_PAGE_LIMIT,
+        DEFAULT_PAGE_OFFSET,
+    },
     handlers::{current_user, Error},
     Components,
 };
@@ -41,7 +44,7 @@ async fn create_query(
             .await
             .map_err(Error::DatabaseClientFailed)?;
         let now = Utc::now();
-        let (query, base) = transactional!(tx, async {
+        let query = transactional!(tx, async {
             let base = base(
                 &auth_user.id,
                 &payload.base.kind,
@@ -82,19 +85,46 @@ async fn create_query(
                 }
             };
             let query = Query {
-                base_id: base.id,
+                base,
                 creation_date: now,
                 grouping: payload.grouping,
                 id: Uuid::new_v4(),
                 name_prefix: payload.name_prefix.clone(),
+                user_id: auth_user.id,
             };
             insert_query(&query, tx.client())
                 .await
                 .map_err(Error::DatabaseClientFailed)?;
-            Ok::<(Query, Base), Error>((query, base))
+            Ok::<Query, Error>(query)
         })?;
         info!("new query created");
-        let resp = QueryResponse::from_query(query, base);
+        let resp: QueryResponse = query.into();
         Ok::<HttpResponse<BoxBody>, Error>(HttpResponse::Created().json(resp))
+    })
+}
+
+#[get("/query")]
+async fn list_queries(
+    req: HttpRequest,
+    page: ActixQuery<PageQuery>,
+    cmpts: Data<Components>,
+) -> impl Responder {
+    handle!(async {
+        trace!("getting database client from pool");
+        let db_client = cmpts
+            .db_pool
+            .get()
+            .await
+            .map_err(Error::DatabasePoolFailed)?;
+        let auth_user = current_user(&req, &cmpts.jwt_cfg, &db_client).await?;
+        let limit = page.limit.unwrap_or(DEFAULT_PAGE_LIMIT);
+        let offset = page.offset.unwrap_or(DEFAULT_PAGE_OFFSET);
+        let page =
+            list_queries_from_database(&auth_user.id, limit.into(), offset.into(), &db_client)
+                .await
+                .map_err(Error::DatabaseClientFailed)?;
+        debug!("page fetched: {page:?}");
+        let resp: PageResponse<QueryResponse> = page.into();
+        Ok::<HttpResponse<BoxBody>, Error>(HttpResponse::Ok().json(resp))
     })
 }
