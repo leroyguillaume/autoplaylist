@@ -30,7 +30,7 @@ use self::{
     db::run_migrations,
     handlers::{
         auth::{auth_with_spotify, spotify_redirect},
-        query::{create_query, list_queries},
+        query::{create_query, delete_query, list_queries},
     },
 };
 
@@ -130,6 +130,7 @@ async fn run() -> Result<()> {
             .wrap(cors)
             .service(auth_with_spotify)
             .service(create_query)
+            .service(delete_query)
             .service(health)
             .service(list_queries)
             .service(spotify_redirect)
