@@ -1,6 +1,10 @@
-import { Error } from "./ctx";
-
 export const JWT_LOCAL_STORAGE_KEY = "jwt";
+
+export enum HttpError {
+  Conflict,
+  Unauthorized,
+  Unexpected,
+}
 
 export function post<T>(path: string, body: any): Promise<T> {
   return api("POST", path, body);
@@ -22,15 +26,17 @@ function api<T>(method: string, path: string, body: any | null): Promise<T> {
   })
     .catch((err) => {
       console.error(err);
-      return Promise.reject(Error.Unexpected);
+      return Promise.reject(HttpError.Unexpected);
     })
     .then((resp) => {
       if (resp.status === 401) {
-        return Promise.reject(Error.Unauthorized);
+        return Promise.reject(HttpError.Unauthorized);
+      } else if (resp.status === 409) {
+        return Promise.reject(HttpError.Conflict);
       } else if (200 <= resp.status && resp.status < 300) {
         return resp.json();
       } else {
-        return Promise.reject(Error.Unexpected);
+        return Promise.reject(HttpError.Unexpected);
       }
     });
 }

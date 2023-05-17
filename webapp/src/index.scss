@@ -1,6 +1,10 @@
 @import "./vars.scss";
 @import "~bootstrap/scss/bootstrap";
 
+form > div {
+  margin-bottom: 10px;
+}
+
 img.inline {
   margin-right: 5px;
 }
