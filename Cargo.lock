@@ -463,6 +463,7 @@ version = "0.1.0"
 dependencies = [
  "actix-cors",
  "actix-web",
+ "autoplaylist-core",
  "chrono",
  "concat-idents",
  "deadpool-postgres",
@@ -470,7 +471,6 @@ dependencies = [
  "jwt",
  "lapin",
  "opentelemetry",
- "opentelemetry-jaeger",
  "postgres-types",
  "refinery",
  "regex",
@@ -482,9 +482,6 @@ dependencies = [
  "tokio-postgres",
  "tracing",
  "tracing-actix-web",
- "tracing-bunyan-formatter",
- "tracing-opentelemetry",
- "tracing-subscriber",
  "uuid 0.8.2",
  "validator",
 ]
@@ -492,10 +489,23 @@ dependencies = [
 [[package]]
 name = "autoplaylist-base-sync"
 version = "0.1.0"
+dependencies = [
+ "autoplaylist-core",
+ "opentelemetry",
+ "tokio",
+]
 
 [[package]]
 name = "autoplaylist-core"
 version = "0.1.0"
+dependencies = [
+ "opentelemetry",
+ "opentelemetry-jaeger",
+ "tracing",
+ "tracing-bunyan-formatter",
+ "tracing-opentelemetry",
+ "tracing-subscriber",
+]
 
 [[package]]
 name = "base64"

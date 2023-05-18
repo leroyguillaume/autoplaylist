@@ -2,3 +2,8 @@
 name = "autoplaylist-base-sync"
 edition.workspace = true
 version.workspace = true
+
+[dependencies]
+autoplaylist-core = { path = "../core" }
+opentelemetry = { version = "0.18" }
+tokio = { version = "1.28", features = ["full"] }

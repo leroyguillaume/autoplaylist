@@ -1,28 +1,14 @@
-use std::{
-    env::{var, VarError},
-    error::Error as StdError,
-    io::stdout,
-    result::Result as StdResult,
-};
+use std::{error::Error as StdError, result::Result as StdResult};
 
 use actix_cors::Cors;
 use actix_web::{get, web::Data, App, HttpResponse, HttpServer, Responder};
+use autoplaylist_core::init_tracing;
 use broker::Channels;
 use cfg::{JwtConfig, SpotifyConfig};
 use deadpool_postgres::Pool as DeadpoolPostresPool;
-use opentelemetry::{
-    global::{set_text_map_propagator, shutdown_tracer_provider},
-    runtime::TokioCurrentThread,
-    sdk::propagation::TraceContextPropagator,
-};
-use opentelemetry_jaeger::new_agent_pipeline;
-use tracing::{debug, error, info, subscriber::set_global_default};
+use opentelemetry::global::shutdown_tracer_provider;
+use tracing::{debug, error, info};
 use tracing_actix_web::TracingLogger;
-use tracing_bunyan_formatter::{BunyanFormattingLayer, JsonStorageLayer};
-use tracing_opentelemetry::layer;
-use tracing_subscriber::{
-    filter::LevelFilter, prelude::__tracing_subscriber_SubscriberExt, EnvFilter, Registry,
-};
 
 use self::{
     broker::open_channels,
@@ -52,7 +38,7 @@ struct Components {
 
 #[actix_web::main]
 async fn main() -> Result<()> {
-    init_tracing()?;
+    init_tracing("autoplaylist-api")?;
     let res = run().await;
     if let Err(err) = &res {
         error!("{err}");
@@ -69,43 +55,6 @@ async fn health() -> impl Responder {
 }
 
 // Functions - Utils
-
-#[inline]
-fn env_var(key: &str, default: &str) -> String {
-    var(key).unwrap_or_else(|err| {
-        if matches!(err, VarError::NotUnicode(_)) {
-            eprintln!("unable to read environment variable {key}: {err}");
-            eprintln!("default value will be used because of previous error");
-        }
-        default.into()
-    })
-}
-
-#[inline]
-fn init_tracing() -> Result<()> {
-    let jaeger_host = env_var("JAEGER_HOST", "127.0.0.1");
-    let jaeger_port = env_var("JAEGER_PORT", "6831");
-    let service = env_var("JAEGER_SERVICE", "autoplaylist-api");
-    set_text_map_propagator(TraceContextPropagator::new());
-    let tracer = new_agent_pipeline()
-        .with_endpoint(format!("{jaeger_host}:{jaeger_port}"))
-        .with_service_name(&service)
-        .install_batch(TokioCurrentThread)
-        .map_err(Box::new)?;
-    let filter = EnvFilter::builder()
-        .with_env_var("LOG_FILTER")
-        .with_default_directive(LevelFilter::INFO.into())
-        .from_env()
-        .map_err(Box::new)?;
-    let telemetry = layer().with_tracer(tracer);
-    let logs = BunyanFormattingLayer::new(service, stdout);
-    let subscriber = Registry::default()
-        .with(filter)
-        .with(telemetry)
-        .with(JsonStorageLayer)
-        .with(logs);
-    set_global_default(subscriber).map_err(|err| Box::new(err) as Box<dyn StdError>)
-}
 
 #[inline]
 async fn run() -> Result<()> {
