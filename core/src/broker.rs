@@ -5,9 +5,13 @@ use std::{
 };
 
 use lapin::{
-    options::{BasicPublishOptions, ExchangeDeclareOptions},
+    options::{
+        BasicConsumeOptions, BasicPublishOptions, ExchangeDeclareOptions, QueueBindOptions,
+        QueueDeclareOptions,
+    },
     types::FieldTable,
-    BasicProperties, Channel, Connection, ConnectionProperties, Error as LapinError, ExchangeKind,
+    BasicProperties, Channel, Connection, ConnectionProperties, Consumer, Error as LapinError,
+    ExchangeKind,
 };
 use securefmt::Debug;
 use serde::Serialize;
@@ -19,7 +23,7 @@ use crate::{env_var, ConfigError};
 
 // Consts
 
-const BASE_EVENT_EXCHANGE_NAME: &str = "base_event";
+const BASE_EVENT_EXCHANGE_NAME: &str = "base-event";
 
 // Types
 
@@ -28,15 +32,15 @@ pub type Result<T> = StdResult<T, Error>;
 // Enums - Errors
 
 #[derive(Debug)]
-pub enum Error {
-    BrokerClient(LapinError),
-    Serialization(JsonError),
+pub enum BrokerInitializationError {
+    Connection(LapinError),
+    ExchangeDeclaration { err: LapinError, name: &'static str },
 }
 
 #[derive(Debug)]
-pub enum InitializationError {
-    Connection(LapinError),
-    ExchangeDeclaration { err: LapinError, name: &'static str },
+pub enum Error {
+    BrokerClient(LapinError),
+    Serialization(JsonError),
 }
 
 // Enums - Kinds
@@ -45,6 +49,22 @@ pub enum InitializationError {
 #[serde(rename_all = "snake_case")]
 pub enum BaseEventKind {
     Created,
+}
+
+#[derive(Debug)]
+pub enum ConsumerInitializationErrorKind {
+    Bind(&'static str),
+    Consumer,
+    Queue,
+}
+
+// Structs - Errors
+
+#[derive(Debug)]
+pub struct ConsumerInitializationError {
+    err: LapinError,
+    kind: ConsumerInitializationErrorKind,
+    queue: &'static str,
 }
 
 // Structs
@@ -81,6 +101,58 @@ impl Config {
     }
 }
 
+// Impl - BrokerInitializationError
+
+impl Display for BrokerInitializationError {
+    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+        match self {
+            Self::Connection(err) => write!(f, "unable to open broker connection: {err}"),
+            Self::ExchangeDeclaration { err, name } => {
+                write!(f, "unable to create broker exchange `{name}`: {err}")
+            }
+        }
+    }
+}
+
+impl StdError for BrokerInitializationError {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        match self {
+            Self::Connection(err) => Some(err),
+            Self::ExchangeDeclaration { err, .. } => Some(err),
+        }
+    }
+}
+
+// Impl - ConsumerInitializationError
+
+impl Display for ConsumerInitializationError {
+    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+        match self.kind {
+            ConsumerInitializationErrorKind::Bind(exchange) => write!(
+                f,
+                "binding broker queue `{}` on exchange `{exchange}` failed: {}",
+                self.queue, self.err
+            ),
+            ConsumerInitializationErrorKind::Consumer => write!(
+                f,
+                "unable to create broker consumer on queue `{}`: {}",
+                self.queue, self.err
+            ),
+            ConsumerInitializationErrorKind::Queue => write!(
+                f,
+                "unable to create broker queue `{}`: {}",
+                self.queue, self.err
+            ),
+        }
+    }
+}
+
+impl StdError for ConsumerInitializationError {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        Some(&self.err)
+    }
+}
+
 // Impl - Error
 
 impl Display for Error {
@@ -103,39 +175,24 @@ impl StdError for Error {
     }
 }
 
-// Impl - InitializationError
-
-impl Display for InitializationError {
-    fn fmt(&self, f: &mut Formatter) -> FmtResult {
-        match self {
-            Self::Connection(err) => write!(f, "unable to open broker connection: {err}"),
-            Self::ExchangeDeclaration { err, name } => {
-                write!(f, "unable to create broker exchange `{name}`: {err}")
-            }
-        }
-    }
-}
-
-impl StdError for InitializationError {
-    fn source(&self) -> Option<&(dyn StdError + 'static)> {
-        match self {
-            Self::Connection(err) => Some(err),
-            Self::ExchangeDeclaration { err, .. } => Some(err),
-        }
-    }
-}
-
 // Functions - Initializers
 
-pub async fn open_channels(cfg: Config) -> StdResult<Channels, InitializationError> {
+pub async fn create_base_event_consumer(
+    queue: &'static str,
+    channels: &Channels,
+) -> StdResult<Consumer, ConsumerInitializationError> {
+    create_consumer(queue, BASE_EVENT_EXCHANGE_NAME, &channels.base_event).await
+}
+
+pub async fn open_channels(cfg: Config) -> StdResult<Channels, BrokerInitializationError> {
     trace!("opening broker connection");
     let conn = Connection::connect(&cfg.url, ConnectionProperties::default())
         .await
-        .map_err(InitializationError::Connection)?;
+        .map_err(BrokerInitializationError::Connection)?;
     Ok(Channels {
         base_event: declare_exchange(&conn, BASE_EVENT_EXCHANGE_NAME)
             .await
-            .map_err(|err| InitializationError::ExchangeDeclaration {
+            .map_err(|err| BrokerInitializationError::ExchangeDeclaration {
                 err,
                 name: BASE_EVENT_EXCHANGE_NAME,
             })?,
@@ -162,6 +219,51 @@ pub async fn send_base_event(event: &BaseEvent, channel: &Channel) -> Result<()>
 }
 
 // Functions - Utils
+
+#[inline]
+async fn create_consumer(
+    queue: &'static str,
+    exchange: &'static str,
+    channel: &Channel,
+) -> StdResult<Consumer, ConsumerInitializationError> {
+    debug!("declaring broker queue `{queue}`");
+    channel
+        .queue_declare(queue, QueueDeclareOptions::default(), FieldTable::default())
+        .await
+        .map_err(|err| ConsumerInitializationError {
+            err,
+            kind: ConsumerInitializationErrorKind::Queue,
+            queue,
+        })?;
+    trace!("binding broker queue `{queue}` on exchange `{exchange}`");
+    channel
+        .queue_bind(
+            queue,
+            exchange,
+            "",
+            QueueBindOptions::default(),
+            FieldTable::default(),
+        )
+        .await
+        .map_err(|err| ConsumerInitializationError {
+            err,
+            kind: ConsumerInitializationErrorKind::Bind(exchange),
+            queue,
+        })?;
+    channel
+        .basic_consume(
+            queue,
+            "",
+            BasicConsumeOptions::default(),
+            FieldTable::default(),
+        )
+        .await
+        .map_err(|err| ConsumerInitializationError {
+            err,
+            kind: ConsumerInitializationErrorKind::Consumer,
+            queue,
+        })
+}
 
 #[inline]
 async fn declare_exchange(conn: &Connection, exchange: &str) -> StdResult<Channel, LapinError> {
