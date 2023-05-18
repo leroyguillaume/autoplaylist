@@ -5,14 +5,14 @@ use actix_web::{
     HttpRequest, HttpResponse, Responder,
 };
 use chrono::Utc;
-use tracing::{debug, info, trace};
+use tracing::{debug, info};
 use uuid::Uuid;
 
 use crate::{
     broker::{send_base_event, BaseEvent, BaseEventKind},
     db::{
-        base, delete_query as delete_query_from_database, insert_base, insert_query,
-        list_queries as list_queries_from_database, query, query_by_id,
+        base, client_from_pool, delete_query as delete_query_from_database, in_transaction,
+        insert_base, insert_query, list_queries as list_queries_from_database, query, query_by_id,
     },
     domain::{Base, Query},
     dto::{
@@ -32,75 +32,71 @@ async fn create_query(
     cmpts: Data<Components>,
 ) -> impl Responder {
     handle!(async {
-        trace!("getting database connection from pool");
-        let mut db_client = cmpts
-            .db_pool
-            .get()
+        let mut db_client = client_from_pool(&cmpts.db_pool)
             .await
             .map_err(Error::DatabasePoolFailed)?;
         let auth_user = current_user(&req, &cmpts.jwt_cfg, &db_client).await?;
         if payload.grouping.is_none() {
             return Err(Error::EmptyQuery);
         }
-        trace!("opening database transaction");
-        let tx = db_client
-            .transaction()
-            .await
-            .map_err(Error::DatabaseClientFailed)?;
         let now = Utc::now();
-        let (query, base_created) = transactional!(tx, async {
-            let base = base(
-                &auth_user.id,
-                &payload.base.kind,
-                &payload.base.platform,
-                tx.client(),
-            )
-            .await
-            .map_err(Error::DatabaseClientFailed)?;
-            debug!("base fetched: {base:?}");
-            let (base, base_created) = match base {
-                Some(base) => {
-                    let query = query(
-                        &base.id,
-                        payload.name_prefix.as_ref(),
-                        payload.grouping.as_ref(),
-                        tx.client(),
-                    )
-                    .await
-                    .map_err(Error::DatabaseClientFailed)?;
-                    debug!("query fetched: {query:?}");
-                    if let Some(query) = query {
-                        return Err(Error::QueryAlreadyExists(query.id));
-                    }
-                    (base, false)
-                }
-                None => {
-                    let base = Base {
-                        creation_date: now,
-                        id: Uuid::new_v4(),
-                        user_id: auth_user.id,
-                        kind: payload.base.kind.clone(),
-                        platform: payload.base.platform,
-                    };
-                    insert_base(&base, tx.client())
-                        .await
-                        .map_err(Error::DatabaseClientFailed)?;
-                    (base, true)
-                }
-            };
-            let query = Query {
-                base,
-                creation_date: now,
-                grouping: payload.grouping,
-                id: Uuid::new_v4(),
-                name_prefix: payload.name_prefix.clone(),
-                user_id: auth_user.id,
-            };
-            insert_query(&query, tx.client())
+        let (query, base_created) = in_transaction(&mut db_client, move |tx| {
+            Box::pin(async move {
+                let base = base(
+                    &auth_user.id,
+                    &payload.base.kind,
+                    &payload.base.platform,
+                    tx.client(),
+                )
                 .await
                 .map_err(Error::DatabaseClientFailed)?;
-            Ok::<(Query, bool), Error>((query, base_created))
-        })?;
+                debug!("base fetched: {base:?}");
+                let (base, base_created) = match base {
+                    Some(base) => {
+                        let query = query(
+                            &base.id,
+                            payload.name_prefix.as_ref(),
+                            payload.grouping.as_ref(),
+                            tx.client(),
+                        )
+                        .await
+                        .map_err(Error::DatabaseClientFailed)?;
+                        debug!("query fetched: {query:?}");
+                        if let Some(query) = query {
+                            return Err(Error::QueryAlreadyExists(query.id));
+                        }
+                        (base, false)
+                    }
+                    None => {
+                        let base = Base {
+                            creation_date: now,
+                            id: Uuid::new_v4(),
+                            user_id: auth_user.id,
+                            kind: payload.base.kind.clone(),
+                            platform: payload.base.platform,
+                        };
+                        insert_base(&base, tx.client())
+                            .await
+                            .map_err(Error::DatabaseClientFailed)?;
+                        (base, true)
+                    }
+                };
+                let query = Query {
+                    base,
+                    creation_date: now,
+                    grouping: payload.grouping,
+                    id: Uuid::new_v4(),
+                    name_prefix: payload.name_prefix.clone(),
+                    user_id: auth_user.id,
+                };
+                insert_query(&query, tx.client())
+                    .await
+                    .map_err(Error::DatabaseClientFailed)?;
+                Ok::<(Query, bool), Error>((query, base_created))
+            })
+        })
+        .await
+        .map_err(Error::from)?;
         info!("new query created");
         if base_created {
             let event = BaseEvent {
@@ -123,10 +119,7 @@ async fn delete_query(
     cmpts: Data<Components>,
 ) -> impl Responder {
     handle!(async {
-        trace!("getting database connection from pool");
-        let db_client = cmpts
-            .db_pool
-            .get()
+        let db_client = client_from_pool(&cmpts.db_pool)
             .await
             .map_err(Error::DatabasePoolFailed)?;
         let auth_user = current_user(&req, &cmpts.jwt_cfg, &db_client).await?;
@@ -158,10 +151,7 @@ async fn list_queries(
     cmpts: Data<Components>,
 ) -> impl Responder {
     handle!(async {
-        trace!("getting database connection from pool");
-        let db_client = cmpts
-            .db_pool
-            .get()
+        let db_client = client_from_pool(&cmpts.db_pool)
             .await
             .map_err(Error::DatabasePoolFailed)?;
         let auth_user = current_user(&req, &cmpts.jwt_cfg, &db_client).await?;

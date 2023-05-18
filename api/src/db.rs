@@ -1,18 +1,19 @@
 use std::{
     error::Error as StdError,
     fmt::{Display, Formatter, Result as FmtResult},
+    future::Future,
     ops::DerefMut,
+    pin::Pin,
     result::Result as StdResult,
 };
 
 use deadpool_postgres::{
-    tokio_postgres::{Client, Error as TokioPostgresError},
-    Config, CreatePoolError, Pool, PoolError,
+    tokio_postgres::{Client, Error as TokioPostgresError, NoTls, Row, Transaction},
+    Config, CreatePoolError, Object, Pool, PoolError,
 };
 use postgres_types::{FromSql, ToSql};
 use refinery::{embed_migrations, Error as RefineryError};
-use tokio_postgres::{NoTls, Row};
-use tracing::{debug, info, trace};
+use tracing::{debug, error, info, trace};
 use uuid::Uuid;
 
 use crate::{
@@ -32,7 +33,13 @@ pub trait TryFromRow {
         Self: Sized;
 }
 
-// Enums - Error
+// Enums - Errors
+
+#[derive(Debug)]
+pub enum InTransactionError<E: StdError + 'static> {
+    Client(TokioPostgresError),
+    Execution(E),
+}
 
 #[derive(Debug)]
 pub enum InitializationError {
@@ -77,7 +84,27 @@ impl TryFromRow for Base {
     }
 }
 
-// Impl - Error
+// Impl - InTransactionError
+
+impl<E: StdError> Display for InTransactionError<E> {
+    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+        match self {
+            Self::Client(err) => write!(f, "{err}"),
+            Self::Execution(err) => write!(f, "{err}"),
+        }
+    }
+}
+
+impl<E: StdError> StdError for InTransactionError<E> {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        match self {
+            Self::Client(err) => Some(err),
+            Self::Execution(err) => Some(err),
+        }
+    }
+}
+
+// Impl - InitializationError
 
 impl Display for InitializationError {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
@@ -150,8 +177,9 @@ pub async fn init(cfg: DatabaseConfig) -> StdResult<Pool, InitializationError> {
     let pool = cfg
         .create_pool(None, NoTls)
         .map_err(InitializationError::PoolCreation)?;
-    trace!("getting database connection from pool");
-    let mut db_client = pool.get().await.map_err(InitializationError::Pool)?;
+    let mut db_client = client_from_pool(&pool)
+        .await
+        .map_err(InitializationError::Pool)?;
     info!("running database migrations");
     migrations::runner()
         .run_async(db_client.deref_mut().deref_mut())
@@ -318,6 +346,41 @@ pub async fn user_by_spotify_email(email: &str, client: &Client) -> Result<Optio
 }
 
 // Functions - Utils
+
+pub async fn client_from_pool(pool: &Pool) -> StdResult<Object, PoolError> {
+    trace!("getting database connection from pool");
+    pool.get().await
+}
+
+pub async fn in_transaction<
+    'a,
+    E: StdError + 'static,
+    F: for<'b> FnOnce(&'b Transaction<'a>) -> Pin<Box<dyn Future<Output = StdResult<T, E>> + 'b>>,
+    T,
+>(
+    client: &'a mut Client,
+    f: F,
+) -> StdResult<T, InTransactionError<E>> {
+    trace!("opening database transaction");
+    let tx = client
+        .transaction()
+        .await
+        .map_err(InTransactionError::Client)?;
+    match f(&tx).await {
+        Ok(val) => {
+            debug!("committing database transaction");
+            tx.commit().await.map_err(InTransactionError::Client)?;
+            Ok(val)
+        }
+        Err(err) => {
+            debug!("rollbacking database transaction");
+            if let Err(err) = tx.rollback().await {
+                error!("database transaction rollback failed: {err}");
+            }
+            Err(InTransactionError::Execution(err))
+        }
+    }
+}
 
 #[inline]
 fn convert_opt_result<T: TryFromRow>(res: Result<Option<Row>>) -> Result<Option<T>> {

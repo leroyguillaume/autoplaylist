@@ -12,12 +12,14 @@ use chrono::Utc;
 use jwt::{Claims, RegisteredClaims, SignWithKey};
 use rspotify::{prelude::OAuthClient, scopes, AuthCodeSpotify, Credentials, OAuth};
 use serde_json::json;
-use tracing::{debug, info, trace};
+use tracing::{debug, info};
 use uuid::Uuid;
 
 use crate::{
     cfg::{JwtConfig, SpotifyConfig},
-    db::{insert_user, upsert_spotify_auth, user_by_spotify_email},
+    db::{
+        client_from_pool, in_transaction, insert_user, upsert_spotify_auth, user_by_spotify_email,
+    },
     domain::{Role, SpotifyAuth, User},
     dto::{AuthWithSpotifyRequest, JwtResponse},
     handlers::{generate_jwt_key, Error, Result, ROLE_JWT_CLAIM_KEY},
@@ -52,46 +54,43 @@ async fn auth_with_spotify(
             .clone()
             .ok_or(Error::NoSpotifyToken)?;
         let email = user.email.ok_or(Error::NoSpotifyUserEmail)?;
-        trace!("getting database connection from pool");
-        let mut db_client = cmpts
-            .db_pool
-            .get()
+        let mut db_client = client_from_pool(&cmpts.db_pool)
             .await
             .map_err(Error::DatabasePoolFailed)?;
-        let tx = db_client
-            .transaction()
-            .await
-            .map_err(Error::DatabaseClientFailed)?;
-        let (user, user_created) = transactional!(tx, async {
-            let user = user_by_spotify_email(&email, tx.client())
-                .await
-                .map_err(Error::DatabaseClientFailed)?;
-            debug!("user fetched: {user:?}");
-            let (user, user_created) = match user {
-                Some(user) => (user, false),
-                None => {
-                    let user = User {
-                        creation_date: Utc::now(),
-                        id: Uuid::new_v4(),
-                        role: Role::User,
-                    };
-                    insert_user(&user, tx.client())
-                        .await
-                        .map_err(Error::DatabaseClientFailed)?;
-                    (user, true)
-                }
-            };
-            let auth = SpotifyAuth {
-                access_token: token.access_token,
-                email,
-                refresh_token: token.refresh_token,
-                user_id: user.id,
-            };
-            upsert_spotify_auth(&auth, tx.client())
-                .await
-                .map_err(Error::DatabaseClientFailed)?;
-            Ok::<(User, bool), Error>((user, user_created))
-        })?;
+        let (user, user_created) = in_transaction(&mut db_client, move |tx| {
+            Box::pin(async move {
+                let user = user_by_spotify_email(&email, tx.client())
+                    .await
+                    .map_err(Error::DatabaseClientFailed)?;
+                debug!("user fetched: {user:?}");
+                let (user, user_created) = match user {
+                    Some(user) => (user, false),
+                    None => {
+                        let user = User {
+                            creation_date: Utc::now(),
+                            id: Uuid::new_v4(),
+                            role: Role::User,
+                        };
+                        insert_user(&user, tx.client())
+                            .await
+                            .map_err(Error::DatabaseClientFailed)?;
+                        (user, true)
+                    }
+                };
+                let auth = SpotifyAuth {
+                    access_token: token.access_token,
+                    email,
+                    refresh_token: token.refresh_token,
+                    user_id: user.id,
+                };
+                upsert_spotify_auth(&auth, tx.client())
+                    .await
+                    .map_err(Error::DatabaseClientFailed)?;
+                Ok::<(User, bool), Error>((user, user_created))
+            })
+        })
+        .await
+        .map_err(Error::from)?;
         if user_created {
             info!("new user created");
         }

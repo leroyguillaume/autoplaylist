@@ -26,7 +26,7 @@ use uuid::Uuid;
 use crate::{
     broker::Error as BrokerError,
     cfg::JwtConfig,
-    db::user_by_id,
+    db::{user_by_id, InTransactionError},
     domain::User,
     dto::{ConflictResponse, PreconditionFailedResponse},
 };
@@ -41,28 +41,6 @@ macro_rules! handle {
                 err.log();
                 use actix_web::ResponseError;
                 err.error_response()
-            }
-        }
-    };
-}
-
-macro_rules! transactional {
-    ($tx:expr, $block:expr) => {
-        match $block.await {
-            Ok(val) => {
-                tracing::debug!("committing database transaction");
-                $tx.commit()
-                    .await
-                    .map_err(crate::handlers::Error::DatabaseClientFailed)?;
-                Ok(val)
-            }
-            Err(err) => {
-                tracing::debug!("rollbacking database transaction");
-                if let Err(err) = $tx.rollback().await {
-                    let err = Error::DatabaseClientFailed(err);
-                    tracing::error!("{err}");
-                }
-                Err(err)
             }
         }
     };
@@ -160,6 +138,15 @@ impl Display for Error {
                 write!(f, "unable to acquire lock on Spotify client token")
             }
             Self::TimestampConversionFailed(err) => write!(f, "timestamp conversion failed: {err}"),
+        }
+    }
+}
+
+impl From<InTransactionError<Error>> for Error {
+    fn from(err: InTransactionError<Error>) -> Self {
+        match err {
+            InTransactionError::Client(err) => Error::DatabaseClientFailed(err),
+            InTransactionError::Execution(err) => err,
         }
     }
 }
