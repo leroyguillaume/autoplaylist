@@ -21,6 +21,14 @@ use crate::{
     domain::{Base, BaseKind, Grouping, Platform, Query, SpotifyAuth, User},
 };
 
+// Macros
+
+macro_rules! sql {
+    ($name:literal) => {
+        include_str!(concat!("../db/queries/", $name, ".sql"))
+    };
+}
+
 // Types
 
 pub type Result<T> = StdResult<T, TokioPostgresError>;
@@ -199,10 +207,7 @@ pub async fn base(
     debug!("fetching base with {kind:?} owned by user {user_id} on {platform}");
     let (kind, platform_id) = kind_and_platform_id(kind);
     let res = client
-        .query_opt(
-            include_str!("../db/queries/base.sql"),
-            &[user_id, platform, &kind, &platform_id],
-        )
+        .query_opt(sql!("base"), &[user_id, platform, &kind, &platform_id])
         .await;
     convert_opt_result(res)
 }
@@ -220,7 +225,7 @@ pub async fn insert_base(base: &Base, client: &Client) -> Result<()> {
     let (kind, platform_id) = kind_and_platform_id(&base.kind);
     client
         .execute(
-            include_str!("../db/queries/insert-base.sql"),
+            sql!("insert-base"),
             &[
                 &base.id,
                 &base.creation_date,
@@ -238,7 +243,7 @@ pub async fn insert_query(query: &Query, client: &Client) -> Result<()> {
     debug!("inserting {query:?} into database");
     client
         .execute(
-            include_str!("../db/queries/insert-query.sql"),
+            sql!("insert-query"),
             &[
                 &query.id,
                 &query.creation_date,
@@ -256,7 +261,7 @@ pub async fn insert_user(user: &User, client: &Client) -> Result<()> {
     debug!("inserting {user:?} into database");
     client
         .execute(
-            include_str!("../db/queries/insert-user.sql"),
+            sql!("insert-user"),
             &[&user.id, &user.creation_date, &user.role],
         )
         .await?;
@@ -271,17 +276,11 @@ pub async fn list_queries(
 ) -> Result<Page<Query>> {
     debug!("listing queries of user {user_id} from offset {offset} limiting to {limit} entries");
     let total: i64 = client
-        .query_one(
-            include_str!("../db/queries/list-queries-total.sql"),
-            &[user_id],
-        )
+        .query_one(sql!("list-queries-total"), &[user_id])
         .await?
         .get(0);
     let rows = client
-        .query(
-            include_str!("../db/queries/list-queries-content.sql"),
-            &[user_id, &limit, &offset],
-        )
+        .query(sql!("list-queries-content"), &[user_id, &limit, &offset])
         .await?;
     Page::try_from_rows(rows, total)
 }
@@ -294,19 +293,14 @@ pub async fn query(
 ) -> Result<Option<Query>> {
     debug!("fetching query on base {base_id} with {name_prefix:?} {grouping:?}");
     let res = client
-        .query_opt(
-            include_str!("../db/queries/query.sql"),
-            &[base_id, &name_prefix, &grouping],
-        )
+        .query_opt(sql!("query"), &[base_id, &name_prefix, &grouping])
         .await;
     convert_opt_result(res)
 }
 
 pub async fn query_by_id(id: &Uuid, client: &Client) -> Result<Option<Query>> {
     debug!("fetching query with ID {id}");
-    let res = client
-        .query_opt(include_str!("../db/queries/query-by-id.sql"), &[id])
-        .await;
+    let res = client.query_opt(sql!("query-by-id"), &[id]).await;
     convert_opt_result(res)
 }
 
@@ -314,7 +308,7 @@ pub async fn upsert_spotify_auth(auth: &SpotifyAuth, client: &Client) -> Result<
     debug!("upserting {auth:?} into database");
     client
         .execute(
-            include_str!("../db/queries/upsert-spotify-auth.sql"),
+            sql!("upsert-spotify-auth"),
             &[
                 &auth.user_id,
                 &auth.email,
@@ -328,19 +322,14 @@ pub async fn upsert_spotify_auth(auth: &SpotifyAuth, client: &Client) -> Result<
 
 pub async fn user_by_id(id: &Uuid, client: &Client) -> Result<Option<User>> {
     debug!("fetching user with ID {id}");
-    let res = client
-        .query_opt(include_str!("../db/queries/user-by-id.sql"), &[id])
-        .await;
+    let res = client.query_opt(sql!("user-by-id"), &[id]).await;
     convert_opt_result(res)
 }
 
 pub async fn user_by_spotify_email(email: &str, client: &Client) -> Result<Option<User>> {
     debug!("fetching user with Spotify email `{email}` from database");
     let res = client
-        .query_opt(
-            include_str!("../db/queries/user-by-spotify-email.sql"),
-            &[&email],
-        )
+        .query_opt(sql!("user-by-spotify-email"), &[&email])
         .await;
     convert_opt_result(res)
 }
