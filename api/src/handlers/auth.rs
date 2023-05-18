@@ -32,83 +32,80 @@ use crate::{
 async fn auth_with_spotify(
     payload: Json<AuthWithSpotifyRequest>,
     cmpts: Data<Components>,
-) -> impl Responder {
-    handle!(async {
-        let spotify = spotify_oauth_client(cmpts.spotify_cfg.clone());
-        debug!("requesting Spotify token");
-        spotify
-            .request_token(&payload.code)
-            .await
-            .map_err(Error::SpotifyClient)?;
-        debug!("requesting Spotify user");
-        let user = spotify.current_user().await.map_err(Error::SpotifyClient)?;
-        debug!("user: {user:?}");
-        let token = spotify
-            .token
-            .lock()
-            .await
-            .map_err(|_| Error::SpotifyClientTokenLock)?
-            .clone()
-            .ok_or(Error::NoSpotifyToken)?;
-        let email = user.email.ok_or(Error::NoSpotifyUserEmail)?;
-        let mut db_client = client_from_pool(&cmpts.db_pool)
-            .await
-            .map_err(Error::DatabasePool)?;
-        let (user, user_created) = in_transaction(&mut db_client, move |tx| {
-            Box::pin(async move {
-                let user = user_by_spotify_email(&email, tx.client())
-                    .await
-                    .map_err(Error::DatabaseClient)?;
-                debug!("user fetched: {user:?}");
-                let (user, user_created) = match user {
-                    Some(user) => (user, false),
-                    None => {
-                        let user = User {
-                            creation_date: Utc::now(),
-                            id: Uuid::new_v4(),
-                            role: Role::User,
-                        };
-                        insert_user(&user, tx.client())
-                            .await
-                            .map_err(Error::DatabaseClient)?;
-                        (user, true)
-                    }
-                };
-                let auth = SpotifyAuth {
-                    access_token: token.access_token,
-                    email,
-                    refresh_token: token.refresh_token,
-                    user_id: user.id,
-                };
-                upsert_spotify_auth(&auth, tx.client())
-                    .await
-                    .map_err(Error::DatabaseClient)?;
-                Ok::<(User, bool), Error>((user, user_created))
-            })
-        })
+) -> Result<impl Responder> {
+    let spotify = spotify_oauth_client(cmpts.spotify_cfg.clone());
+    debug!("requesting Spotify token");
+    spotify
+        .request_token(&payload.code)
         .await
-        .map_err(Error::from)?;
-        if user_created {
-            info!("new user created");
-        }
-        let jwt = generate_jwt(&user, &cmpts.jwt_cfg)?;
-        Ok::<HttpResponse<BoxBody>, Error>(HttpResponse::Ok().json(JwtResponse { jwt }))
+        .map_err(Error::SpotifyClient)?;
+    debug!("requesting Spotify user");
+    let user = spotify.current_user().await.map_err(Error::SpotifyClient)?;
+    debug!("user: {user:?}");
+    let token = spotify
+        .token
+        .lock()
+        .await
+        .map_err(|_| Error::SpotifyClientTokenLock)?
+        .clone()
+        .ok_or(Error::NoSpotifyToken)?;
+    let email = user.email.ok_or(Error::NoSpotifyUserEmail)?;
+    let mut db_client = client_from_pool(&cmpts.db_pool)
+        .await
+        .map_err(Error::DatabasePool)?;
+    let (user, user_created) = in_transaction(&mut db_client, move |tx| {
+        Box::pin(async move {
+            let user = user_by_spotify_email(&email, tx.client())
+                .await
+                .map_err(Error::DatabaseClient)?;
+            debug!("user fetched: {user:?}");
+            let (user, user_created) = match user {
+                Some(user) => (user, false),
+                None => {
+                    let user = User {
+                        creation_date: Utc::now(),
+                        id: Uuid::new_v4(),
+                        role: Role::User,
+                    };
+                    insert_user(&user, tx.client())
+                        .await
+                        .map_err(Error::DatabaseClient)?;
+                    (user, true)
+                }
+            };
+            let auth = SpotifyAuth {
+                access_token: token.access_token,
+                email,
+                refresh_token: token.refresh_token,
+                user_id: user.id,
+            };
+            upsert_spotify_auth(&auth, tx.client())
+                .await
+                .map_err(Error::DatabaseClient)?;
+            Ok::<(User, bool), Error>((user, user_created))
+        })
     })
+    .await
+    .map_err(Error::from)?;
+    if user_created {
+        info!("new user created");
+    }
+    let jwt = generate_jwt(&user, &cmpts.jwt_cfg)?;
+    Ok(HttpResponse::Ok().json(JwtResponse { jwt }))
 }
 
 #[get("/auth/spotify")]
-async fn spotify_redirect(cmpts: Data<Components>) -> impl Responder {
-    handle!(async {
-        let spotify = spotify_oauth_client(cmpts.spotify_cfg.clone());
-        debug!("computing Spotify authorize URL");
-        let url = spotify
-            .get_authorize_url(false)
-            .map_err(Error::SpotifyClient)?;
-        debug!("sending redirect to {url}");
-        let mut resp = HttpResponse::TemporaryRedirect();
-        resp.insert_header((header::LOCATION, url));
-        Ok::<HttpResponse<BoxBody>, Error>(resp.into())
-    })
+async fn spotify_redirect(cmpts: Data<Components>) -> Result<impl Responder> {
+    let spotify = spotify_oauth_client(cmpts.spotify_cfg.clone());
+    debug!("computing Spotify authorize URL");
+    let url = spotify
+        .get_authorize_url(false)
+        .map_err(Error::SpotifyClient)?;
+    debug!("sending redirect to {url}");
+    let mut resp = HttpResponse::TemporaryRedirect();
+    resp.insert_header((header::LOCATION, url));
+    let resp: HttpResponse<BoxBody> = resp.into();
+    Ok(resp)
 }
 
 // Functions - Utils

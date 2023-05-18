@@ -8,7 +8,7 @@ use std::{
 use actix_web::{
     body::BoxBody,
     http::{header, StatusCode},
-    HttpRequest, HttpResponse, ResponseError,
+    HttpRequest, HttpResponse, HttpResponseBuilder, ResponseError,
 };
 use chrono::Utc;
 use deadpool_postgres::{
@@ -20,7 +20,7 @@ use jwt::{Claims, Error as JwtError, VerifyWithKey};
 use regex::Regex;
 use rspotify::ClientError;
 use sha2::Sha512;
-use tracing::{debug, error, trace};
+use tracing::{debug, trace};
 use uuid::Uuid;
 
 use crate::{
@@ -30,21 +30,6 @@ use crate::{
     domain::User,
     dto::{ConflictResponse, PreconditionFailedResponse},
 };
-
-// Macros
-
-macro_rules! handle {
-    ($block:expr) => {
-        match $block.await {
-            Ok(resp) => resp,
-            Err(err) => {
-                err.log();
-                use actix_web::ResponseError;
-                err.error_response()
-            }
-        }
-    };
-}
 
 // Consts
 
@@ -81,24 +66,6 @@ enum Error {
 }
 
 // Impl - Error
-
-impl Error {
-    pub fn log(&self) {
-        match self {
-            Self::AuthenticatedUserNotFound(_) => debug!("{self}"),
-            Self::EmptyQuery => debug!("{self}"),
-            Self::ExpiredJwt => debug!("{self}"),
-            Self::InvalidAuthorizationHeader(_) => debug!("{self}"),
-            Self::InvalidJwtSubject(_) => debug!("{self}"),
-            Self::JwtSignatureVerification(_) => debug!("{self}"),
-            Self::MissingAuthorizationHeader => debug!("{self}"),
-            Self::QueryAlreadyExists(_) => debug!("{self}"),
-            Self::QueryNotFound(_) => debug!("{self}"),
-            Self::QueryNotOwnedByAuthenticatedUser(_) => debug!("{self}"),
-            _ => error!("{self}"),
-        }
-    }
-}
 
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
@@ -153,24 +120,15 @@ impl From<InTransactionError<Error>> for Error {
 
 impl ResponseError for Error {
     fn error_response(&self) -> HttpResponse<BoxBody> {
+        let status = self.status_code();
         match self {
-            Self::AuthenticatedUserNotFound(_) => HttpResponse::Unauthorized().into(),
-            Self::EmptyQuery => {
-                HttpResponse::PreconditionFailed().json(PreconditionFailedResponse {
-                    detail: self.to_string(),
-                })
-            }
-            Self::ExpiredJwt => HttpResponse::Unauthorized().into(),
-            Self::InvalidAuthorizationHeader(_) => HttpResponse::Unauthorized().into(),
-            Self::InvalidJwtSubject(_) => HttpResponse::Unauthorized().into(),
-            Self::JwtSignatureVerification(_) => HttpResponse::Unauthorized().into(),
-            Self::MissingAuthorizationHeader => HttpResponse::Unauthorized().into(),
+            Self::EmptyQuery => HttpResponseBuilder::new(status).json(PreconditionFailedResponse {
+                detail: self.to_string(),
+            }),
             Self::QueryAlreadyExists(id) => {
-                HttpResponse::Conflict().json(ConflictResponse { id: *id })
+                HttpResponseBuilder::new(status).json(ConflictResponse { id: *id })
             }
-            Self::QueryNotFound(_) => HttpResponse::NotFound().into(),
-            Self::QueryNotOwnedByAuthenticatedUser(_) => HttpResponse::Forbidden().into(),
-            _ => HttpResponse::InternalServerError().into(),
+            _ => HttpResponse::new(status),
         }
     }
 
