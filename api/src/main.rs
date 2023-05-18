@@ -7,6 +7,7 @@ use std::{
 
 use actix_cors::Cors;
 use actix_web::{get, web::Data, App, HttpResponse, HttpServer, Responder};
+use broker::Channels;
 use cfg::{JwtConfig, SpotifyConfig};
 use deadpool_postgres::{
     tokio_postgres::NoTls, Config as DeadpoolPostgresConfig, Pool as DeadpoolPostresPool,
@@ -26,6 +27,7 @@ use tracing_subscriber::{
 };
 
 use self::{
+    broker::open_channels,
     cfg::Config,
     db::run_migrations,
     handlers::{
@@ -42,6 +44,7 @@ type Result<T> = StdResult<T, Box<dyn StdError>>;
 
 #[derive(Clone)]
 struct Components {
+    channels: Channels,
     db_pool: DeadpoolPostresPool,
     jwt_cfg: JwtConfig,
     spotify_cfg: SpotifyConfig,
@@ -112,7 +115,9 @@ async fn run() -> Result<()> {
     let db_pool_cfg: DeadpoolPostgresConfig = cfg.db.into();
     trace!("creating database client pool");
     let db_pool = db_pool_cfg.create_pool(None, NoTls).map_err(Box::new)?;
+    let channels = open_channels(cfg.broker).await.map_err(Box::new)?;
     let cmpts = Components {
+        channels,
         db_pool: db_pool.clone(),
         jwt_cfg: cfg.jwt,
         spotify_cfg: cfg.spotify,
@@ -146,6 +151,7 @@ async fn run() -> Result<()> {
 
 // Mods
 
+mod broker;
 mod cfg;
 mod db;
 mod domain;

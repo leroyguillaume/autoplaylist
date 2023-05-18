@@ -24,6 +24,7 @@ use tracing::{debug, error, trace};
 use uuid::Uuid;
 
 use crate::{
+    broker::Error as BrokerError,
     cfg::JwtConfig,
     db::user_by_id,
     domain::User,
@@ -80,6 +81,7 @@ type Result<T> = StdResult<T, Error>;
 #[derive(Debug)]
 enum Error {
     AuthenticatedUserNotFound(Uuid),
+    BrokerClientFailed(BrokerError),
     DatabaseClientFailed(TokioPostgresError),
     DatabasePoolFailed(DeadpoolPostgresPoolError),
     EmptyQuery,
@@ -124,6 +126,7 @@ impl Display for Error {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         match self {
             Self::AuthenticatedUserNotFound(id) => write!(f, "user {id} doesn't exist anymore"),
+            Self::BrokerClientFailed(err) => write!(f, "{err}"),
             Self::DatabaseClientFailed(err) => write!(f, "database client error: {err}"),
             Self::DatabasePoolFailed(err) => write!(f, "database client pool error: {err}"),
             Self::EmptyQuery => write!(f, "query should contain at least one filter or grouping"),
@@ -205,6 +208,7 @@ impl StdError for Error {
     fn source(&self) -> Option<&(dyn StdError + 'static)> {
         match self {
             Self::AuthenticatedUserNotFound(_) => None,
+            Self::BrokerClientFailed(err) => Some(err),
             Self::DatabaseClientFailed(err) => Some(err),
             Self::DatabasePoolFailed(err) => Some(err),
             Self::EmptyQuery => None,

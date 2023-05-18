@@ -10,6 +10,7 @@ chrono = "0.4"
 concat-idents = "1.1"
 deadpool-postgres = "0.10"
 hmac = "0.12"
+lapin = "2.1"
 jwt = "0.16"
 opentelemetry = { version = "0.18", features = ["rt-tokio-current-thread"] }
 opentelemetry-jaeger = { version = "0.17", features = ["rt-tokio-current-thread"] }

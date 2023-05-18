@@ -9,6 +9,7 @@ use tracing::{debug, info, trace};
 use uuid::Uuid;
 
 use crate::{
+    broker::{send_base_event, BaseEvent, BaseEventKind},
     db::{
         base, delete_query as delete_query_from_database, insert_base, insert_query,
         list_queries as list_queries_from_database, query, query_by_id,
@@ -47,7 +48,7 @@ async fn create_query(
             .await
             .map_err(Error::DatabaseClientFailed)?;
         let now = Utc::now();
-        let query = transactional!(tx, async {
+        let (query, base_created) = transactional!(tx, async {
             let base = base(
                 &auth_user.id,
                 &payload.base.kind,
@@ -57,7 +58,7 @@ async fn create_query(
             .await
             .map_err(Error::DatabaseClientFailed)?;
             debug!("base fetched: {base:?}");
-            let base = match base {
+            let (base, base_created) = match base {
                 Some(base) => {
                     let query = query(
                         &base.id,
@@ -71,7 +72,7 @@ async fn create_query(
                     if let Some(query) = query {
                         return Err(Error::QueryAlreadyExists(query.id));
                     }
-                    base
+                    (base, false)
                 }
                 None => {
                     let base = Base {
@@ -84,7 +85,7 @@ async fn create_query(
                     insert_base(&base, tx.client())
                         .await
                         .map_err(Error::DatabaseClientFailed)?;
-                    base
+                    (base, true)
                 }
             };
             let query = Query {
@@ -98,9 +99,18 @@ async fn create_query(
             insert_query(&query, tx.client())
                 .await
                 .map_err(Error::DatabaseClientFailed)?;
-            Ok::<Query, Error>(query)
+            Ok::<(Query, bool), Error>((query, base_created))
         })?;
         info!("new query created");
+        if base_created {
+            let event = BaseEvent {
+                id: query.base.id,
+                kind: BaseEventKind::Created,
+            };
+            send_base_event(&event, &cmpts.channels.base_event)
+                .await
+                .map_err(Error::BrokerClientFailed)?;
+        }
         let resp: QueryResponse = query.into();
         Ok::<HttpResponse<BoxBody>, Error>(HttpResponse::Created().json(resp))
     })
