@@ -3,4 +3,4 @@ version = "0.1.0"
 edition = "2021"
 
 [workspace]
-members = ["api", "base-sync"]
+members = ["api", "base-sync", "core"]
