@@ -479,7 +479,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "tokio-postgres",
  "tracing",
  "tracing-actix-web",
  "uuid 0.8.2",
