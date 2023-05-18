@@ -32,6 +32,12 @@ pub enum Error {
     SerializationFailed(JsonError),
 }
 
+#[derive(Debug)]
+pub enum InitializationError {
+    Connection(LapinError),
+    ExchangeDeclaration { err: LapinError, name: &'static str },
+}
+
 // Enums - Kinds
 
 #[derive(Debug, Serialize)]
@@ -75,13 +81,42 @@ impl StdError for Error {
     }
 }
 
+// Impl - InitializationError
+
+impl Display for InitializationError {
+    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+        match self {
+            Self::Connection(err) => write!(f, "unable to open broker connection: {err}"),
+            Self::ExchangeDeclaration { err, name } => {
+                write!(f, "unable to create broker exchange `{name}`: {err}")
+            }
+        }
+    }
+}
+
+impl StdError for InitializationError {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        match self {
+            Self::Connection(err) => Some(err),
+            Self::ExchangeDeclaration { err, .. } => Some(err),
+        }
+    }
+}
+
 // Functions - Initializers
 
-pub async fn open_channels(cfg: BrokerConfig) -> StdResult<Channels, LapinError> {
+pub async fn open_channels(cfg: BrokerConfig) -> StdResult<Channels, InitializationError> {
     trace!("opening broker connection");
-    let conn = Connection::connect(&cfg.url, ConnectionProperties::default()).await?;
+    let conn = Connection::connect(&cfg.url, ConnectionProperties::default())
+        .await
+        .map_err(InitializationError::Connection)?;
     Ok(Channels {
-        base_event: declare_exchange(&conn, BASE_EVENT_EXCHANGE_NAME).await?,
+        base_event: declare_exchange(&conn, BASE_EVENT_EXCHANGE_NAME)
+            .await
+            .map_err(|err| InitializationError::ExchangeDeclaration {
+                err,
+                name: BASE_EVENT_EXCHANGE_NAME,
+            })?,
     })
 }
 
