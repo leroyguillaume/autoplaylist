@@ -59,25 +59,25 @@ type Result<T> = StdResult<T, Error>;
 #[derive(Debug)]
 enum Error {
     AuthenticatedUserNotFound(Uuid),
-    BrokerClientFailed(BrokerError),
-    DatabaseClientFailed(TokioPostgresError),
-    DatabasePoolFailed(DeadpoolPostgresPoolError),
+    BrokerClient(BrokerError),
+    DatabaseClient(TokioPostgresError),
+    DatabasePool(DeadpoolPostgresPoolError),
     EmptyQuery,
     ExpiredJwt,
     InvalidAuthorizationHeader(String),
     InvalidJwtSubject(Option<String>),
-    JwtGenerationFailed(JwtError),
-    JwtKeyGenerationFailed(HmacInvalidLength),
-    JwtSignatureVerificationFailed(JwtError),
+    JwtGeneration(JwtError),
+    JwtKeyGeneration(HmacInvalidLength),
+    JwtSignatureVerification(JwtError),
     MissingAuthorizationHeader,
     NoSpotifyToken,
     NoSpotifyUserEmail,
     QueryAlreadyExists(Uuid),
     QueryNotFound(Uuid),
     QueryNotOwnedByAuthenticatedUser(Uuid),
-    SpotifyClientFailed(ClientError),
-    SpotifyClientTokenLockFailed,
-    TimestampConversionFailed(TryFromIntError),
+    SpotifyClient(ClientError),
+    SpotifyClientTokenLock,
+    TimestampConversion(TryFromIntError),
 }
 
 // Impl - Error
@@ -90,7 +90,7 @@ impl Error {
             Self::ExpiredJwt => debug!("{self}"),
             Self::InvalidAuthorizationHeader(_) => debug!("{self}"),
             Self::InvalidJwtSubject(_) => debug!("{self}"),
-            Self::JwtSignatureVerificationFailed(_) => debug!("{self}"),
+            Self::JwtSignatureVerification(_) => debug!("{self}"),
             Self::MissingAuthorizationHeader => debug!("{self}"),
             Self::QueryAlreadyExists(_) => debug!("{self}"),
             Self::QueryNotFound(_) => debug!("{self}"),
@@ -104,9 +104,9 @@ impl Display for Error {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         match self {
             Self::AuthenticatedUserNotFound(id) => write!(f, "user {id} doesn't exist anymore"),
-            Self::BrokerClientFailed(err) => write!(f, "{err}"),
-            Self::DatabaseClientFailed(err) => write!(f, "database error: {err}"),
-            Self::DatabasePoolFailed(err) => write!(f, "database connection pool error: {err}"),
+            Self::BrokerClient(err) => write!(f, "{err}"),
+            Self::DatabaseClient(err) => write!(f, "database error: {err}"),
+            Self::DatabasePool(err) => write!(f, "database connection pool error: {err}"),
             Self::EmptyQuery => write!(f, "query should contain at least one filter or grouping"),
             Self::ExpiredJwt => write!(f, "JWT is expired"),
             Self::InvalidAuthorizationHeader(val) => {
@@ -116,9 +116,9 @@ impl Display for Error {
                 Some(subj) => write!(f, "`{subj}` is not a valid JWT subject"),
                 None => write!(f, "no subject in JWT"),
             },
-            Self::JwtGenerationFailed(err) => write!(f, "JWT generation failed: {err}"),
-            Self::JwtKeyGenerationFailed(err) => write!(f, "JWT key generation failed: {err}"),
-            Self::JwtSignatureVerificationFailed(err) => {
+            Self::JwtGeneration(err) => write!(f, "JWT generation failed: {err}"),
+            Self::JwtKeyGeneration(err) => write!(f, "JWT key generation failed: {err}"),
+            Self::JwtSignatureVerification(err) => {
                 write!(f, "JWT signature verification failed: {err}")
             }
             Self::MissingAuthorizationHeader => write!(
@@ -133,11 +133,11 @@ impl Display for Error {
             Self::QueryNotOwnedByAuthenticatedUser(id) => {
                 write!(f, "query {id} is not owned by authenticated user")
             }
-            Self::SpotifyClientFailed(err) => write!(f, "Spotify error: {err}"),
-            Self::SpotifyClientTokenLockFailed => {
+            Self::SpotifyClient(err) => write!(f, "Spotify error: {err}"),
+            Self::SpotifyClientTokenLock => {
                 write!(f, "unable to acquire lock on Spotify client token")
             }
-            Self::TimestampConversionFailed(err) => write!(f, "timestamp conversion failed: {err}"),
+            Self::TimestampConversion(err) => write!(f, "timestamp conversion failed: {err}"),
         }
     }
 }
@@ -145,7 +145,7 @@ impl Display for Error {
 impl From<InTransactionError<Error>> for Error {
     fn from(err: InTransactionError<Error>) -> Self {
         match err {
-            InTransactionError::Client(err) => Error::DatabaseClientFailed(err),
+            InTransactionError::Client(err) => Error::DatabaseClient(err),
             InTransactionError::Execution(err) => err,
         }
     }
@@ -163,7 +163,7 @@ impl ResponseError for Error {
             Self::ExpiredJwt => HttpResponse::Unauthorized().into(),
             Self::InvalidAuthorizationHeader(_) => HttpResponse::Unauthorized().into(),
             Self::InvalidJwtSubject(_) => HttpResponse::Unauthorized().into(),
-            Self::JwtSignatureVerificationFailed(_) => HttpResponse::Unauthorized().into(),
+            Self::JwtSignatureVerification(_) => HttpResponse::Unauthorized().into(),
             Self::MissingAuthorizationHeader => HttpResponse::Unauthorized().into(),
             Self::QueryAlreadyExists(id) => {
                 HttpResponse::Conflict().json(ConflictResponse { id: *id })
@@ -181,7 +181,7 @@ impl ResponseError for Error {
             Self::ExpiredJwt => StatusCode::UNAUTHORIZED,
             Self::InvalidAuthorizationHeader(_) => StatusCode::UNAUTHORIZED,
             Self::InvalidJwtSubject(_) => StatusCode::UNAUTHORIZED,
-            Self::JwtSignatureVerificationFailed(_) => StatusCode::UNAUTHORIZED,
+            Self::JwtSignatureVerification(_) => StatusCode::UNAUTHORIZED,
             Self::MissingAuthorizationHeader => StatusCode::UNAUTHORIZED,
             Self::QueryAlreadyExists(_) => StatusCode::CONFLICT,
             Self::QueryNotFound(_) => StatusCode::NOT_FOUND,
@@ -195,25 +195,25 @@ impl StdError for Error {
     fn source(&self) -> Option<&(dyn StdError + 'static)> {
         match self {
             Self::AuthenticatedUserNotFound(_) => None,
-            Self::BrokerClientFailed(err) => Some(err),
-            Self::DatabaseClientFailed(err) => Some(err),
-            Self::DatabasePoolFailed(err) => Some(err),
+            Self::BrokerClient(err) => Some(err),
+            Self::DatabaseClient(err) => Some(err),
+            Self::DatabasePool(err) => Some(err),
             Self::EmptyQuery => None,
             Self::ExpiredJwt => None,
             Self::InvalidAuthorizationHeader(_) => None,
             Self::InvalidJwtSubject(_) => None,
-            Self::JwtGenerationFailed(err) => Some(err),
-            Self::JwtKeyGenerationFailed(err) => Some(err),
-            Self::JwtSignatureVerificationFailed(err) => Some(err),
+            Self::JwtGeneration(err) => Some(err),
+            Self::JwtKeyGeneration(err) => Some(err),
+            Self::JwtSignatureVerification(err) => Some(err),
             Self::MissingAuthorizationHeader => None,
             Self::NoSpotifyToken => None,
             Self::NoSpotifyUserEmail => None,
             Self::QueryAlreadyExists(_) => None,
             Self::QueryNotFound(_) => None,
             Self::QueryNotOwnedByAuthenticatedUser(_) => None,
-            Self::SpotifyClientFailed(err) => Some(err),
-            Self::SpotifyClientTokenLockFailed => None,
-            Self::TimestampConversionFailed(err) => Some(err),
+            Self::SpotifyClient(err) => Some(err),
+            Self::SpotifyClientTokenLock => None,
+            Self::TimestampConversion(err) => Some(err),
         }
     }
 }
@@ -244,11 +244,11 @@ async fn current_user(
     let claims: Claims = jwt
         .as_str()
         .verify_with_key(&key)
-        .map_err(Error::JwtSignatureVerificationFailed)?;
+        .map_err(Error::JwtSignatureVerification)?;
     let now_ts: u64 = Utc::now()
         .timestamp()
         .try_into()
-        .map_err(Error::TimestampConversionFailed)?;
+        .map_err(Error::TimestampConversion)?;
     if let Some(exp_ts) = claims.registered.expiration {
         if exp_ts < now_ts {
             return Err(Error::ExpiredJwt);
@@ -266,14 +266,14 @@ async fn current_user(
         .map_err(|_| Error::InvalidJwtSubject(Some(subj)))?;
     user_by_id(&id, db_client)
         .await
-        .map_err(Error::DatabaseClientFailed)?
+        .map_err(Error::DatabaseClient)?
         .ok_or_else(|| Error::AuthenticatedUserNotFound(id))
 }
 
 #[inline]
 fn generate_jwt_key(cfg: &JwtConfig) -> Result<Hmac<Sha512>> {
     trace!("generating JWT signature key from secret");
-    Hmac::new_from_slice(cfg.secret.as_bytes()).map_err(Error::JwtKeyGenerationFailed)
+    Hmac::new_from_slice(cfg.secret.as_bytes()).map_err(Error::JwtKeyGeneration)
 }
 
 // Mods

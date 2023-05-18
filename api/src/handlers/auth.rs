@@ -39,29 +39,26 @@ async fn auth_with_spotify(
         spotify
             .request_token(&payload.code)
             .await
-            .map_err(Error::SpotifyClientFailed)?;
+            .map_err(Error::SpotifyClient)?;
         debug!("requesting Spotify user");
-        let user = spotify
-            .current_user()
-            .await
-            .map_err(Error::SpotifyClientFailed)?;
+        let user = spotify.current_user().await.map_err(Error::SpotifyClient)?;
         debug!("user: {user:?}");
         let token = spotify
             .token
             .lock()
             .await
-            .map_err(|_| Error::SpotifyClientTokenLockFailed)?
+            .map_err(|_| Error::SpotifyClientTokenLock)?
             .clone()
             .ok_or(Error::NoSpotifyToken)?;
         let email = user.email.ok_or(Error::NoSpotifyUserEmail)?;
         let mut db_client = client_from_pool(&cmpts.db_pool)
             .await
-            .map_err(Error::DatabasePoolFailed)?;
+            .map_err(Error::DatabasePool)?;
         let (user, user_created) = in_transaction(&mut db_client, move |tx| {
             Box::pin(async move {
                 let user = user_by_spotify_email(&email, tx.client())
                     .await
-                    .map_err(Error::DatabaseClientFailed)?;
+                    .map_err(Error::DatabaseClient)?;
                 debug!("user fetched: {user:?}");
                 let (user, user_created) = match user {
                     Some(user) => (user, false),
@@ -73,7 +70,7 @@ async fn auth_with_spotify(
                         };
                         insert_user(&user, tx.client())
                             .await
-                            .map_err(Error::DatabaseClientFailed)?;
+                            .map_err(Error::DatabaseClient)?;
                         (user, true)
                     }
                 };
@@ -85,7 +82,7 @@ async fn auth_with_spotify(
                 };
                 upsert_spotify_auth(&auth, tx.client())
                     .await
-                    .map_err(Error::DatabaseClientFailed)?;
+                    .map_err(Error::DatabaseClient)?;
                 Ok::<(User, bool), Error>((user, user_created))
             })
         })
@@ -106,7 +103,7 @@ async fn spotify_redirect(cmpts: Data<Components>) -> impl Responder {
         debug!("computing Spotify authorize URL");
         let url = spotify
             .get_authorize_url(false)
-            .map_err(Error::SpotifyClientFailed)?;
+            .map_err(Error::SpotifyClient)?;
         debug!("sending redirect to {url}");
         let mut resp = HttpResponse::TemporaryRedirect();
         resp.insert_header((header::LOCATION, url));
@@ -123,7 +120,7 @@ fn generate_jwt(user: &User, cfg: &JwtConfig) -> Result<String> {
     let expiration_ts: u64 = expiration_date
         .timestamp()
         .try_into()
-        .map_err(Error::TimestampConversionFailed)?;
+        .map_err(Error::TimestampConversion)?;
     let claims = Claims {
         private: BTreeMap::from_iter([(ROLE_JWT_CLAIM_KEY.into(), json!(user.role))]),
         registered: RegisteredClaims {
@@ -134,9 +131,7 @@ fn generate_jwt(user: &User, cfg: &JwtConfig) -> Result<String> {
         },
     };
     let key = generate_jwt_key(cfg)?;
-    claims
-        .sign_with_key(&key)
-        .map_err(Error::JwtGenerationFailed)
+    claims.sign_with_key(&key).map_err(Error::JwtGeneration)
 }
 
 #[inline]

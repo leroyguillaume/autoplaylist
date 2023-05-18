@@ -21,7 +21,7 @@ pub type Result<T> = StdResult<T, Error>;
 #[derive(Debug)]
 pub enum Error {
     MissingEnvVar(&'static str),
-    ParsingFailed {
+    Parsing {
         key: &'static str,
         err: Box<dyn StdError>,
     },
@@ -82,7 +82,7 @@ impl Display for Error {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         match self {
             Self::MissingEnvVar(key) => write!(f, "missing environment variable {key}"),
-            Self::ParsingFailed { key, err } => {
+            Self::Parsing { key, err } => {
                 write!(f, "unable to parse environment variable {key}:  {err}")
             }
         }
@@ -93,7 +93,7 @@ impl StdError for Error {
     fn source(&self) -> Option<&(dyn StdError + 'static)> {
         match self {
             Self::MissingEnvVar(_) => None,
-            Self::ParsingFailed { err, .. } => Some(err.as_ref()),
+            Self::Parsing { err, .. } => Some(err.as_ref()),
         }
     }
 }
@@ -152,12 +152,10 @@ impl Config {
         key: &'static str,
     ) -> Result<Option<T>> {
         match var(key) {
-            Ok(val) => T::from_str(&val)
-                .map(Some)
-                .map_err(|err| Error::ParsingFailed {
-                    key,
-                    err: Box::new(err),
-                }),
+            Ok(val) => T::from_str(&val).map(Some).map_err(|err| Error::Parsing {
+                key,
+                err: Box::new(err),
+            }),
             Err(err) => {
                 if matches!(err, VarError::NotUnicode(_)) {
                     error!("unable to read environment variable {key}: {err}");

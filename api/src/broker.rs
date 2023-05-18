@@ -28,8 +28,8 @@ pub type Result<T> = StdResult<T, Error>;
 
 #[derive(Debug)]
 pub enum Error {
-    BrokerClientFailed(LapinError),
-    SerializationFailed(JsonError),
+    BrokerClient(LapinError),
+    Serialization(JsonError),
 }
 
 #[derive(Debug)]
@@ -64,8 +64,8 @@ pub struct Channels {
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         match self {
-            Self::BrokerClientFailed(err) => write!(f, "broker error: {err}"),
-            Self::SerializationFailed(err) => {
+            Self::BrokerClient(err) => write!(f, "broker error: {err}"),
+            Self::Serialization(err) => {
                 write!(f, "unable to serialize event into JSON: {err}")
             }
         }
@@ -75,8 +75,8 @@ impl Display for Error {
 impl StdError for Error {
     fn source(&self) -> Option<&(dyn StdError + 'static)> {
         match self {
-            Error::BrokerClientFailed(err) => Some(err),
-            Error::SerializationFailed(err) => Some(err),
+            Error::BrokerClient(err) => Some(err),
+            Error::Serialization(err) => Some(err),
         }
     }
 }
@@ -124,7 +124,7 @@ pub async fn open_channels(cfg: BrokerConfig) -> StdResult<Channels, Initializat
 
 pub async fn send_base_event(event: &BaseEvent, channel: &Channel) -> Result<()> {
     trace!("serializing {event:?} into JSON");
-    let payload = to_string(event).map_err(Error::SerializationFailed)?;
+    let payload = to_string(event).map_err(Error::Serialization)?;
     debug!("sending {payload:?} to broker");
     channel
         .basic_publish(
@@ -135,7 +135,7 @@ pub async fn send_base_event(event: &BaseEvent, channel: &Channel) -> Result<()>
             BasicProperties::default(),
         )
         .await
-        .map_err(Error::BrokerClientFailed)?;
+        .map_err(Error::BrokerClient)?;
     Ok(())
 }
 

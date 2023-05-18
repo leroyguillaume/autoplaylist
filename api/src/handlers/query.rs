@@ -34,7 +34,7 @@ async fn create_query(
     handle!(async {
         let mut db_client = client_from_pool(&cmpts.db_pool)
             .await
-            .map_err(Error::DatabasePoolFailed)?;
+            .map_err(Error::DatabasePool)?;
         let auth_user = current_user(&req, &cmpts.jwt_cfg, &db_client).await?;
         if payload.grouping.is_none() {
             return Err(Error::EmptyQuery);
@@ -49,7 +49,7 @@ async fn create_query(
                     tx.client(),
                 )
                 .await
-                .map_err(Error::DatabaseClientFailed)?;
+                .map_err(Error::DatabaseClient)?;
                 debug!("base fetched: {base:?}");
                 let (base, base_created) = match base {
                     Some(base) => {
@@ -60,7 +60,7 @@ async fn create_query(
                             tx.client(),
                         )
                         .await
-                        .map_err(Error::DatabaseClientFailed)?;
+                        .map_err(Error::DatabaseClient)?;
                         debug!("query fetched: {query:?}");
                         if let Some(query) = query {
                             return Err(Error::QueryAlreadyExists(query.id));
@@ -77,7 +77,7 @@ async fn create_query(
                         };
                         insert_base(&base, tx.client())
                             .await
-                            .map_err(Error::DatabaseClientFailed)?;
+                            .map_err(Error::DatabaseClient)?;
                         (base, true)
                     }
                 };
@@ -91,7 +91,7 @@ async fn create_query(
                 };
                 insert_query(&query, tx.client())
                     .await
-                    .map_err(Error::DatabaseClientFailed)?;
+                    .map_err(Error::DatabaseClient)?;
                 Ok::<(Query, bool), Error>((query, base_created))
             })
         })
@@ -105,7 +105,7 @@ async fn create_query(
             };
             send_base_event(&event, &cmpts.channels.base_event)
                 .await
-                .map_err(Error::BrokerClientFailed)?;
+                .map_err(Error::BrokerClient)?;
         }
         let resp: QueryResponse = query.into();
         Ok::<HttpResponse<BoxBody>, Error>(HttpResponse::Created().json(resp))
@@ -121,11 +121,11 @@ async fn delete_query(
     handle!(async {
         let db_client = client_from_pool(&cmpts.db_pool)
             .await
-            .map_err(Error::DatabasePoolFailed)?;
+            .map_err(Error::DatabasePool)?;
         let auth_user = current_user(&req, &cmpts.jwt_cfg, &db_client).await?;
         let query = query_by_id(&path, &db_client)
             .await
-            .map_err(Error::DatabaseClientFailed)?;
+            .map_err(Error::DatabaseClient)?;
         debug!("query fetched: {query:?}");
         let query = match query {
             Some(query) => query,
@@ -138,7 +138,7 @@ async fn delete_query(
         }
         delete_query_from_database(&query.id, &db_client)
             .await
-            .map_err(Error::DatabaseClientFailed)?;
+            .map_err(Error::DatabaseClient)?;
         info!("query {} deleted", query.id);
         Ok::<HttpResponse<BoxBody>, Error>(HttpResponse::NoContent().into())
     })
@@ -153,14 +153,14 @@ async fn list_queries(
     handle!(async {
         let db_client = client_from_pool(&cmpts.db_pool)
             .await
-            .map_err(Error::DatabasePoolFailed)?;
+            .map_err(Error::DatabasePool)?;
         let auth_user = current_user(&req, &cmpts.jwt_cfg, &db_client).await?;
         let limit = page.limit.unwrap_or(DEFAULT_PAGE_LIMIT);
         let offset = page.offset.unwrap_or(DEFAULT_PAGE_OFFSET);
         let page =
             list_queries_from_database(&auth_user.id, limit.into(), offset.into(), &db_client)
                 .await
-                .map_err(Error::DatabaseClientFailed)?;
+                .map_err(Error::DatabaseClient)?;
         debug!("page fetched: {page:?}");
         let resp: PageResponse<QueryResponse> = page.into();
         Ok::<HttpResponse<BoxBody>, Error>(HttpResponse::Ok().json(resp))
