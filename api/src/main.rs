@@ -2,8 +2,10 @@ use std::{error::Error as StdError, result::Result as StdResult};
 
 use actix_cors::Cors;
 use actix_web::{get, web::Data, App, HttpResponse, HttpServer, Responder};
-use autoplaylist_core::init_tracing;
-use broker::Channels;
+use autoplaylist_core::{
+    broker::{open_channels, Channels, Config as BrokerConfig},
+    init_tracing,
+};
 use cfg::{JwtConfig, SpotifyConfig};
 use deadpool_postgres::Pool as DeadpoolPostresPool;
 use opentelemetry::global::shutdown_tracer_provider;
@@ -11,7 +13,6 @@ use tracing::{debug, error, info};
 use tracing_actix_web::TracingLogger;
 
 use self::{
-    broker::open_channels,
     cfg::Config,
     db::init as init_database,
     handlers::{
@@ -59,8 +60,9 @@ async fn health() -> impl Responder {
 #[inline]
 async fn run() -> Result<()> {
     let cfg = Config::from_env()?;
+    let broker_cfg = BrokerConfig::from_env()?;
     let db_pool = init_database(cfg.db).await.map_err(Box::new)?;
-    let channels = open_channels(cfg.broker).await.map_err(Box::new)?;
+    let channels = open_channels(broker_cfg).await.map_err(Box::new)?;
     let cmpts = Components {
         channels,
         db_pool,
@@ -95,7 +97,6 @@ async fn run() -> Result<()> {
 
 // Mods
 
-mod broker;
 mod cfg;
 mod db;
 mod domain;

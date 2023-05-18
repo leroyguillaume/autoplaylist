@@ -30,14 +30,7 @@ pub enum Error {
 // Structs
 
 #[derive(Debug, Clone)]
-pub struct BrokerConfig {
-    #[sensitive]
-    pub url: String,
-}
-
-#[derive(Debug, Clone)]
 pub struct Config {
-    pub broker: BrokerConfig,
     pub db: DatabaseConfig,
     pub jwt: JwtConfig,
     pub server: ServerConfig,
@@ -106,9 +99,6 @@ impl Config {
         let webapp_url: String = Self::env_var("WEBAPP_URL")?;
         let spotify_redirect_url = format!("{webapp_url}/auth/spotify");
         let cfg = Config {
-            broker: BrokerConfig {
-                url: Self::env_var("BROKER_URL")?,
-            },
             db: DatabaseConfig {
                 host: Self::env_var("DB_HOST")?,
                 name: Self::env_var_or_default("DB_NAME", || "autoplaylist".into())?,

@@ -492,18 +492,24 @@ dependencies = [
  "autoplaylist-core",
  "opentelemetry",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "autoplaylist-core"
 version = "0.1.0"
 dependencies = [
+ "lapin",
  "opentelemetry",
  "opentelemetry-jaeger",
+ "securefmt",
+ "serde",
+ "serde_json",
  "tracing",
  "tracing-bunyan-formatter",
  "tracing-opentelemetry",
  "tracing-subscriber",
+ "uuid 0.8.2",
 ]
 
 [[package]]

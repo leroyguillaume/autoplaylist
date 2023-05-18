@@ -9,12 +9,13 @@ use lapin::{
     types::FieldTable,
     BasicProperties, Channel, Connection, ConnectionProperties, Error as LapinError, ExchangeKind,
 };
+use securefmt::Debug;
 use serde::Serialize;
 use serde_json::{to_string, Error as JsonError};
 use tracing::{debug, trace};
 use uuid::Uuid;
 
-use crate::cfg::BrokerConfig;
+use crate::{env_var, ConfigError};
 
 // Consts
 
@@ -48,15 +49,36 @@ pub enum BaseEventKind {
 
 // Structs
 
+#[derive(Debug, Clone)]
+pub struct Config {
+    #[sensitive]
+    pub url: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct Channels {
+    pub base_event: Channel,
+}
+
+// Structs - Events
+
 #[derive(Debug, Serialize)]
 pub struct BaseEvent {
     pub id: Uuid,
     pub kind: BaseEventKind,
 }
 
-#[derive(Debug, Clone)]
-pub struct Channels {
-    pub base_event: Channel,
+// Impl - Config
+
+impl Config {
+    pub fn from_env() -> StdResult<Self, ConfigError> {
+        trace!("loading broker configuration");
+        let cfg = Self {
+            url: env_var("BROKER_URL")?,
+        };
+        debug!("broker configuration loaded: {cfg:?}");
+        Ok(cfg)
+    }
 }
 
 // Impl - Error
@@ -105,7 +127,7 @@ impl StdError for InitializationError {
 
 // Functions - Initializers
 
-pub async fn open_channels(cfg: BrokerConfig) -> StdResult<Channels, InitializationError> {
+pub async fn open_channels(cfg: Config) -> StdResult<Channels, InitializationError> {
     trace!("opening broker connection");
     let conn = Connection::connect(&cfg.url, ConnectionProperties::default())
         .await

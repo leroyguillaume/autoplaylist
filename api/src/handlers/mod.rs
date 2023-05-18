@@ -10,6 +10,7 @@ use actix_web::{
     http::{header, StatusCode},
     HttpRequest, HttpResponse, HttpResponseBuilder, ResponseError,
 };
+use autoplaylist_core::broker::Error as BrokerError;
 use chrono::Utc;
 use deadpool_postgres::{
     tokio_postgres::Client as TokioPostgresClient, tokio_postgres::Error as TokioPostgresError,
@@ -24,7 +25,6 @@ use tracing::{debug, trace};
 use uuid::Uuid;
 
 use crate::{
-    broker::Error as BrokerError,
     cfg::JwtConfig,
     db::{user_by_id, InTransactionError},
     domain::User,

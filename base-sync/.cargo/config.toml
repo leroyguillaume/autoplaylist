@@ -1,2 +1,3 @@
 [env]
+BROKER_URL = "amqp://localhost:5672"
 LOG_FILTER = "info,autoplaylist_core=trace,autoplaylist_base_sync=trace"
