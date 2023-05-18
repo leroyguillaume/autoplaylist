@@ -9,16 +9,14 @@ use actix_cors::Cors;
 use actix_web::{get, web::Data, App, HttpResponse, HttpServer, Responder};
 use broker::Channels;
 use cfg::{JwtConfig, SpotifyConfig};
-use deadpool_postgres::{
-    tokio_postgres::NoTls, Config as DeadpoolPostgresConfig, Pool as DeadpoolPostresPool,
-};
+use deadpool_postgres::Pool as DeadpoolPostresPool;
 use opentelemetry::{
     global::{set_text_map_propagator, shutdown_tracer_provider},
     runtime::TokioCurrentThread,
     sdk::propagation::TraceContextPropagator,
 };
 use opentelemetry_jaeger::new_agent_pipeline;
-use tracing::{debug, error, info, subscriber::set_global_default, trace};
+use tracing::{debug, error, info, subscriber::set_global_default};
 use tracing_actix_web::TracingLogger;
 use tracing_bunyan_formatter::{BunyanFormattingLayer, JsonStorageLayer};
 use tracing_opentelemetry::layer;
@@ -29,7 +27,7 @@ use tracing_subscriber::{
 use self::{
     broker::open_channels,
     cfg::Config,
-    db::run_migrations,
+    db::init as init_database,
     handlers::{
         auth::{auth_with_spotify, spotify_redirect},
         query::{create_query, delete_query, list_queries},
@@ -112,17 +110,14 @@ fn init_tracing() -> Result<()> {
 #[inline]
 async fn run() -> Result<()> {
     let cfg = Config::from_env()?;
-    let db_pool_cfg: DeadpoolPostgresConfig = cfg.db.into();
-    trace!("creating database client pool");
-    let db_pool = db_pool_cfg.create_pool(None, NoTls).map_err(Box::new)?;
+    let db_pool = init_database(cfg.db).await.map_err(Box::new)?;
     let channels = open_channels(cfg.broker).await.map_err(Box::new)?;
     let cmpts = Components {
         channels,
-        db_pool: db_pool.clone(),
+        db_pool,
         jwt_cfg: cfg.jwt,
         spotify_cfg: cfg.spotify,
     };
-    run_migrations(&cmpts.db_pool).await?;
     debug!("starting server on {}", cfg.server.addr);
     let server = HttpServer::new(move || {
         let cors = Cors::default()

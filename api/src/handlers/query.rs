@@ -32,7 +32,7 @@ async fn create_query(
     cmpts: Data<Components>,
 ) -> impl Responder {
     handle!(async {
-        trace!("getting database client from pool");
+        trace!("getting database connection from pool");
         let mut db_client = cmpts
             .db_pool
             .get()
@@ -123,7 +123,7 @@ async fn delete_query(
     cmpts: Data<Components>,
 ) -> impl Responder {
     handle!(async {
-        trace!("getting database client from pool");
+        trace!("getting database connection from pool");
         let db_client = cmpts
             .db_pool
             .get()
@@ -158,7 +158,7 @@ async fn list_queries(
     cmpts: Data<Components>,
 ) -> impl Responder {
     handle!(async {
-        trace!("getting database client from pool");
+        trace!("getting database connection from pool");
         let db_client = cmpts
             .db_pool
             .get()

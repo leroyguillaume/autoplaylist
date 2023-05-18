@@ -127,8 +127,8 @@ impl Display for Error {
         match self {
             Self::AuthenticatedUserNotFound(id) => write!(f, "user {id} doesn't exist anymore"),
             Self::BrokerClientFailed(err) => write!(f, "{err}"),
-            Self::DatabaseClientFailed(err) => write!(f, "database client error: {err}"),
-            Self::DatabasePoolFailed(err) => write!(f, "database client pool error: {err}"),
+            Self::DatabaseClientFailed(err) => write!(f, "database error: {err}"),
+            Self::DatabasePoolFailed(err) => write!(f, "database connection pool error: {err}"),
             Self::EmptyQuery => write!(f, "query should contain at least one filter or grouping"),
             Self::ExpiredJwt => write!(f, "JWT is expired"),
             Self::InvalidAuthorizationHeader(val) => {

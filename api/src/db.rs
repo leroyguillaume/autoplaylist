@@ -1,16 +1,24 @@
-use std::{error::Error as StdError, ops::DerefMut, result::Result as StdResult};
+use std::{
+    error::Error as StdError,
+    fmt::{Display, Formatter, Result as FmtResult},
+    ops::DerefMut,
+    result::Result as StdResult,
+};
 
 use deadpool_postgres::{
     tokio_postgres::{Client, Error as TokioPostgresError},
-    Pool,
+    Config, CreatePoolError, Pool, PoolError,
 };
 use postgres_types::{FromSql, ToSql};
-use refinery::embed_migrations;
-use tokio_postgres::Row;
+use refinery::{embed_migrations, Error as RefineryError};
+use tokio_postgres::{NoTls, Row};
 use tracing::{debug, info, trace};
 use uuid::Uuid;
 
-use crate::domain::{Base, BaseKind, Grouping, Platform, Query, SpotifyAuth, User};
+use crate::{
+    cfg::DatabaseConfig,
+    domain::{Base, BaseKind, Grouping, Platform, Query, SpotifyAuth, User},
+};
 
 // Types
 
@@ -24,7 +32,16 @@ pub trait TryFromRow {
         Self: Sized;
 }
 
-// Enums
+// Enums - Error
+
+#[derive(Debug)]
+pub enum InitializationError {
+    Migrations(Box<RefineryError>),
+    PoolCreation(CreatePoolError),
+    Pool(PoolError),
+}
+
+// Enums - SQL helpers
 
 #[derive(Debug, FromSql, ToSql)]
 #[postgres(name = "base_kind")]
@@ -57,6 +74,30 @@ impl TryFromRow for Base {
             platform: row.try_get("base_platform")?,
             user_id: row.try_get("base_user_id")?,
         })
+    }
+}
+
+// Impl - Error
+
+impl Display for InitializationError {
+    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+        match self {
+            Self::Migrations(err) => write!(f, "database migrations failed: {err}"),
+            Self::PoolCreation(err) => {
+                write!(f, "unable to create database connection pool: {err}")
+            }
+            Self::Pool(err) => write!(f, "database connection pool error: {err}"),
+        }
+    }
+}
+
+impl StdError for InitializationError {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        match self {
+            Self::Migrations(err) => Some(err.as_ref()),
+            Self::PoolCreation(err) => Some(err),
+            Self::Pool(err) => Some(err),
+        }
     }
 }
 
@@ -99,6 +140,24 @@ impl TryFromRow for User {
             role: row.try_get("user_role")?,
         })
     }
+}
+
+// Functions - Initializers
+
+pub async fn init(cfg: DatabaseConfig) -> StdResult<Pool, InitializationError> {
+    let cfg: Config = cfg.into();
+    trace!("creating database connection pool");
+    let pool = cfg
+        .create_pool(None, NoTls)
+        .map_err(InitializationError::PoolCreation)?;
+    trace!("getting database connection from pool");
+    let mut db_client = pool.get().await.map_err(InitializationError::Pool)?;
+    info!("running database migrations");
+    migrations::runner()
+        .run_async(db_client.deref_mut().deref_mut())
+        .await
+        .map_err(|err| InitializationError::Migrations(Box::new(err)))?;
+    Ok(pool)
 }
 
 // Functions - Queries
@@ -275,18 +334,6 @@ fn kind_and_platform_id(kind: &BaseKind) -> (BaseKindSql, Option<&String>) {
         BaseKind::Likes => (BaseKindSql::Likes, None),
         BaseKind::Playlist(platform_id) => (BaseKindSql::Playlist, Some(platform_id)),
     }
-}
-
-#[inline]
-pub async fn run_migrations(db_pool: &Pool) -> StdResult<(), Box<dyn StdError>> {
-    trace!("getting database client from pool");
-    let mut db_client = db_pool.get().await.map_err(Box::new)?;
-    info!("running database migrations");
-    migrations::runner()
-        .run_async(db_client.deref_mut().deref_mut())
-        .await
-        .map_err(Box::new)?;
-    Ok(())
 }
 
 // Mods

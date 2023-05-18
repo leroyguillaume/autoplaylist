@@ -52,7 +52,7 @@ async fn auth_with_spotify(
             .clone()
             .ok_or(Error::NoSpotifyToken)?;
         let email = user.email.ok_or(Error::NoSpotifyUserEmail)?;
-        trace!("getting database client from pool");
+        trace!("getting database connection from pool");
         let mut db_client = cmpts
             .db_pool
             .get()
