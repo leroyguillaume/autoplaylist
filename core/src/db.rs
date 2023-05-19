@@ -9,16 +9,17 @@ use std::{
 
 use deadpool_postgres::{
     tokio_postgres::{Client, Error as TokioPostgresError, NoTls, Row, Transaction},
-    Config, CreatePoolError, Object, Pool, PoolError,
+    Config as DeadpoolPostgresConfig, CreatePoolError, Object, Pool, PoolError,
 };
 use postgres_types::{FromSql, ToSql};
 use refinery::{embed_migrations, Error as RefineryError};
+use securefmt::Debug as SecureDebug;
 use tracing::{debug, error, info, trace};
 use uuid::Uuid;
 
 use crate::{
-    cfg::DatabaseConfig,
     domain::{Base, BaseKind, Grouping, Platform, Query, SpotifyAuth, User},
+    env_var, env_var_opt, env_var_or_default, ConfigError,
 };
 
 // Macros
@@ -69,6 +70,16 @@ enum BaseKindSql {
 
 // Structs
 
+#[derive(Clone, SecureDebug)]
+pub struct Config {
+    pub host: String,
+    pub name: String,
+    pub port: Option<u16>,
+    #[sensitive]
+    pub pwd: String,
+    pub user: String,
+}
+
 #[derive(Debug)]
 pub struct Page<T> {
     pub content: Vec<T>,
@@ -89,6 +100,35 @@ impl TryFromRow for Base {
             platform: row.try_get("base_platform")?,
             user_id: row.try_get("base_user_id")?,
         })
+    }
+}
+
+// Impl - Config
+
+impl Config {
+    pub fn from_env() -> StdResult<Self, ConfigError> {
+        Ok(Self {
+            host: env_var("DB_HOST")?,
+            name: env_var_or_default("DB_NAME", || "autoplaylist".into())?,
+            port: env_var_opt("DB_PORT")?,
+            pwd: env_var("DB_PASSWORD")?,
+            user: env_var_or_default("DB_USER", || "autoplaylist".into())?,
+        })
+    }
+}
+
+// Impl - DeadpoolPostgresConfig
+
+impl From<Config> for DeadpoolPostgresConfig {
+    fn from(cfg: Config) -> Self {
+        Self {
+            dbname: Some(cfg.name),
+            host: Some(cfg.host),
+            password: Some(cfg.pwd),
+            port: cfg.port,
+            user: Some(cfg.user),
+            ..Default::default()
+        }
     }
 }
 
@@ -179,8 +219,8 @@ impl TryFromRow for User {
 
 // Functions - Initializers
 
-pub async fn init(cfg: DatabaseConfig) -> StdResult<Pool, InitializationError> {
-    let cfg: Config = cfg.into();
+pub async fn init(cfg: Config) -> StdResult<Pool, InitializationError> {
+    let cfg: DeadpoolPostgresConfig = cfg.into();
     trace!("creating database connection pool");
     let pool = cfg
         .create_pool(None, NoTls)

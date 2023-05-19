@@ -1,12 +1,11 @@
+use autoplaylist_core::{
+    db::Page,
+    domain::{Base, BaseKind, Grouping, Platform, Query},
+};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use validator::Validate;
-
-use crate::{
-    db::Page,
-    domain::{Base, BaseKind, Grouping, Platform, Query},
-};
 
 // Consts
 

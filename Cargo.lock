@@ -500,10 +500,14 @@ dependencies = [
 name = "autoplaylist-core"
 version = "0.1.0"
 dependencies = [
+ "chrono",
+ "deadpool-postgres",
  "futures",
  "lapin",
  "opentelemetry",
  "opentelemetry-jaeger",
+ "postgres-types",
+ "refinery",
  "securefmt",
  "serde",
  "serde_json",

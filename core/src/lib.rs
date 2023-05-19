@@ -126,3 +126,5 @@ fn env_var_or_default<E: StdError + 'static, F: Fn() -> T, T: FromStr<Err = E>>(
 // Mods
 
 pub mod broker;
+pub mod db;
+pub mod domain;

@@ -8,6 +8,12 @@ use actix_web::{
     web::{Data, Json},
     HttpResponse, Responder,
 };
+use autoplaylist_core::{
+    db::{
+        client_from_pool, in_transaction, insert_user, upsert_spotify_auth, user_by_spotify_email,
+    },
+    domain::{Role, SpotifyAuth, User},
+};
 use chrono::Utc;
 use jwt::{Claims, RegisteredClaims, SignWithKey};
 use rspotify::{prelude::OAuthClient, scopes, AuthCodeSpotify, Credentials, OAuth};
@@ -17,10 +23,6 @@ use uuid::Uuid;
 
 use crate::{
     cfg::{JwtConfig, SpotifyConfig},
-    db::{
-        client_from_pool, in_transaction, insert_user, upsert_spotify_auth, user_by_spotify_email,
-    },
-    domain::{Role, SpotifyAuth, User},
     dto::{AuthWithSpotifyRequest, JwtResponse},
     handlers::{generate_jwt_key, Error, Result, ROLE_JWT_CLAIM_KEY},
     Components,

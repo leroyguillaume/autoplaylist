@@ -8,7 +8,6 @@ use std::{
 };
 
 use chrono::Duration;
-use deadpool_postgres::Config as DeadpoolPostgresConfig;
 use securefmt::Debug;
 use tracing::{debug, error, trace, warn};
 
@@ -31,20 +30,9 @@ pub enum Error {
 
 #[derive(Debug, Clone)]
 pub struct Config {
-    pub db: DatabaseConfig,
     pub jwt: JwtConfig,
     pub server: ServerConfig,
     pub spotify: SpotifyConfig,
-}
-
-#[derive(Debug, Clone)]
-pub struct DatabaseConfig {
-    pub host: String,
-    pub name: String,
-    pub port: Option<u16>,
-    #[sensitive]
-    pub pwd: String,
-    pub user: String,
 }
 
 #[derive(Debug, Clone)]
@@ -99,13 +87,6 @@ impl Config {
         let webapp_url: String = Self::env_var("WEBAPP_URL")?;
         let spotify_redirect_url = format!("{webapp_url}/auth/spotify");
         let cfg = Config {
-            db: DatabaseConfig {
-                host: Self::env_var("DB_HOST")?,
-                name: Self::env_var_or_default("DB_NAME", || "autoplaylist".into())?,
-                port: Self::env_var_opt("DB_PORT")?,
-                pwd: Self::env_var("DB_PASSWORD")?,
-                user: Self::env_var_or_default("DB_USER", || "autoplaylist".into())?,
-            },
             jwt: JwtConfig {
                 issuer: Self::env_var("DOMAIN")?,
                 secret: Self::env_var("JWT_SECRET")?,
@@ -165,21 +146,6 @@ impl Config {
             Ok(Some(val)) => Ok(val),
             Ok(None) => Ok(default()),
             Err(err) => Err(err),
-        }
-    }
-}
-
-// Impl - DeadpoolPostgresConfig
-
-impl From<DatabaseConfig> for DeadpoolPostgresConfig {
-    fn from(cfg: DatabaseConfig) -> Self {
-        Self {
-            dbname: Some(cfg.name),
-            host: Some(cfg.host),
-            password: Some(cfg.pwd),
-            port: cfg.port,
-            user: Some(cfg.user),
-            ..Default::default()
         }
     }
 }

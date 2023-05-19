@@ -4,6 +4,7 @@ use actix_cors::Cors;
 use actix_web::{get, web::Data, App, HttpResponse, HttpServer, Responder};
 use autoplaylist_core::{
     broker::{open_channels, Channels, Config as BrokerConfig},
+    db::{init as init_database, Config as DatabaseConfig},
     init_tracing,
 };
 use cfg::{JwtConfig, SpotifyConfig};
@@ -14,7 +15,6 @@ use tracing_actix_web::TracingLogger;
 
 use self::{
     cfg::Config,
-    db::init as init_database,
     handlers::{
         auth::{auth_with_spotify, spotify_redirect},
         query::{create_query, delete_query, list_queries},
@@ -60,8 +60,9 @@ async fn health() -> impl Responder {
 #[inline]
 async fn run() -> Result<()> {
     let cfg = Config::from_env()?;
+    let db_cfg = DatabaseConfig::from_env()?;
     let broker_cfg = BrokerConfig::from_env()?;
-    let db_pool = init_database(cfg.db).await.map_err(Box::new)?;
+    let db_pool = init_database(db_cfg).await.map_err(Box::new)?;
     let channels = open_channels(broker_cfg).await.map_err(Box::new)?;
     let cmpts = Components {
         channels,
@@ -98,7 +99,5 @@ async fn run() -> Result<()> {
 // Mods
 
 mod cfg;
-mod db;
-mod domain;
 mod dto;
 mod handlers;

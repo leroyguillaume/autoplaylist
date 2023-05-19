@@ -4,17 +4,19 @@ use actix_web::{
     web::{Data, Json, Path, Query as ActixQuery},
     HttpRequest, HttpResponse, Responder,
 };
-use autoplaylist_core::broker::{send_base_event, BaseEvent, BaseEventKind};
-use chrono::Utc;
-use tracing::{debug, info};
-use uuid::Uuid;
-
-use crate::{
+use autoplaylist_core::{
+    broker::{send_base_event, BaseEvent, BaseEventKind},
     db::{
         base, client_from_pool, delete_query as delete_query_from_database, in_transaction,
         insert_base, insert_query, list_queries as list_queries_from_database, query, query_by_id,
     },
     domain::{Base, Query},
+};
+use chrono::Utc;
+use tracing::{debug, info};
+use uuid::Uuid;
+
+use crate::{
     dto::{
         CreateQueryRequest, PageQuery, PageResponse, QueryResponse, DEFAULT_PAGE_LIMIT,
         DEFAULT_PAGE_OFFSET,
