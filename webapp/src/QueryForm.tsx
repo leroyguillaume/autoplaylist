@@ -4,8 +4,8 @@ import { useContext, useState } from "react";
 import { Button, Container, Form, Row } from "react-bootstrap";
 import { useNavigate } from "react-router-dom";
 import Header from "./Header";
-import { doPost } from "./api";
-import { Context, Info } from "./ctx";
+import { HttpError, doPost } from "./api";
+import { Context, Error, Info } from "./ctx";
 import { BaseKind, Grouping, Platform, Query, QueryRequest } from "./domain";
 
 export default function QueryForm() {
@@ -33,13 +33,23 @@ export default function QueryForm() {
     const valid = event.currentTarget.checkValidity();
 
     if (valid) {
-      doPost<Query>("query", query)
+      doPost<Query>("query", query, ctx)
         .then((_resp) => {
           ctx.setInfo(Info.QueryCreated);
           navigate("/home");
         })
         .catch((err) => {
-          ctx.setError(err);
+          switch (err) {
+            case HttpError.Unauthorized:
+              navigate("/");
+              break;
+            case HttpError.Conflict:
+              ctx.setError(Error.QueryAlreadyExists);
+              break;
+            default:
+              ctx.setError(Error.Unexpected);
+              break;
+          }
         })
         .finally(() => {
           setProcessing(false);

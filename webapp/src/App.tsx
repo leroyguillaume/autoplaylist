@@ -8,15 +8,29 @@ import Home from "./Home";
 import LogIn from "./LogIn";
 import QueryForm from "./QueryForm";
 import SpotifyAuth from "./SpotifyAuth";
-import { Context, ContextData, Error, Info } from "./ctx";
+import { JWT_LOCAL_STORAGE_KEY } from "./api";
+import {
+  AuthenticatedUser,
+  Context,
+  ContextData,
+  Error,
+  Info,
+  decodeJwt,
+} from "./ctx";
 
 export default function App() {
+  const jwt = localStorage.getItem(JWT_LOCAL_STORAGE_KEY);
+  const [authUser, setAuthUser] = useState<AuthenticatedUser | null>(
+    decodeJwt(jwt)
+  );
   const [error, setError] = useState<Error | null>(null);
   const [info, setInfo] = useState<Info | null>(null);
 
   const ctx: ContextData = {
-    error: error,
-    info: info,
+    authUser,
+    error,
+    info,
+    setAuthUser,
     setError,
     setInfo,
   };

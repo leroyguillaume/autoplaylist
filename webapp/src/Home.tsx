@@ -23,7 +23,7 @@ export default function Home() {
 
   const deleteQuery = async (id: string) => {
     setDeleting([...deleting, id]);
-    doDelete(`query/${id}`)
+    doDelete(`query/${id}`, ctx)
       .then(() => {
         ctx.setInfo(Info.QueryDeleted);
         return fetchPage(pageNb);
@@ -31,15 +31,7 @@ export default function Home() {
       .then((page) => {
         const maxPageNb = Math.max(1, Math.ceil(page.total / LIMIT));
         if (pageNb >= maxPageNb) {
-          fetchPage(maxPageNb);
-        }
-      })
-      .catch((err) => {
-        if (err === HttpError.Unauthorized) {
-          ctx.setError(Error.Unauthorized);
-          navigate("/");
-        } else {
-          ctx.setError(Error.Unexpected);
+          return fetchPage(maxPageNb);
         }
       })
       .finally(() => {
@@ -52,10 +44,14 @@ export default function Home() {
 
   const fetchPage = (nb: number): Promise<Page<Query>> => {
     setFetching(true);
-    return doGet<Page<Query>>("query", {
-      limit: LIMIT,
-      offset: (nb - 1) * LIMIT,
-    })
+    return doGet<Page<Query>>(
+      "query",
+      {
+        limit: LIMIT,
+        offset: (nb - 1) * LIMIT,
+      },
+      ctx
+    )
       .then((page) => {
         setPage(page);
         setPageNb(nb);
@@ -66,7 +62,6 @@ export default function Home() {
       })
       .catch((err) => {
         if (err === HttpError.Unauthorized) {
-          ctx.setError(Error.Unauthorized);
           navigate("/");
         } else {
           ctx.setError(Error.Unexpected);
@@ -90,7 +85,7 @@ export default function Home() {
       } catch (exception: any) {
         page = 1;
       }
-      await fetchPage(page);
+      await fetchPage(page).catch(() => {});
     })();
   }, []);
 

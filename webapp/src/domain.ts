@@ -40,3 +40,8 @@ export interface QueryRequest {
   grouping: Grouping;
   namePrefix: string;
 }
+
+export enum Role {
+  Admin = "admin",
+  User = "user",
+}

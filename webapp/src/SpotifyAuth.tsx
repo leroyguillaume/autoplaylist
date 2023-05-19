@@ -18,7 +18,7 @@ export default function SpotifyAuth() {
       if (code === null) {
         navigate("/");
       } else {
-        doPost<{ jwt: string }>("auth/spotify", { code })
+        doPost<{ jwt: string }>("auth/spotify", { code }, ctx)
           .then((resp) => {
             window.localStorage.setItem(JWT_LOCAL_STORAGE_KEY, resp.jwt);
             navigate("/home");

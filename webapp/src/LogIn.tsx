@@ -1,28 +1,23 @@
 import { faSpotify } from "@fortawesome/free-brands-svg-icons";
 import { faSpinner } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import jwt_decode from "jwt-decode";
-import { useEffect, useState } from "react";
+import { useContext, useEffect, useState } from "react";
 import { Container, Row } from "react-bootstrap";
 import { useNavigate } from "react-router-dom";
 import Alert from "./Alert";
 import "./LogIn.scss";
-import { JWT_LOCAL_STORAGE_KEY } from "./api";
+import { Context } from "./ctx";
 import logo from "./logo.webp";
 
 export default function LogIn() {
+  const ctx = useContext(Context);
   const [redirecting, setRedirecting] = useState(false);
 
   const navigate = useNavigate();
 
   useEffect(() => {
-    const jwt = localStorage.getItem(JWT_LOCAL_STORAGE_KEY);
-    if (jwt !== null) {
-      const jwt_decoded: any = jwt_decode(jwt);
-      const now = Math.floor(Date.now() / 1000);
-      if (now < jwt_decoded.exp) {
-        navigate("/home");
-      }
+    if (ctx.authUser !== null) {
+      navigate("/home");
     }
   });
 

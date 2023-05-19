@@ -1,3 +1,5 @@
+import { ContextData, Error } from "./ctx";
+
 export const JWT_LOCAL_STORAGE_KEY = "jwt";
 
 export enum HttpError {
@@ -6,23 +8,32 @@ export enum HttpError {
   Unexpected,
 }
 
-export function doDelete(path: string): Promise<void> {
-  return callApi("DELETE", path, {}, null);
+export function doDelete(path: string, ctx: ContextData): Promise<void> {
+  return callApi("DELETE", path, {}, null, ctx);
 }
 
-export function doGet<T>(path: string, query: any): Promise<T> {
-  return callApi("GET", path, query, null);
+export function doGet<T>(
+  path: string,
+  query: any,
+  ctx: ContextData
+): Promise<T> {
+  return callApi("GET", path, query, null, ctx);
 }
 
-export function doPost<T>(path: string, body: any): Promise<T> {
-  return callApi("POST", path, {}, body);
+export function doPost<T>(
+  path: string,
+  body: any,
+  ctx: ContextData
+): Promise<T> {
+  return callApi("POST", path, {}, body, ctx);
 }
 
 function callApi<T>(
   method: string,
   path: string,
   query: any,
-  body: any | null
+  body: any | null,
+  ctx: ContextData
 ): Promise<T> {
   let headers: any = {
     "Content-Type": "application/json",
@@ -44,6 +55,9 @@ function callApi<T>(
     })
     .then((resp) => {
       if (resp.status === 401) {
+        ctx.setAuthUser(null);
+        localStorage.removeItem(JWT_LOCAL_STORAGE_KEY);
+        ctx.setError(Error.Unauthorized);
         return Promise.reject(HttpError.Unauthorized);
       } else if (resp.status === 409) {
         return Promise.reject(HttpError.Conflict);
