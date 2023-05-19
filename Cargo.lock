@@ -490,6 +490,7 @@ name = "autoplaylist-base-sync"
 version = "0.1.0"
 dependencies = [
  "autoplaylist-core",
+ "futures",
  "opentelemetry",
  "tokio",
  "tracing",

@@ -3,10 +3,7 @@ use std::{
     fmt::{Display, Formatter, Result as FmtResult},
     future::Future,
     result::Result as StdResult,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
+    sync::Arc,
 };
 
 use futures::{FutureExt, StreamExt};
@@ -23,7 +20,11 @@ use lapin::{
 use securefmt::Debug;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{from_slice, to_string, Error as JsonError};
-use tokio::spawn;
+use tokio::{
+    spawn,
+    sync::watch::Receiver,
+    task::{JoinHandle, JoinSet},
+};
 use tracing::{debug, error, trace};
 use uuid::Uuid;
 
@@ -64,6 +65,14 @@ pub enum ConsumerInitializationErrorKind {
     Bind(&'static str),
     Consumer,
     Queue,
+}
+
+// Enums
+
+#[derive(Debug, Clone, Copy)]
+pub enum ConsumerSignal {
+    Start,
+    Stop,
 }
 
 // Structs - Errors
@@ -229,12 +238,14 @@ pub async fn start_consumer<
 >(
     queue: &'static str,
     channels: &Channels,
+    sig_rcv: Receiver<ConsumerSignal>,
     handle: F,
-) -> StdResult<Arc<AtomicBool>, ConsumerInitializationError> {
+) -> StdResult<JoinHandle<()>, ConsumerInitializationError> {
     create_and_start_consumer(
         queue,
         &channels.base_event,
         BASE_EVENT_EXCHANGE_NAME,
+        sig_rcv,
         handle,
     )
     .await
@@ -377,21 +388,37 @@ async fn create_and_start_consumer<
     queue: &'static str,
     channel: &Channel,
     exchange: &'static str,
+    mut sig_rcv: Receiver<ConsumerSignal>,
     handle: F,
-) -> StdResult<Arc<AtomicBool>, ConsumerInitializationError> {
+) -> StdResult<JoinHandle<()>, ConsumerInitializationError> {
     let mut csm = create_consumer(queue, exchange, channel).await?;
-    let running = Arc::new(AtomicBool::new(true));
     let handle = Arc::new(handle);
-    spawn({
-        let running = running.clone();
+    trace!("spawning consumer of queue `{queue}`");
+    Ok(spawn({
         async move {
             debug!("consumer of queue `{queue}` started");
-            while running.load(Ordering::Relaxed) {
+            let mut handles = JoinSet::new();
+            loop {
+                match sig_rcv.changed().now_or_never() {
+                    Some(Ok(())) => {
+                        let sig = *sig_rcv.borrow();
+                        trace!("consumer of queue `{queue}` received {sig:?}");
+                        if let ConsumerSignal::Stop = sig {
+                            break;
+                        }
+                    }
+                    Some(Err(err)) => {
+                        error!(
+                            "consumer of queue `{queue}` failed to listen consumer signal: {err}"
+                        );
+                    }
+                    None => (),
+                }
                 if let Some(Some(delivery)) = csm.next().now_or_never() {
                     match delivery {
                         Ok(delivery) => {
                             trace!("spawning worker to handle {delivery:?}");
-                            spawn({
+                            handles.spawn({
                                 let handle = handle.clone();
                                 async move {
                                     handle_delivery(delivery, handle.as_ref()).await;
@@ -404,8 +431,13 @@ async fn create_and_start_consumer<
                     }
                 }
             }
+            debug!("waiting for workers stop");
+            while let Some(res) = handles.join_next().await {
+                if let Err(err) = res {
+                    error!("waiting for worker stop failed: {err}");
+                }
+            }
             debug!("consumer of queue `{queue}` stopped");
         }
-    });
-    Ok(running)
+    }))
 }
