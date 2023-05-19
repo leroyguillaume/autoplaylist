@@ -490,8 +490,6 @@ name = "autoplaylist-base-sync"
 version = "0.1.0"
 dependencies = [
  "autoplaylist-core",
- "futures",
- "lapin",
  "opentelemetry",
  "tokio",
  "tracing",
@@ -501,12 +499,14 @@ dependencies = [
 name = "autoplaylist-core"
 version = "0.1.0"
 dependencies = [
+ "futures",
  "lapin",
  "opentelemetry",
  "opentelemetry-jaeger",
  "securefmt",
  "serde",
  "serde_json",
+ "tokio",
  "tracing",
  "tracing-bunyan-formatter",
  "tracing-opentelemetry",

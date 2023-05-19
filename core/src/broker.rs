@@ -1,22 +1,30 @@
 use std::{
     error::Error as StdError,
     fmt::{Display, Formatter, Result as FmtResult},
+    future::Future,
     result::Result as StdResult,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
 };
 
+use futures::{FutureExt, StreamExt};
 use lapin::{
+    message::Delivery,
     options::{
-        BasicConsumeOptions, BasicPublishOptions, ExchangeDeclareOptions, QueueBindOptions,
-        QueueDeclareOptions,
+        BasicAckOptions, BasicConsumeOptions, BasicNackOptions, BasicPublishOptions,
+        ExchangeDeclareOptions, QueueBindOptions, QueueDeclareOptions,
     },
     types::FieldTable,
     BasicProperties, Channel, Connection, ConnectionProperties, Consumer, Error as LapinError,
     ExchangeKind,
 };
 use securefmt::Debug;
-use serde::Serialize;
-use serde_json::{to_string, Error as JsonError};
-use tracing::{debug, trace};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde_json::{from_slice, to_string, Error as JsonError};
+use tokio::spawn;
+use tracing::{debug, error, trace};
 use uuid::Uuid;
 
 use crate::{env_var, ConfigError};
@@ -45,7 +53,7 @@ pub enum Error {
 
 // Enums - Kinds
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BaseEventKind {
     Created,
@@ -59,6 +67,12 @@ pub enum ConsumerInitializationErrorKind {
 }
 
 // Structs - Errors
+
+#[derive(Debug)]
+pub struct ConsumerError {
+    err: Box<dyn StdError + Send + Sync>,
+    requeue: bool,
+}
 
 #[derive(Debug)]
 pub struct ConsumerInitializationError {
@@ -82,7 +96,7 @@ pub struct Channels {
 
 // Structs - Events
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct BaseEvent {
     pub id: Uuid,
     pub kind: BaseEventKind,
@@ -120,6 +134,20 @@ impl StdError for BrokerInitializationError {
             Self::Connection(err) => Some(err),
             Self::ExchangeDeclaration { err, .. } => Some(err),
         }
+    }
+}
+
+// Impl - ConsumerError
+
+impl Display for ConsumerError {
+    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+        write!(f, "{}", self.err)
+    }
+}
+
+impl StdError for ConsumerError {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        Some(self.err.as_ref())
     }
 }
 
@@ -177,13 +205,6 @@ impl StdError for Error {
 
 // Functions - Initializers
 
-pub async fn create_base_event_consumer(
-    queue: &'static str,
-    channels: &Channels,
-) -> StdResult<Consumer, ConsumerInitializationError> {
-    create_consumer(queue, BASE_EVENT_EXCHANGE_NAME, &channels.base_event).await
-}
-
 pub async fn open_channels(cfg: Config) -> StdResult<Channels, BrokerInitializationError> {
     trace!("opening broker connection");
     let conn = Connection::connect(&cfg.url, ConnectionProperties::default())
@@ -197,6 +218,26 @@ pub async fn open_channels(cfg: Config) -> StdResult<Channels, BrokerInitializat
                 name: BASE_EVENT_EXCHANGE_NAME,
             })?,
     })
+}
+
+// Functions - Consumers
+
+pub async fn start_consumer<
+    F: Fn(T) -> R + Send + Sync + 'static,
+    R: Future<Output = StdResult<(), ConsumerError>> + Send,
+    T: DeserializeOwned + Send,
+>(
+    queue: &'static str,
+    channels: &Channels,
+    handle: F,
+) -> StdResult<Arc<AtomicBool>, ConsumerInitializationError> {
+    create_and_start_consumer(
+        queue,
+        &channels.base_event,
+        BASE_EVENT_EXCHANGE_NAME,
+        handle,
+    )
+    .await
 }
 
 // Functions - Producers
@@ -250,6 +291,7 @@ async fn create_consumer(
             kind: ConsumerInitializationErrorKind::Bind(exchange),
             queue,
         })?;
+    trace!("creating consumer of queue `{queue}`");
     channel
         .basic_consume(
             queue,
@@ -279,4 +321,91 @@ async fn declare_exchange(conn: &Connection, exchange: &str) -> StdResult<Channe
         )
         .await?;
     Ok(channel)
+}
+
+#[inline]
+async fn handle_delivery<
+    F: Fn(T) -> R + Send + Sync + 'static,
+    R: Future<Output = StdResult<(), ConsumerError>> + Send,
+    T: DeserializeOwned,
+>(
+    delivery: Delivery,
+    handle: &F,
+) {
+    match from_slice(&delivery.data) {
+        Ok(payload) => match handle(payload).await {
+            Ok(()) => {
+                debug!("sending acknowledgement to broker");
+                if let Err(err) = delivery.ack(BasicAckOptions::default()).await {
+                    error!("sending acknowledgement to borker failed: {err}");
+                }
+            }
+            Err(err) => {
+                error!("{err}");
+                send_nack(err.requeue, delivery).await;
+            }
+        },
+        Err(err) => {
+            error!("deserialization failed: {err}");
+            send_nack(true, delivery).await;
+        }
+    }
+}
+
+#[inline]
+async fn send_nack(requeue: bool, delivery: Delivery) {
+    let opts = BasicNackOptions {
+        requeue,
+        ..Default::default()
+    };
+    if requeue {
+        debug!("sending non-acknowledgement to broker because of previous error (delivery will be requeued)");
+    } else {
+        debug!("sending non-acknowledgement to broker because of previous error");
+    }
+    if let Err(err) = delivery.nack(opts).await {
+        error!("sending non-acknowledgement to broker failed: {err}");
+    }
+}
+
+#[inline]
+async fn create_and_start_consumer<
+    F: Fn(T) -> R + Send + Sync + 'static,
+    R: Future<Output = StdResult<(), ConsumerError>> + Send,
+    T: DeserializeOwned + Send,
+>(
+    queue: &'static str,
+    channel: &Channel,
+    exchange: &'static str,
+    handle: F,
+) -> StdResult<Arc<AtomicBool>, ConsumerInitializationError> {
+    let mut csm = create_consumer(queue, exchange, channel).await?;
+    let running = Arc::new(AtomicBool::new(true));
+    let handle = Arc::new(handle);
+    spawn({
+        let running = running.clone();
+        async move {
+            debug!("consumer of queue `{queue}` started");
+            while running.load(Ordering::Relaxed) {
+                if let Some(Some(delivery)) = csm.next().now_or_never() {
+                    match delivery {
+                        Ok(delivery) => {
+                            trace!("spawning worker to handle {delivery:?}");
+                            spawn({
+                                let handle = handle.clone();
+                                async move {
+                                    handle_delivery(delivery, handle.as_ref()).await;
+                                }
+                            });
+                        }
+                        Err(err) => {
+                            error!("consumer of queue `{queue}` failed: {err}");
+                        }
+                    }
+                }
+            }
+            debug!("consumer of queue `{queue}` stopped");
+        }
+    });
+    Ok(running)
 }
