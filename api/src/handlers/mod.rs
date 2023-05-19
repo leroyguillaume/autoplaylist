@@ -104,7 +104,7 @@ impl Display for Error {
             }
             Self::SpotifyClient(err) => write!(f, "Spotify error: {err}"),
             Self::SpotifyClientTokenLock => {
-                write!(f, "unable to acquire lock on Spotify client token")
+                write!(f, "acquiring lock on Spotify client token failed")
             }
             Self::TimestampConversion(err) => write!(f, "timestamp conversion failed: {err}"),
         }

@@ -129,9 +129,9 @@ impl Config {
 impl Display for BrokerInitializationError {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         match self {
-            Self::Connection(err) => write!(f, "unable to open broker connection: {err}"),
+            Self::Connection(err) => write!(f, "broker connection failed: {err}"),
             Self::ExchangeDeclaration { err, name } => {
-                write!(f, "unable to create broker exchange `{name}`: {err}")
+                write!(f, "broker exchange `{name}` creation failed: {err}")
             }
         }
     }
@@ -172,12 +172,12 @@ impl Display for ConsumerInitializationError {
             ),
             ConsumerInitializationErrorKind::Consumer => write!(
                 f,
-                "unable to create broker consumer on queue `{}`: {}",
+                "broker consumer on queue `{}` creation failed: {}",
                 self.queue, self.err
             ),
             ConsumerInitializationErrorKind::Queue => write!(
                 f,
-                "unable to create broker queue `{}`: {}",
+                "broker queue `{}` creation failed: {}",
                 self.queue, self.err
             ),
         }
@@ -197,7 +197,7 @@ impl Display for Error {
         match self {
             Self::BrokerClient(err) => write!(f, "broker error: {err}"),
             Self::Serialization(err) => {
-                write!(f, "unable to serialize event into JSON: {err}")
+                write!(f, "event serialization into JSON failed: {err}")
             }
         }
     }

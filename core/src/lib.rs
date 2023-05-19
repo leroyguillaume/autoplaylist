@@ -101,7 +101,7 @@ pub fn env_var_opt<E: StdError + 'static, T: FromStr<Err = E>>(
             }),
         Err(err) => {
             if matches!(err, VarError::NotUnicode(_)) {
-                error!("unable to read environment variable {key}: {err}");
+                error!("environment variable {key} decoding failed: {err}");
                 warn!("environment varialbe {key} will be ignored because of previous error");
             }
             Ok(None)

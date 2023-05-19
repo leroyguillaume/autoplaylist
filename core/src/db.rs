@@ -162,7 +162,7 @@ impl Display for InitializationError {
         match self {
             Self::Migrations(err) => write!(f, "database migrations failed: {err}"),
             Self::PoolCreation(err) => {
-                write!(f, "unable to create database connection pool: {err}")
+                write!(f, "database connection pool creation failed: {err}")
             }
             Self::Pool(err) => write!(f, "database connection pool error: {err}"),
         }
