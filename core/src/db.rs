@@ -107,13 +107,16 @@ impl TryFromRow for Base {
 
 impl Config {
     pub fn from_env() -> StdResult<Self, ConfigError> {
-        Ok(Self {
+        trace!("loading database configuration");
+        let cfg = Self {
             host: env_var("DB_HOST")?,
             name: env_var_or_default("DB_NAME", || "autoplaylist".into())?,
             port: env_var_opt("DB_PORT")?,
             pwd: env_var("DB_PASSWORD")?,
             user: env_var_or_default("DB_USER", || "autoplaylist".into())?,
-        })
+        };
+        trace!("database configuration loaded: {cfg:?}");
+        Ok(cfg)
     }
 }
 

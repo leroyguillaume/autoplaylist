@@ -119,7 +119,7 @@ impl Config {
         let cfg = Self {
             url: env_var("BROKER_URL")?,
         };
-        debug!("broker configuration loaded: {cfg:?}");
+        trace!("broker configuration loaded: {cfg:?}");
         Ok(cfg)
     }
 }
