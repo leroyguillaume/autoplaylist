@@ -3,8 +3,8 @@ use std::{error::Error as StdError, result::Result as StdResult};
 use actix_cors::Cors;
 use actix_web::{get, web::Data, App, HttpResponse, HttpServer, Responder};
 use autoplaylist_core::{
-    broker::{open_channels, Channels, Config as BrokerConfig},
-    db::{init as init_database, Config as DatabaseConfig},
+    broker::{open_channels, Channels},
+    db::init as init_database,
     init_tracing,
 };
 use cfg::{JwtConfig, SpotifyConfig};
@@ -60,10 +60,8 @@ async fn health() -> impl Responder {
 #[inline]
 async fn run() -> Result<()> {
     let cfg = Config::from_env()?;
-    let db_cfg = DatabaseConfig::from_env()?;
-    let broker_cfg = BrokerConfig::from_env()?;
-    let db_pool = init_database(db_cfg).await.map_err(Box::new)?;
-    let channels = open_channels(broker_cfg).await.map_err(Box::new)?;
+    let db_pool = init_database(cfg.db).await.map_err(Box::new)?;
+    let channels = open_channels(cfg.broker).await.map_err(Box::new)?;
     let cmpts = Components {
         channels,
         db_pool,

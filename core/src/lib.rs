@@ -79,8 +79,7 @@ pub fn init_tracing(service: &str) -> Result<(), Box<dyn StdError>> {
 
 // Functions - Utils
 
-#[inline]
-fn env_var<E: StdError + 'static, T: FromStr<Err = E>>(
+pub fn env_var<E: StdError + 'static, T: FromStr<Err = E>>(
     key: &'static str,
 ) -> Result<T, ConfigError> {
     match env_var_opt(key) {
@@ -90,8 +89,7 @@ fn env_var<E: StdError + 'static, T: FromStr<Err = E>>(
     }
 }
 
-#[inline]
-fn env_var_opt<E: StdError + 'static, T: FromStr<Err = E>>(
+pub fn env_var_opt<E: StdError + 'static, T: FromStr<Err = E>>(
     key: &'static str,
 ) -> Result<Option<T>, ConfigError> {
     match var(key) {
@@ -111,8 +109,7 @@ fn env_var_opt<E: StdError + 'static, T: FromStr<Err = E>>(
     }
 }
 
-#[inline]
-fn env_var_or_default<E: StdError + 'static, F: Fn() -> T, T: FromStr<Err = E>>(
+pub fn env_var_or_default<E: StdError + 'static, F: Fn() -> T, T: FromStr<Err = E>>(
     key: &'static str,
     default: F,
 ) -> Result<T, ConfigError> {
