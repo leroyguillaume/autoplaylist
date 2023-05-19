@@ -41,6 +41,20 @@ pub enum Role {
     User,
 }
 
+#[derive(Debug, Deserialize, FromSql, Serialize, ToSql)]
+#[postgres(name = "sync_state")]
+#[serde(rename_all = "snake_case")]
+pub enum SyncState {
+    #[postgres(name = "aborted")]
+    Aborted,
+    #[postgres(name = "failed")]
+    Failed,
+    #[postgres(name = "running")]
+    Running,
+    #[postgres(name = "succeeded")]
+    Succeeded,
+}
+
 // Structs
 
 #[derive(Debug)]
@@ -49,6 +63,7 @@ pub struct Base {
     pub id: Uuid,
     pub kind: BaseKind,
     pub platform: Platform,
+    pub sync: Sync,
     pub user_id: Uuid,
 }
 
@@ -70,6 +85,14 @@ pub struct SpotifyAuth {
     #[sensitive]
     pub refresh_token: Option<String>,
     pub user_id: Uuid,
+}
+
+#[derive(Debug)]
+pub struct Sync {
+    pub last_err_msg: Option<String>,
+    pub last_start_date: Option<DateTime<Utc>>,
+    pub last_success_date: Option<DateTime<Utc>>,
+    pub state: Option<SyncState>,
 }
 
 #[derive(Debug)]

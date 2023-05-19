@@ -18,7 +18,7 @@ use tracing::{debug, error, info, trace};
 use uuid::Uuid;
 
 use crate::{
-    domain::{Base, BaseKind, Grouping, Platform, Query, SpotifyAuth, User},
+    domain::{Base, BaseKind, Grouping, Platform, Query, SpotifyAuth, Sync, User},
     env_var, env_var_opt, env_var_or_default, ConfigError,
 };
 
@@ -98,6 +98,12 @@ impl TryFromRow for Base {
                 BaseKindSql::Playlist => BaseKind::Playlist(row.try_get("base_platform_id")?),
             },
             platform: row.try_get("base_platform")?,
+            sync: Sync {
+                last_err_msg: row.try_get("base_last_sync_err_msg")?,
+                last_start_date: row.try_get("base_last_sync_start_date")?,
+                last_success_date: row.try_get("base_last_sync_success_date")?,
+                state: row.try_get("base_sync_state")?,
+            },
             user_id: row.try_get("base_user_id")?,
         })
     }

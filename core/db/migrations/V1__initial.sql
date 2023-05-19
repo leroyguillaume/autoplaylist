@@ -16,6 +16,13 @@ CREATE TYPE role AS ENUM (
     'user'
 );
 
+CREATE TYPE sync_state AS ENUM (
+    'aborted',
+    'failed',
+    'running',
+    'succeeded'
+);
+
 CREATE TABLE "user" (
     id UUID NOT NULL PRIMARY KEY,
     creation_date TIMESTAMP WITH TIME ZONE NOT NULL,
@@ -36,6 +43,10 @@ CREATE TABLE base (
     platform PLATFORM NOT NULL,
     kind BASE_KIND NOT NULL,
     platform_id VARCHAR (255),
+    sync_state SYNC_STATE DEFAULT NULL,
+    last_sync_start_date TIMESTAMP WITH TIME ZONE DEFAULT NULL,
+    last_sync_success_date TIMESTAMP WITH TIME ZONE DEFAULT NULL,
+    last_sync_err_msg TEXT DEFAULT NULL,
     UNIQUE NULLS NOT DISTINCT (user_id, platform, kind, platform_id)
 );
 

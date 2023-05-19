@@ -10,7 +10,7 @@ use autoplaylist_core::{
         base, client_from_pool, delete_query as delete_query_from_database, in_transaction,
         insert_base, insert_query, list_queries as list_queries_from_database, query, query_by_id,
     },
-    domain::{Base, Query},
+    domain::{Base, Query, Sync},
 };
 use chrono::Utc;
 use tracing::{debug, info};
@@ -72,9 +72,15 @@ async fn create_query(
                     let base = Base {
                         creation_date: now,
                         id: Uuid::new_v4(),
-                        user_id: auth_user.id,
                         kind: payload.base.kind.clone(),
                         platform: payload.base.platform,
+                        sync: Sync {
+                            last_err_msg: None,
+                            last_start_date: None,
+                            last_success_date: None,
+                            state: None,
+                        },
+                        user_id: auth_user.id,
                     };
                     insert_base(&base, tx.client())
                         .await
