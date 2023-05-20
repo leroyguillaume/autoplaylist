@@ -1,9 +1,10 @@
 import { faPlus, faSpinner, faTrash } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useContext, useEffect, useState } from "react";
-import { Button, Container, Pagination, Row, Table } from "react-bootstrap";
+import { Button, Container, Row } from "react-bootstrap";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import Header from "./Header";
+import Table from "./Table";
 import { HttpError, doDelete, doGet } from "./api";
 import { Context, Error, Info } from "./ctx";
 import { Page, Query } from "./domain";
@@ -13,96 +14,49 @@ const LIMIT = 10;
 export default function Home() {
   const ctx = useContext(Context);
 
-  const [deleting, setDeleting] = useState<string[]>([]);
-  const [fetching, setFetching] = useState(false);
-  const [page, setPage] = useState<Page<Query> | null>(null);
-  const [pageNb, setPageNb] = useState<number>(1);
-
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
 
+  const initialQueryPageNb = pageNumberFromQuery("queryPage", params);
+
+  const [queriesInDeletion, setQueriesInDeletion] = useState<string[]>([]);
+  const [queryPage, setQueryPage] = useState<Page<Query> | null>(null);
+  const [queryPageFetching, setQueryPageFetching] = useState(false);
+  const [queryPageNb, setQueryPageNb] = useState(initialQueryPageNb);
+
+  const queryTableThead = (
+    <thead>
+      <tr>
+        <th>Creation date</th>
+        <th>Base</th>
+        <th>Action</th>
+      </tr>
+    </thead>
+  );
+
   const deleteQuery = async (id: string) => {
-    setDeleting([...deleting, id]);
-    doDelete(`query/${id}`, ctx)
+    setQueriesInDeletion([...queriesInDeletion, id]);
+    await doDelete(`query/${id}`, ctx)
       .then(() => {
         ctx.setInfo(Info.QueryDeleted);
-        return fetchPage(pageNb);
-      })
-      .then((page) => {
-        const maxPageNb = Math.max(1, Math.ceil(page.total / LIMIT));
-        if (pageNb >= maxPageNb) {
-          return fetchPage(maxPageNb);
-        }
+        return fetchQueryPage(queryPageNb);
       })
       .finally(() => {
-        const idx = deleting.indexOf(id);
+        const idx = queriesInDeletion.indexOf(id);
         if (idx > -1) {
-          setDeleting([...deleting.slice(0, idx), ...deleting.slice(idx + 1)]);
+          setQueriesInDeletion([
+            ...queriesInDeletion.slice(0, idx),
+            ...queriesInDeletion.slice(idx + 1),
+          ]);
         }
       });
   };
 
-  const fetchPage = (nb: number): Promise<Page<Query>> => {
-    setFetching(true);
-    return doGet<Page<Query>>(
-      "query",
-      {
-        limit: LIMIT,
-        offset: (nb - 1) * LIMIT,
-      },
-      ctx
-    )
-      .then((page) => {
-        setPage(page);
-        setPageNb(nb);
-        setParams({
-          page: nb.toString(),
-        });
-        return page;
-      })
-      .catch((err) => {
-        if (err === HttpError.Unauthorized) {
-          navigate("/");
-        } else {
-          ctx.setError(Error.Unexpected);
-        }
-        return Promise.reject(null);
-      })
-      .finally(() => {
-        setFetching(false);
-      });
-  };
-
-  useEffect(() => {
-    (async function () {
-      let pageParam = params.get("page");
-      if (pageParam == null) {
-        pageParam = "1";
-      }
-      let page;
-      try {
-        page = parseInt(pageParam);
-      } catch (exception: any) {
-        page = 1;
-      }
-      await fetchPage(page).catch(() => {});
-    })();
-  }, []);
-
-  let table = <></>;
-  if (page === null || fetching) {
-    table = (
-      <>
-        <div className="text-center">
-          <FontAwesomeIcon icon={faSpinner} spin size="2x" />
-        </div>
-      </>
-    );
-  } else {
-    const trs = page.content.map((query) => {
+  const buildQueryTrs = (page: Page<Query>) => {
+    return page.content.map((query) => {
       const creationDate = new Date(query.creationDate);
       let deleteBtn;
-      if (deleting.indexOf(query.id) === -1) {
+      if (queriesInDeletion.indexOf(query.id) === -1) {
         deleteBtn = (
           <Button
             className="btn-sm"
@@ -129,52 +83,48 @@ export default function Home() {
         </tr>
       );
     });
-    const maxPageNb = Math.ceil(page.total / LIMIT);
-    let paginationFirst;
-    let paginationPrev;
-    let paginationNext;
-    let paginationLast;
-    if (pageNb <= 1) {
-      paginationFirst = <></>;
-      paginationPrev = <></>;
-    } else {
-      paginationFirst = <Pagination.First onClick={() => fetchPage(1)} />;
-      paginationPrev = (
-        <Pagination.Prev onClick={() => fetchPage(pageNb - 1)} />
-      );
-    }
-    if (pageNb >= maxPageNb) {
-      paginationNext = <></>;
-      paginationLast = <></>;
-    } else {
-      paginationNext = (
-        <Pagination.Next onClick={() => fetchPage(pageNb + 1)} />
-      );
-      paginationLast = <Pagination.Last onClick={() => fetchPage(maxPageNb)} />;
-    }
-    table = (
-      <>
-        <div className="text-center">
-          <Table bordered>
-            <thead>
-              <tr>
-                <th>Creation date</th>
-                <th>Base</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-            <tbody>{trs}</tbody>
-          </Table>
-        </div>
-        <Pagination className="justify-content-end">
-          {paginationFirst}
-          {paginationPrev}
-          {paginationNext}
-          {paginationLast}
-        </Pagination>
-      </>
-    );
-  }
+  };
+
+  const fetchQueryPage = async (nb: number) => {
+    setQueryPageFetching(true);
+    await doGet<Page<Query>>(
+      "query",
+      {
+        limit: LIMIT,
+        offset: (nb - 1) * LIMIT,
+      },
+      ctx
+    )
+      .then((page) => {
+        const maxNb = Math.max(1, Math.ceil(page.total / LIMIT));
+        if (nb > maxNb) {
+          return fetchQueryPage(maxNb);
+        } else {
+          setQueryPage(page);
+          setQueryPageNb(nb);
+          setParams({
+            ...params,
+            queryPage: "1",
+          });
+        }
+      })
+      .catch((err) => {
+        if (err === HttpError.Unauthorized) {
+          navigate("/");
+        } else {
+          ctx.setError(Error.Unexpected);
+        }
+      })
+      .finally(() => {
+        setQueryPageFetching(false);
+      });
+  };
+
+  useEffect(() => {
+    (async function () {
+      await fetchQueryPage(queryPageNb);
+    })();
+  }, []);
 
   return (
     <>
@@ -191,8 +141,31 @@ export default function Home() {
             </div>
           </div>
         </Row>
-        <Row>{table}</Row>
+        {/* <Row>{table}</Row> */}
+        <Row>
+          <Table
+            buildTrs={buildQueryTrs}
+            fetching={queryPageFetching}
+            page={queryPage}
+            pageNb={queryPageNb}
+            pageNbChanged={fetchQueryPage}
+            pageSize={LIMIT}
+            thead={queryTableThead}
+          />
+        </Row>
       </Container>
     </>
   );
+}
+
+function pageNumberFromQuery(key: string, params: URLSearchParams): number {
+  let param = params.get(key);
+  if (param == null) {
+    param = "1";
+  }
+  try {
+    return parseInt(param);
+  } catch {
+    return 1;
+  }
 }
