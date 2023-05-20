@@ -1,9 +1,16 @@
 use actix_web::{
-    get,
-    web::{Data, Query},
+    body::BoxBody,
+    get, put,
+    web::{Data, Path, Query},
     HttpRequest, HttpResponse, Responder,
 };
-use autoplaylist_core::db::{client_from_pool, list_bases as list_bases_from_database};
+use autoplaylist_core::{
+    broker::{send_base_command, BaseCommand, BaseCommandKind},
+    db::{client_from_pool, list_bases as list_bases_from_database},
+    domain::Role,
+};
+use tracing::info;
+use uuid::Uuid;
 
 use crate::{
     dto::{BaseResponse, PageQuery, PageResponse, DEFAULT_PAGE_LIMIT, DEFAULT_PAGE_OFFSET},
@@ -28,4 +35,28 @@ async fn list_bases(
         .map_err(Error::DatabaseClient)?;
     let resp: PageResponse<BaseResponse> = page.into();
     Ok(HttpResponse::Ok().json(resp))
+}
+
+#[put("/base/{id}")]
+async fn start_base_sync(
+    req: HttpRequest,
+    path: Path<Uuid>,
+    cmpts: Data<Components>,
+) -> Result<impl Responder> {
+    let db_client = client_from_pool(&cmpts.db_pool)
+        .await
+        .map_err(Error::DatabasePool)?;
+    let auth_user = current_user(&req, &cmpts.jwt_cfg, &db_client).await?;
+    if auth_user.role != Role::Admin {
+        return Err(Error::AuthenticatedUserIsNotAdmin(auth_user.id));
+    }
+    let cmd = BaseCommand {
+        id: *path,
+        kind: BaseCommandKind::Sync,
+    };
+    send_base_command(&cmd, &cmpts.channels.base_cmd)
+        .await
+        .map_err(Error::BrokerClient)?;
+    info!("synchronization requested for base {}", *path);
+    Ok::<HttpResponse<BoxBody>, Error>(HttpResponse::NoContent().into())
 }

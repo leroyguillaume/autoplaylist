@@ -45,6 +45,7 @@ type Result<T> = StdResult<T, Error>;
 
 #[derive(Debug)]
 enum Error {
+    AuthenticatedUserIsNotAdmin(Uuid),
     AuthenticatedUserNotFound(Uuid),
     BrokerClient(BrokerError),
     DatabaseClient(TokioPostgresError),
@@ -72,6 +73,7 @@ enum Error {
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         match self {
+            Self::AuthenticatedUserIsNotAdmin(id) => write!(f, "user {id} is not admin"),
             Self::AuthenticatedUserNotFound(id) => write!(f, "user {id} doesn't exist anymore"),
             Self::BrokerClient(err) => write!(f, "{err}"),
             Self::DatabaseClient(err) => write!(f, "database error: {err}"),
@@ -136,6 +138,7 @@ impl ResponseError for Error {
 
     fn status_code(&self) -> StatusCode {
         match self {
+            Self::AuthenticatedUserIsNotAdmin(_) => StatusCode::FORBIDDEN,
             Self::AuthenticatedUserNotFound(_) => StatusCode::UNAUTHORIZED,
             Self::EmptyQuery => StatusCode::PRECONDITION_FAILED,
             Self::ExpiredJwt => StatusCode::UNAUTHORIZED,
@@ -154,6 +157,7 @@ impl ResponseError for Error {
 impl StdError for Error {
     fn source(&self) -> Option<&(dyn StdError + 'static)> {
         match self {
+            Self::AuthenticatedUserIsNotAdmin(_) => None,
             Self::AuthenticatedUserNotFound(_) => None,
             Self::BrokerClient(err) => Some(err),
             Self::DatabaseClient(err) => Some(err),

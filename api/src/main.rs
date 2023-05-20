@@ -13,6 +13,8 @@ use opentelemetry::global::shutdown_tracer_provider;
 use tracing::{debug, error, info};
 use tracing_actix_web::TracingLogger;
 
+use crate::handlers::base::start_base_sync;
+
 use self::{
     cfg::Config,
     handlers::{
@@ -86,6 +88,7 @@ async fn run() -> Result<()> {
             .service(list_bases)
             .service(list_queries)
             .service(spotify_redirect)
+            .service(start_base_sync)
     })
     .bind(cfg.server.addr)
     .map_err(Box::new)?;

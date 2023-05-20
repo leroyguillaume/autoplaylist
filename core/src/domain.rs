@@ -31,7 +31,7 @@ pub enum Platform {
     Spotify,
 }
 
-#[derive(Debug, Deserialize, FromSql, Serialize, ToSql)]
+#[derive(Debug, Deserialize, Eq, FromSql, PartialEq, Serialize, ToSql)]
 #[postgres(name = "role")]
 #[serde(rename_all = "snake_case")]
 pub enum Role {

@@ -1,6 +1,6 @@
 use std::{
     error::Error as StdError,
-    fmt::{Display, Formatter, Result as FmtResult},
+    fmt::{Debug, Display, Formatter, Result as FmtResult},
     future::Future,
     result::Result as StdResult,
     sync::Arc,
@@ -17,7 +17,7 @@ use lapin::{
     BasicProperties, Channel, Connection, ConnectionProperties, Consumer, Error as LapinError,
     ExchangeKind,
 };
-use securefmt::Debug;
+use securefmt::Debug as SecureDebug;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{from_slice, to_string, Error as JsonError};
 use tokio::{
@@ -33,6 +33,7 @@ use crate::{env_var, ConfigError};
 // Consts
 
 const BASE_EVENT_EXCHANGE_NAME: &str = "base-event";
+const BASE_CMD_EXCHANGE_NAME: &str = "base-cmd";
 
 // Types
 
@@ -53,6 +54,12 @@ pub enum Error {
 }
 
 // Enums - Kinds
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BaseCommandKind {
+    Sync,
+}
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -92,7 +99,7 @@ pub struct ConsumerInitializationError {
 
 // Structs
 
-#[derive(Debug, Clone)]
+#[derive(SecureDebug, Clone)]
 pub struct Config {
     #[sensitive]
     pub url: String,
@@ -100,7 +107,16 @@ pub struct Config {
 
 #[derive(Debug, Clone)]
 pub struct Channels {
+    pub base_cmd: Channel,
     pub base_event: Channel,
+}
+
+// Structs - Command
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct BaseCommand {
+    pub id: Uuid,
+    pub kind: BaseCommandKind,
 }
 
 // Structs - Events
@@ -220,12 +236,8 @@ pub async fn open_channels(cfg: Config) -> StdResult<Channels, BrokerInitializat
         .await
         .map_err(BrokerInitializationError::Connection)?;
     Ok(Channels {
-        base_event: declare_exchange(&conn, BASE_EVENT_EXCHANGE_NAME)
-            .await
-            .map_err(|err| BrokerInitializationError::ExchangeDeclaration {
-                err,
-                name: BASE_EVENT_EXCHANGE_NAME,
-            })?,
+        base_cmd: declare_exchange(&conn, BASE_CMD_EXCHANGE_NAME).await?,
+        base_event: declare_exchange(&conn, BASE_EVENT_EXCHANGE_NAME).await?,
     })
 }
 
@@ -253,21 +265,12 @@ pub async fn start_consumer<
 
 // Functions - Producers
 
+pub async fn send_base_command(event: &BaseCommand, channel: &Channel) -> Result<()> {
+    send(event, channel, BASE_CMD_EXCHANGE_NAME).await
+}
+
 pub async fn send_base_event(event: &BaseEvent, channel: &Channel) -> Result<()> {
-    trace!("serializing {event:?} into JSON");
-    let payload = to_string(event).map_err(Error::Serialization)?;
-    debug!("sending {payload:?} to broker");
-    channel
-        .basic_publish(
-            BASE_EVENT_EXCHANGE_NAME,
-            "",
-            BasicPublishOptions::default(),
-            payload.as_bytes(),
-            BasicProperties::default(),
-        )
-        .await
-        .map_err(Error::BrokerClient)?;
-    Ok(())
+    send(event, channel, BASE_EVENT_EXCHANGE_NAME).await
 }
 
 // Functions - Utils
@@ -319,9 +322,17 @@ async fn create_consumer(
 }
 
 #[inline]
-async fn declare_exchange(conn: &Connection, exchange: &str) -> StdResult<Channel, LapinError> {
+async fn declare_exchange(
+    conn: &Connection,
+    exchange: &'static str,
+) -> StdResult<Channel, BrokerInitializationError> {
     trace!("creating broker channel");
-    let channel = conn.create_channel().await?;
+    let channel = conn.create_channel().await.map_err(|err| {
+        BrokerInitializationError::ExchangeDeclaration {
+            err,
+            name: exchange,
+        }
+    })?;
     debug!("declaring broker exchange `{exchange}`");
     channel
         .exchange_declare(
@@ -330,7 +341,11 @@ async fn declare_exchange(conn: &Connection, exchange: &str) -> StdResult<Channe
             ExchangeDeclareOptions::default(),
             FieldTable::default(),
         )
-        .await?;
+        .await
+        .map_err(|err| BrokerInitializationError::ExchangeDeclaration {
+            err,
+            name: exchange,
+        })?;
     Ok(channel)
 }
 
@@ -361,6 +376,24 @@ async fn handle_delivery<
             send_nack(true, delivery).await;
         }
     }
+}
+
+#[inline]
+async fn send<T: Debug + Serialize>(payload: &T, channel: &Channel, exchange: &str) -> Result<()> {
+    trace!("serializing {payload:?} into JSON");
+    let payload = to_string(payload).map_err(Error::Serialization)?;
+    debug!("sending {payload:?} to broker");
+    channel
+        .basic_publish(
+            exchange,
+            "",
+            BasicPublishOptions::default(),
+            payload.as_bytes(),
+            BasicProperties::default(),
+        )
+        .await
+        .map_err(Error::BrokerClient)?;
+    Ok(())
 }
 
 #[inline]
