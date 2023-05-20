@@ -1,6 +1,6 @@
 use autoplaylist_core::{
     db::Page,
-    domain::{Base, BaseKind, Grouping, Platform, Query},
+    domain::{Base, BaseKind, Grouping, Platform, Query, Sync, SyncState},
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -54,6 +54,7 @@ pub struct BaseResponse {
     pub id: Uuid,
     pub kind: BaseKind,
     pub platform: Platform,
+    pub sync: SyncResponse,
 }
 
 #[derive(Serialize)]
@@ -91,6 +92,15 @@ pub struct JwtResponse {
     pub jwt: String,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncResponse {
+    pub last_err_msg: Option<String>,
+    pub last_start_date: Option<DateTime<Utc>>,
+    pub last_success_date: Option<DateTime<Utc>>,
+    pub state: Option<SyncState>,
+}
+
 // Impl - BaseResponse
 
 impl From<Base> for BaseResponse {
@@ -100,6 +110,7 @@ impl From<Base> for BaseResponse {
             id: base.id,
             kind: base.kind,
             platform: base.platform,
+            sync: base.sync.into(),
         }
     }
 }
@@ -136,6 +147,19 @@ impl From<Query> for QueryResponse {
             grouping: query.grouping,
             id: query.id,
             name_prefix: query.name_prefix,
+        }
+    }
+}
+
+// Impl - SyncResponse
+
+impl From<Sync> for SyncResponse {
+    fn from(sync: Sync) -> Self {
+        Self {
+            last_err_msg: sync.last_err_msg,
+            last_start_date: sync.last_start_date,
+            last_success_date: sync.last_success_date,
+            state: sync.state,
         }
     }
 }
