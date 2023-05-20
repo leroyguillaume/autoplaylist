@@ -3,6 +3,7 @@ export interface Base {
   id: string;
   kind: BaseKind;
   platform: Platform;
+  sync: Sync;
 }
 
 export interface BaseRequest {
@@ -44,4 +45,18 @@ export interface QueryRequest {
 export enum Role {
   Admin = "admin",
   User = "user",
+}
+
+export interface Sync {
+  lastErrMsg: string | null;
+  lastStartDate: string | null;
+  lastSuccessDate: string | null;
+  state: SyncState | null;
+}
+
+export enum SyncState {
+  Aborted = "aborted",
+  Failed = "failed",
+  Running = "running",
+  Succeeded = "succeeded",
 }
