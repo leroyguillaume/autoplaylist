@@ -57,7 +57,7 @@ export function pageNumberFromQuery(
 ): number {
   let param = params.get(key);
   if (param == null) {
-    param = "1";
+    return 1;
   }
   try {
     return parseInt(param);

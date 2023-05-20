@@ -2,30 +2,28 @@ import { faSpinner, faTrash } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useContext, useEffect, useState } from "react";
 import { Button } from "react-bootstrap";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import Table from "./Table";
 import { HttpError, doDelete, doGet } from "./api";
-import { Context, Error, Info, pageNumberFromQuery } from "./ctx";
+import { Context, Error, Info } from "./ctx";
 import { Page, Query } from "./domain";
 
 const LIMIT = 10;
 
 interface Props {
-  paramKey: string;
+  initialPageNb: number;
+  pageNbChanged: (nb: number) => void;
 }
 
 export default function QueryTable(props: Props) {
   const ctx = useContext(Context);
 
   const navigate = useNavigate();
-  const [params, setParams] = useSearchParams();
-
-  const initialPageNb = pageNumberFromQuery(props.paramKey, params);
 
   const [fetching, setFetching] = useState(false);
   const [inDeletion, setInDeletion] = useState<string[]>([]);
   const [page, setPage] = useState<Page<Query> | null>(null);
-  const [pageNb, setPageNb] = useState(initialPageNb);
+  const [pageNb, setPageNb] = useState(props.initialPageNb);
 
   const thead = (
     <thead>
@@ -105,10 +103,7 @@ export default function QueryTable(props: Props) {
         } else {
           setPage(page);
           setPageNb(nb);
-          setParams({
-            ...params,
-            queryPage: "1",
-          });
+          props.pageNbChanged(nb);
         }
       })
       .catch((err) => {

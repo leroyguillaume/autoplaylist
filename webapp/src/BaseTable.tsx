@@ -1,27 +1,25 @@
 import { useContext, useEffect, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import Table from "./Table";
 import { HttpError, doGet } from "./api";
-import { Context, Error, pageNumberFromQuery } from "./ctx";
+import { Context, Error } from "./ctx";
 import { Base, Page, SyncState } from "./domain";
 
 const LIMIT = 5;
 
 interface Props {
-  paramKey: string;
+  initialPageNb: number;
+  pageNbChanged: (nb: number) => void;
 }
 
 export default function QueryTable(props: Props) {
   const ctx = useContext(Context);
 
   const navigate = useNavigate();
-  const [params, setParams] = useSearchParams();
-
-  const initialPageNb = pageNumberFromQuery(props.paramKey, params);
 
   const [fetching, setFetching] = useState(false);
   const [page, setPage] = useState<Page<Base> | null>(null);
-  const [pageNb, setPageNb] = useState(initialPageNb);
+  const [pageNb, setPageNb] = useState(props.initialPageNb);
 
   const thead = (
     <thead>
@@ -72,11 +70,7 @@ export default function QueryTable(props: Props) {
         } else {
           setPage(page);
           setPageNb(nb);
-          const params = {};
-          setParams({
-            ...params,
-            basePage: "1",
-          });
+          props.pageNbChanged(nb);
         }
       })
       .catch((err) => {

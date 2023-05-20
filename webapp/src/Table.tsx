@@ -2,7 +2,6 @@ import { faSpinner } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { ReactNode, useContext } from "react";
 import { Pagination, Table as ReactTable } from "react-bootstrap";
-import { useNavigate } from "react-router-dom";
 import { Context } from "./ctx";
 import { Page } from "./domain";
 
@@ -18,8 +17,6 @@ interface Props<T> {
 
 export default function Table<T>(props: Props<T>) {
   const ctx = useContext(Context);
-
-  const navigate = useNavigate();
 
   if (props.page === null || props.fetching) {
     return (
