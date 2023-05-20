@@ -2,7 +2,6 @@ import { faGithub } from "@fortawesome/free-brands-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useState } from "react";
 import { RouterProvider, createBrowserRouter } from "react-router-dom";
-import "./App.scss";
 import ErrorPage from "./Error";
 import Home from "./Home";
 import LogIn from "./LogIn";

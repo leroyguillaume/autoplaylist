@@ -3,7 +3,6 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { Button, Container, Nav, Navbar } from "react-bootstrap";
 import { Link, useNavigate } from "react-router-dom";
 import Alert from "./Alert";
-import "./Header.scss";
 import { JWT_LOCAL_STORAGE_KEY } from "./api";
 import logo from "./logo.webp";
 

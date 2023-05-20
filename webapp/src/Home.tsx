@@ -38,7 +38,7 @@ export default function Home() {
       <Header />
       <Container>
         <Row>
-          <div className="d-flex title">
+          <div className="d-flex">
             <h3 className="col-8">My queries</h3>
             <div className="col-4 text-end">
               <Link className="btn btn-primary" to="/query">
@@ -49,15 +49,31 @@ export default function Home() {
           </div>
         </Row>
         <Row>
+          <p>
+            <em>
+              A query allows you to create one or multiple playlists based on
+              certain criterias.
+            </em>
+          </p>
+        </Row>
+        <Row>
           <QueryTable
             initialPageNb={initialQueryPageNb}
             pageNbChanged={updateQueryPageParam}
           />
         </Row>
         <Row>
-          <div className="d-flex title">
+          <div className="d-flex">
             <h3>Synchronized bases</h3>
           </div>
+        </Row>
+        <Row>
+          <p>
+            <em>
+              A base can be your liked songs or a playlist on which you want as
+              base of a query.
+            </em>
+          </p>
         </Row>
         <Row>
           <BaseTable

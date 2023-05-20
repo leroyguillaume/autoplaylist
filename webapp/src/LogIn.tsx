@@ -5,7 +5,6 @@ import { useContext, useEffect, useState } from "react";
 import { Container, Row } from "react-bootstrap";
 import { useNavigate } from "react-router-dom";
 import Alert from "./Alert";
-import "./LogIn.scss";
 import { Context } from "./ctx";
 import logo from "./logo.webp";
 
@@ -40,12 +39,12 @@ export default function LogIn() {
   return (
     <>
       <Alert></Alert>
-      <Container className="text-center v-offset">
+      <Container className="text-center">
         <Row>
-          <div className="logo">
+          <div className="login-logo">
             <img src={logo} />
           </div>
-          <h1 className="title">AutoPlaylist</h1>
+          <h1 className="login-brand">AutoPlaylist</h1>
           <div>
             <a
               className="btn btn-primary"
