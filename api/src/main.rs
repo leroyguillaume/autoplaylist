@@ -17,6 +17,7 @@ use self::{
     cfg::Config,
     handlers::{
         auth::{auth_with_spotify, spotify_redirect},
+        base::list_bases,
         query::{create_query, delete_query, list_queries},
     },
 };
@@ -82,6 +83,7 @@ async fn run() -> Result<()> {
             .service(create_query)
             .service(delete_query)
             .service(health)
+            .service(list_bases)
             .service(list_queries)
             .service(spotify_redirect)
     })

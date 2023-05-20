@@ -239,4 +239,5 @@ fn generate_jwt_key(cfg: &JwtConfig) -> Result<Hmac<Sha512>> {
 // Mods
 
 pub mod auth;
+pub mod base;
 pub mod query;

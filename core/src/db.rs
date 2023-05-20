@@ -317,6 +317,23 @@ pub async fn insert_user(user: &User, client: &Client) -> Result<()> {
     Ok(())
 }
 
+pub async fn list_bases(
+    user_id: &Uuid,
+    limit: i64,
+    offset: i64,
+    client: &Client,
+) -> Result<Page<Base>> {
+    debug!("listing bases of user {user_id} from offset {offset} limiting to {limit} entries");
+    let total: i64 = client
+        .query_one(sql!("list-bases-total"), &[user_id])
+        .await?
+        .get(0);
+    let rows = client
+        .query(sql!("list-bases-content"), &[user_id, &limit, &offset])
+        .await?;
+    Page::try_from_rows(rows, total)
+}
+
 pub async fn list_queries(
     user_id: &Uuid,
     limit: i64,

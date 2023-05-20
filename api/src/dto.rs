@@ -117,10 +117,10 @@ impl Default for PageQuery {
 
 // Impl - PageResponse
 
-impl From<Page<Query>> for PageResponse<QueryResponse> {
-    fn from(page: Page<Query>) -> Self {
+impl<F, T: From<F>> From<Page<F>> for PageResponse<T> {
+    fn from(page: Page<F>) -> Self {
         Self {
-            content: page.content.into_iter().map(QueryResponse::from).collect(),
+            content: page.content.into_iter().map(T::from).collect(),
             total: page.total,
         }
     }
