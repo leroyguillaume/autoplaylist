@@ -1,7 +1,10 @@
 use std::{error::Error as StdError, result::Result as StdResult};
 
 use autoplaylist_core::{
-    broker::{open_channels, start_consumer, BaseEvent, ConsumerError, ConsumerSignal},
+    broker::{
+        open_channels, start_base_command_consumer, start_base_event_consumer, BaseEvent,
+        ConsumerError, ConsumerSignal,
+    },
     db::init as init_database,
     init_tracing,
 };
@@ -43,6 +46,30 @@ fn create_signal_listener(kind: SignalKind) -> Result<Signal> {
 }
 
 #[inline]
+async fn handle_base_command(
+    _event: BaseEvent,
+    mut sig_rcv: Receiver<ConsumerSignal>,
+) -> StdResult<(), ConsumerError> {
+    loop {
+        match sig_rcv.changed().now_or_never() {
+            Some(Ok(())) => {
+                let sig = *sig_rcv.borrow();
+                trace!("base command worker received {sig:?}");
+                if let ConsumerSignal::Stop = sig {
+                    break;
+                }
+            }
+            Some(Err(err)) => {
+                error!("base command worker failed to listen consumer signal: {err}");
+            }
+            None => (),
+        }
+    }
+    debug!("base command worker stopped");
+    Ok(())
+}
+
+#[inline]
 async fn handle_base_event(
     _event: BaseEvent,
     mut sig_rcv: Receiver<ConsumerSignal>,
@@ -74,16 +101,33 @@ async fn run() -> Result<()> {
     let _db_pool = init_database(cfg.db).await.map_err(Box::new)?;
     let channels = open_channels(cfg.broker).await.map_err(Box::new)?;
     let (csm_sig_sdr, csm_sig_rcv) = watch_channel(ConsumerSignal::Start);
-    let mut handles = vec![];
-    let base_event_csm_handle =
-        start_consumer("base-sync", &channels, csm_sig_rcv.clone(), move |event| {
+    let base_cmd_csm_handle = start_base_command_consumer(
+        "base-sync_base-cmd",
+        &channels.base_cmd,
+        csm_sig_rcv.clone(),
+        {
+            let csm_sig_rcv = csm_sig_rcv.clone();
+            move |event| {
+                let csm_sig_rcv = csm_sig_rcv.clone();
+                async move { handle_base_command(event, csm_sig_rcv).await }
+            }
+        },
+    )
+    .await
+    .map_err(Box::new)?;
+    let base_event_csm_handle = start_base_event_consumer(
+        "base-sync_base-event",
+        &channels.base_event,
+        csm_sig_rcv.clone(),
+        move |event| {
             let csm_sig_rcv = csm_sig_rcv.clone();
             async move { handle_base_event(event, csm_sig_rcv).await }
-        })
-        .await
-        .map_err(Box::new)?;
-    handles.push(base_event_csm_handle);
+        },
+    )
+    .await
+    .map_err(Box::new)?;
     info!("synchronizer is started");
+    let handles = vec![base_cmd_csm_handle, base_event_csm_handle];
     select! {
         _ = sig_int.recv() => shutdown(SignalKind::interrupt(), csm_sig_sdr, handles).await,
         _ = sig_term.recv() => shutdown(SignalKind::terminate(), csm_sig_sdr, handles).await,

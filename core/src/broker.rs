@@ -243,24 +243,28 @@ pub async fn open_channels(cfg: Config) -> StdResult<Channels, BrokerInitializat
 
 // Functions - Consumers
 
-pub async fn start_consumer<
-    F: Fn(T) -> R + Send + Sync + 'static,
+pub async fn start_base_command_consumer<
+    F: Fn(BaseEvent) -> R + Send + Sync + 'static,
     R: Future<Output = StdResult<(), ConsumerError>> + Send,
-    T: DeserializeOwned + Send,
 >(
     queue: &'static str,
-    channels: &Channels,
+    channel: &Channel,
     sig_rcv: Receiver<ConsumerSignal>,
     handle: F,
 ) -> StdResult<JoinHandle<()>, ConsumerInitializationError> {
-    create_and_start_consumer(
-        queue,
-        &channels.base_event,
-        BASE_EVENT_EXCHANGE_NAME,
-        sig_rcv,
-        handle,
-    )
-    .await
+    start_consumer(queue, channel, BASE_CMD_EXCHANGE_NAME, sig_rcv, handle).await
+}
+
+pub async fn start_base_event_consumer<
+    F: Fn(BaseEvent) -> R + Send + Sync + 'static,
+    R: Future<Output = StdResult<(), ConsumerError>> + Send,
+>(
+    queue: &'static str,
+    channel: &Channel,
+    sig_rcv: Receiver<ConsumerSignal>,
+    handle: F,
+) -> StdResult<JoinHandle<()>, ConsumerInitializationError> {
+    start_consumer(queue, channel, BASE_EVENT_EXCHANGE_NAME, sig_rcv, handle).await
 }
 
 // Functions - Producers
@@ -413,7 +417,7 @@ async fn send_nack(requeue: bool, delivery: Delivery) {
 }
 
 #[inline]
-async fn create_and_start_consumer<
+async fn start_consumer<
     F: Fn(T) -> R + Send + Sync + 'static,
     R: Future<Output = StdResult<(), ConsumerError>> + Send,
     T: DeserializeOwned + Send,
