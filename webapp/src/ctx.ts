@@ -50,3 +50,18 @@ export function decodeJwt(jwt: string | null): AuthenticatedUser | null {
     role: jwt_decoded.role,
   };
 }
+
+export function pageNumberFromQuery(
+  key: string,
+  params: URLSearchParams
+): number {
+  let param = params.get(key);
+  if (param == null) {
+    param = "1";
+  }
+  try {
+    return parseInt(param);
+  } catch {
+    return 1;
+  }
+}
