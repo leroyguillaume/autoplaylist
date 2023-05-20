@@ -13,7 +13,7 @@ use autoplaylist_core::{
     domain::{Base, Query, Sync},
 };
 use chrono::Utc;
-use tracing::{debug, info};
+use tracing::info;
 use uuid::Uuid;
 
 use crate::{
@@ -51,7 +51,6 @@ async fn create_query(
             )
             .await
             .map_err(Error::DatabaseClient)?;
-            debug!("base fetched: {base:?}");
             let (base, base_created) = match base {
                 Some(base) => {
                     let query = query(
@@ -62,7 +61,6 @@ async fn create_query(
                     )
                     .await
                     .map_err(Error::DatabaseClient)?;
-                    debug!("query fetched: {query:?}");
                     if let Some(query) = query {
                         return Err(Error::QueryAlreadyExists(query.id));
                     }
@@ -131,7 +129,6 @@ async fn delete_query(
     let query = query_by_id(&path, &db_client)
         .await
         .map_err(Error::DatabaseClient)?;
-    debug!("query fetched: {query:?}");
     let query = match query {
         Some(query) => query,
         None => {
@@ -164,7 +161,6 @@ async fn list_queries(
     let page = list_queries_from_database(&auth_user.id, limit.into(), offset.into(), &db_client)
         .await
         .map_err(Error::DatabaseClient)?;
-    debug!("page fetched: {page:?}");
     let resp: PageResponse<QueryResponse> = page.into();
     Ok(HttpResponse::Ok().json(resp))
 }

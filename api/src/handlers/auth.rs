@@ -43,7 +43,7 @@ async fn auth_with_spotify(
         .map_err(Error::SpotifyClient)?;
     debug!("requesting Spotify user");
     let user = spotify.current_user().await.map_err(Error::SpotifyClient)?;
-    debug!("user: {user:?}");
+    debug!("Spotify user fetched: {user:?}");
     let token = spotify
         .token
         .lock()
@@ -60,7 +60,6 @@ async fn auth_with_spotify(
             let user = user_by_spotify_email(&email, tx.client())
                 .await
                 .map_err(Error::DatabaseClient)?;
-            debug!("user fetched: {user:?}");
             let (user, user_created) = match user {
                 Some(user) => (user, false),
                 None => {

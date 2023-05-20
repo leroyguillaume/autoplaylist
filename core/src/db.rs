@@ -258,7 +258,11 @@ pub async fn base(
     let res = client
         .query_opt(sql!("base"), &[user_id, platform, &kind, &platform_id])
         .await;
-    convert_opt_result(res)
+    let res = convert_opt_result(res);
+    if let Ok(base) = &res {
+        debug!("base fetched: {base:?}");
+    }
+    res
 }
 
 pub async fn delete_query(id: &Uuid, client: &Client) -> Result<()> {
@@ -331,7 +335,11 @@ pub async fn list_bases(
     let rows = client
         .query(sql!("list-bases-content"), &[user_id, &limit, &offset])
         .await?;
-    Page::try_from_rows(rows, total)
+    let res = Page::try_from_rows(rows, total);
+    if let Ok(page) = &res {
+        debug!("page fetched: {page:?}");
+    }
+    res
 }
 
 pub async fn list_queries(
@@ -348,7 +356,11 @@ pub async fn list_queries(
     let rows = client
         .query(sql!("list-queries-content"), &[user_id, &limit, &offset])
         .await?;
-    Page::try_from_rows(rows, total)
+    let res = Page::try_from_rows(rows, total);
+    if let Ok(page) = &res {
+        debug!("page fetched: {page:?}");
+    }
+    res
 }
 
 pub async fn query(
@@ -361,13 +373,21 @@ pub async fn query(
     let res = client
         .query_opt(sql!("query"), &[base_id, &name_prefix, &grouping])
         .await;
-    convert_opt_result(res)
+    let res = convert_opt_result(res);
+    if let Ok(query) = &res {
+        debug!("query fetched: {query:?}");
+    }
+    res
 }
 
 pub async fn query_by_id(id: &Uuid, client: &Client) -> Result<Option<Query>> {
     debug!("fetching query with ID {id}");
     let res = client.query_opt(sql!("query-by-id"), &[id]).await;
-    convert_opt_result(res)
+    let res = convert_opt_result(res);
+    if let Ok(query) = &res {
+        debug!("query fetched: {query:?}");
+    }
+    res
 }
 
 pub async fn upsert_spotify_auth(auth: &SpotifyAuth, client: &Client) -> Result<()> {
@@ -389,7 +409,11 @@ pub async fn upsert_spotify_auth(auth: &SpotifyAuth, client: &Client) -> Result<
 pub async fn user_by_id(id: &Uuid, client: &Client) -> Result<Option<User>> {
     debug!("fetching user with ID {id}");
     let res = client.query_opt(sql!("user-by-id"), &[id]).await;
-    convert_opt_result(res)
+    let res = convert_opt_result(res);
+    if let Ok(user) = &res {
+        debug!("user fetched: {user:?}");
+    }
+    res
 }
 
 pub async fn user_by_spotify_email(email: &str, client: &Client) -> Result<Option<User>> {
@@ -397,7 +421,11 @@ pub async fn user_by_spotify_email(email: &str, client: &Client) -> Result<Optio
     let res = client
         .query_opt(sql!("user-by-spotify-email"), &[&email])
         .await;
-    convert_opt_result(res)
+    let res = convert_opt_result(res);
+    if let Ok(user) = &res {
+        debug!("user fetched: {user:?}");
+    }
+    res
 }
 
 // Functions - Utils

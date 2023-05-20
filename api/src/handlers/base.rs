@@ -4,7 +4,6 @@ use actix_web::{
     HttpRequest, HttpResponse, Responder,
 };
 use autoplaylist_core::db::{client_from_pool, list_bases as list_bases_from_database};
-use tracing::debug;
 
 use crate::{
     dto::{BaseResponse, PageQuery, PageResponse, DEFAULT_PAGE_LIMIT, DEFAULT_PAGE_OFFSET},
@@ -27,7 +26,6 @@ async fn list_bases(
     let page = list_bases_from_database(&auth_user.id, limit.into(), offset.into(), &db_client)
         .await
         .map_err(Error::DatabaseClient)?;
-    debug!("page fetched: {page:?}");
     let resp: PageResponse<BaseResponse> = page.into();
     Ok(HttpResponse::Ok().json(resp))
 }
