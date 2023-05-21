@@ -15,10 +15,10 @@ export function doDelete(path: string, ctx: ContextData): Promise<void> {
 
 export function doGet<T>(
   path: string,
-  query: any,
+  params: any,
   ctx: ContextData
 ): Promise<T> {
-  return callApi("GET", path, query, null, ctx);
+  return callApi("GET", path, params, null, ctx);
 }
 
 export function doPost<T>(
@@ -52,7 +52,7 @@ export function handleCommonErrors(
 function callApi<T>(
   method: string,
   path: string,
-  query: any,
+  params: any,
   body: any | null,
   ctx: ContextData
 ): Promise<T> {
@@ -63,8 +63,8 @@ function callApi<T>(
   if (jwt !== null) {
     headers["Authorization"] = `Bearer ${jwt}`;
   }
-  const params = new URLSearchParams(query);
-  return fetch(`${process.env.REACT_APP_API_URL}/${path}?${params}`, {
+  const queryParams = new URLSearchParams(params);
+  return fetch(`${process.env.REACT_APP_API_URL}/${path}?${queryParams}`, {
     method,
     headers,
     body: body !== null ? JSON.stringify(body) : null,

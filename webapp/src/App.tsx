@@ -5,7 +5,7 @@ import { RouterProvider, createBrowserRouter } from "react-router-dom";
 import ErrorPage from "./Error";
 import Home from "./Home";
 import LogIn from "./LogIn";
-import QueryForm from "./QueryForm";
+import PlaylistForm from "./PlaylistForm";
 import SpotifyAuth from "./SpotifyAuth";
 import {
   AuthenticatedUser,
@@ -49,8 +49,8 @@ export default function App() {
       errorElement: <ErrorPage />,
     },
     {
-      path: "/query",
-      element: <QueryForm />,
+      path: "/playlist",
+      element: <PlaylistForm />,
       errorElement: <ErrorPage />,
     },
   ]);

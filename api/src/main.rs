@@ -20,7 +20,7 @@ use self::{
     handlers::{
         auth::{auth_with_spotify, spotify_redirect},
         base::list_bases,
-        query::{create_query, delete_query, list_queries},
+        playlist::{create_playlist, delete_playlist, list_playlists},
     },
 };
 
@@ -82,11 +82,11 @@ async fn run() -> Result<()> {
             .wrap(TracingLogger::default())
             .wrap(cors)
             .service(auth_with_spotify)
-            .service(create_query)
-            .service(delete_query)
+            .service(create_playlist)
+            .service(delete_playlist)
             .service(health)
             .service(list_bases)
-            .service(list_queries)
+            .service(list_playlists)
             .service(spotify_redirect)
             .service(start_base_sync)
     })

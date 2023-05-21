@@ -5,31 +5,31 @@ import { Container, Row } from "react-bootstrap";
 import { Link, useSearchParams } from "react-router-dom";
 import BaseTable from "./BaseTable";
 import Header from "./Header";
-import QueryTable from "./QueryTable";
-import { pageNumberFromQuery } from "./ctx";
+import PlaylistTable from "./PlaylistTable";
+import { pageNumberFromPlaylist } from "./ctx";
 
 export default function Home() {
   const [params, setParams] = useSearchParams();
 
-  const initialQueryPageNb = pageNumberFromQuery("queryPage", params);
-  const initialBasePageNb = pageNumberFromQuery("basePage", params);
+  const initialPlaylistPageNb = pageNumberFromPlaylist("playlistPage", params);
+  const initialBasePageNb = pageNumberFromPlaylist("basePage", params);
 
-  const [queryPageNb, setQueryPageNb] = useState(initialQueryPageNb);
+  const [playlistPageNb, setPlaylistPageNb] = useState(initialPlaylistPageNb);
   const [basePageNb, setBasePageNb] = useState(initialBasePageNb);
 
   const updateBasePageParam = (nb: number) => {
     setBasePageNb(nb);
     setParams({
       basePage: nb.toString(),
-      queryPage: queryPageNb.toString(),
+      playlistPage: playlistPageNb.toString(),
     });
   };
 
-  const updateQueryPageParam = (nb: number) => {
-    setQueryPageNb(nb);
+  const updatePlaylistPageParam = (nb: number) => {
+    setPlaylistPageNb(nb);
     setParams({
       basePage: basePageNb.toString(),
-      queryPage: nb.toString(),
+      playlistPage: nb.toString(),
     });
   };
 
@@ -39,27 +39,24 @@ export default function Home() {
       <Container>
         <Row>
           <div className="d-flex">
-            <h3 className="col-8">My queries</h3>
+            <h3 className="col-8">My playlists</h3>
             <div className="col-4 text-end">
-              <Link className="btn btn-primary" to="/query">
+              <Link className="btn btn-primary" to="/playlist">
                 <FontAwesomeIcon className="inline" icon={faPlus} />
-                Add query
+                Add playlist
               </Link>
             </div>
           </div>
         </Row>
         <Row>
           <p>
-            <em>
-              A query allows you to create one or multiple playlists based on
-              certain criterias.
-            </em>
+            <em>All your playlists managed by AutoPlaylist.</em>
           </p>
         </Row>
         <Row>
-          <QueryTable
-            initialPageNb={initialQueryPageNb}
-            pageNbChanged={updateQueryPageParam}
+          <PlaylistTable
+            initialPageNb={initialPlaylistPageNb}
+            pageNbChanged={updatePlaylistPageParam}
           />
         </Row>
         <Row>
@@ -71,7 +68,7 @@ export default function Home() {
           <p>
             <em>
               A base can be your liked songs or a playlist on which you want as
-              base of a query.
+              base of a playlist.
             </em>
           </p>
         </Row>

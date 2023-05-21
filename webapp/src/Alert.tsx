@@ -12,10 +12,10 @@ export default function Alert() {
       switch (info) {
         case Info.BaseSyncWillStart:
           return "Synchronization will start! ⚙";
-        case Info.QueryCreated:
-          return "Query successfully created! 🥳";
-        case Info.QueryDeleted:
-          return "Query successfully deleted! 🔥";
+        case Info.PlaylistCreated:
+          return "Playlist successfully created! 🥳";
+        case Info.PlaylistDeleted:
+          return "Playlist successfully deleted! 🔥";
         default:
           return "It seems you find a bug! 😤";
       }
@@ -27,8 +27,8 @@ export default function Alert() {
     "danger",
     (err) => {
       switch (err) {
-        case Error.QueryAlreadyExists:
-          return "A similar query already exists! 🫣";
+        case Error.PlaylistAlreadyExists:
+          return "A similar playlist already exists! 🫣";
         case Error.Unauthorized:
           return "You're not authenticated, hacker! 😏";
         case Error.Unexpected:

@@ -28,10 +28,7 @@ use sha2::Sha512;
 use tracing::{debug, trace};
 use uuid::Uuid;
 
-use crate::{
-    cfg::JwtConfig,
-    dto::{ConflictResponse, PreconditionFailedResponse},
-};
+use crate::{cfg::JwtConfig, dto::ConflictResponse};
 
 // Consts
 
@@ -50,7 +47,6 @@ enum Error {
     BrokerClient(BrokerError),
     DatabaseClient(TokioPostgresError),
     DatabasePool(DeadpoolPostgresPoolError),
-    EmptyQuery,
     ExpiredJwt,
     InvalidAuthorizationHeader(String),
     InvalidJwtSubject(Option<String>),
@@ -60,9 +56,9 @@ enum Error {
     MissingAuthorizationHeader,
     NoSpotifyToken,
     NoSpotifyUserEmail,
-    QueryAlreadyExists(Uuid),
-    QueryNotFound(Uuid),
-    QueryNotOwnedByAuthenticatedUser(Uuid),
+    PlaylistAlreadyExists(Uuid),
+    PlaylistNotFound(Uuid),
+    PlaylistNotOwnedByAuthenticatedUser(Uuid),
     SpotifyClient(ClientError),
     SpotifyClientTokenLock,
     TimestampConversion(TryFromIntError),
@@ -78,7 +74,6 @@ impl Display for Error {
             Self::BrokerClient(err) => write!(f, "{err}"),
             Self::DatabaseClient(err) => write!(f, "database error: {err}"),
             Self::DatabasePool(err) => write!(f, "database connection pool error: {err}"),
-            Self::EmptyQuery => write!(f, "query should contain at least one filter or grouping"),
             Self::ExpiredJwt => write!(f, "JWT is expired"),
             Self::InvalidAuthorizationHeader(val) => {
                 write!(f, "invalid {} header value: `{val}`", header::AUTHORIZATION)
@@ -99,10 +94,12 @@ impl Display for Error {
             ),
             Self::NoSpotifyToken => write!(f, "Spotify client doesn't have token"),
             Self::NoSpotifyUserEmail => write!(f, "Spotify user doesn't have email"),
-            Self::QueryAlreadyExists(id) => write!(f, "similar query already exists with ID {id}"),
-            Self::QueryNotFound(id) => write!(f, "query {id} doesn't exist"),
-            Self::QueryNotOwnedByAuthenticatedUser(id) => {
-                write!(f, "query {id} is not owned by authenticated user")
+            Self::PlaylistAlreadyExists(id) => {
+                write!(f, "similar playlist already exists with ID {id}")
+            }
+            Self::PlaylistNotFound(id) => write!(f, "playlist {id} doesn't exist"),
+            Self::PlaylistNotOwnedByAuthenticatedUser(id) => {
+                write!(f, "playlist {id} is not owned by authenticated user")
             }
             Self::SpotifyClient(err) => write!(f, "Spotify error: {err}"),
             Self::SpotifyClientTokenLock => {
@@ -126,10 +123,7 @@ impl ResponseError for Error {
     fn error_response(&self) -> HttpResponse<BoxBody> {
         let status = self.status_code();
         match self {
-            Self::EmptyQuery => HttpResponseBuilder::new(status).json(PreconditionFailedResponse {
-                detail: self.to_string(),
-            }),
-            Self::QueryAlreadyExists(id) => {
+            Self::PlaylistAlreadyExists(id) => {
                 HttpResponseBuilder::new(status).json(ConflictResponse { id: *id })
             }
             _ => HttpResponse::new(status),
@@ -140,15 +134,14 @@ impl ResponseError for Error {
         match self {
             Self::AuthenticatedUserIsNotAdmin(_) => StatusCode::FORBIDDEN,
             Self::AuthenticatedUserNotFound(_) => StatusCode::UNAUTHORIZED,
-            Self::EmptyQuery => StatusCode::PRECONDITION_FAILED,
             Self::ExpiredJwt => StatusCode::UNAUTHORIZED,
             Self::InvalidAuthorizationHeader(_) => StatusCode::UNAUTHORIZED,
             Self::InvalidJwtSubject(_) => StatusCode::UNAUTHORIZED,
             Self::JwtSignatureVerification(_) => StatusCode::UNAUTHORIZED,
             Self::MissingAuthorizationHeader => StatusCode::UNAUTHORIZED,
-            Self::QueryAlreadyExists(_) => StatusCode::CONFLICT,
-            Self::QueryNotFound(_) => StatusCode::NOT_FOUND,
-            Self::QueryNotOwnedByAuthenticatedUser(_) => StatusCode::FORBIDDEN,
+            Self::PlaylistAlreadyExists(_) => StatusCode::CONFLICT,
+            Self::PlaylistNotFound(_) => StatusCode::NOT_FOUND,
+            Self::PlaylistNotOwnedByAuthenticatedUser(_) => StatusCode::FORBIDDEN,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -162,7 +155,6 @@ impl StdError for Error {
             Self::BrokerClient(err) => Some(err),
             Self::DatabaseClient(err) => Some(err),
             Self::DatabasePool(err) => Some(err),
-            Self::EmptyQuery => None,
             Self::ExpiredJwt => None,
             Self::InvalidAuthorizationHeader(_) => None,
             Self::InvalidJwtSubject(_) => None,
@@ -172,9 +164,9 @@ impl StdError for Error {
             Self::MissingAuthorizationHeader => None,
             Self::NoSpotifyToken => None,
             Self::NoSpotifyUserEmail => None,
-            Self::QueryAlreadyExists(_) => None,
-            Self::QueryNotFound(_) => None,
-            Self::QueryNotOwnedByAuthenticatedUser(_) => None,
+            Self::PlaylistAlreadyExists(_) => None,
+            Self::PlaylistNotFound(_) => None,
+            Self::PlaylistNotOwnedByAuthenticatedUser(_) => None,
             Self::SpotifyClient(err) => Some(err),
             Self::SpotifyClientTokenLock => None,
             Self::TimestampConversion(err) => Some(err),
@@ -244,4 +236,4 @@ fn generate_jwt_key(cfg: &JwtConfig) -> Result<Hmac<Sha512>> {
 
 pub mod auth;
 pub mod base;
-pub mod query;
+pub mod playlist;

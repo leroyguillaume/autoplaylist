@@ -9,15 +9,15 @@ export interface AuthenticatedUser {
 }
 
 export enum Error {
-  QueryAlreadyExists,
+  PlaylistAlreadyExists,
   Unauthorized,
   Unexpected,
 }
 
 export enum Info {
   BaseSyncWillStart,
-  QueryCreated,
-  QueryDeleted,
+  PlaylistCreated,
+  PlaylistDeleted,
 }
 
 export interface ContextData {
@@ -54,7 +54,7 @@ export function loadAuthenticatedUser(): AuthenticatedUser | null {
   };
 }
 
-export function pageNumberFromQuery(
+export function pageNumberFromPlaylist(
   key: string,
   params: URLSearchParams
 ): number {

@@ -18,7 +18,7 @@ use tracing::{debug, error, info, trace};
 use uuid::Uuid;
 
 use crate::{
-    domain::{Base, BaseKind, Grouping, Platform, Query, SpotifyAuth, Sync, User},
+    domain::{Base, BaseKind, Platform, Playlist, SpotifyAuth, Sync, User},
     env_var, env_var_opt, env_var_or_default, ConfigError,
 };
 
@@ -199,17 +199,16 @@ impl<T: TryFromRow> Page<T> {
     }
 }
 
-// Impl - Query
+// Impl - Playlist
 
-impl TryFromRow for Query {
+impl TryFromRow for Playlist {
     fn try_from_row(row: &Row) -> Result<Self> {
         Ok(Self {
             base: Base::try_from_row(row)?,
-            creation_date: row.try_get("query_creation_date")?,
-            grouping: row.try_get("query_grouping")?,
-            id: row.try_get("query_id")?,
-            name_prefix: row.try_get("query_name_prefix")?,
-            user_id: row.try_get("query_user_id")?,
+            creation_date: row.try_get("playlist_creation_date")?,
+            id: row.try_get("playlist_id")?,
+            name: row.try_get("playlist_name")?,
+            user_id: row.try_get("playlist_user_id")?,
         })
     }
 }
@@ -265,11 +264,9 @@ pub async fn base(
     res
 }
 
-pub async fn delete_query(id: &Uuid, client: &Client) -> Result<()> {
-    debug!("deleting query {id}");
-    client
-        .execute(include_str!("../db/queries/delete-query.sql"), &[id])
-        .await?;
+pub async fn delete_playlist(id: &Uuid, client: &Client) -> Result<()> {
+    debug!("deleting playlist {id}");
+    client.execute(sql!("delete-playlist"), &[id]).await?;
     Ok(())
 }
 
@@ -292,18 +289,17 @@ pub async fn insert_base(base: &Base, client: &Client) -> Result<()> {
     Ok(())
 }
 
-pub async fn insert_query(query: &Query, client: &Client) -> Result<()> {
-    debug!("inserting {query:?} into database");
+pub async fn insert_playlist(playlist: &Playlist, client: &Client) -> Result<()> {
+    debug!("inserting {playlist:?} into database");
     client
         .execute(
-            sql!("insert-query"),
+            sql!("insert-playlist"),
             &[
-                &query.id,
-                &query.creation_date,
-                &query.user_id,
-                &query.base.id,
-                &query.name_prefix,
-                &query.grouping,
+                &playlist.id,
+                &playlist.creation_date,
+                &playlist.user_id,
+                &playlist.base.id,
+                &playlist.name,
             ],
         )
         .await?;
@@ -342,19 +338,19 @@ pub async fn list_bases(
     res
 }
 
-pub async fn list_queries(
+pub async fn list_playlists(
     user_id: &Uuid,
     limit: i64,
     offset: i64,
     client: &Client,
-) -> Result<Page<Query>> {
-    debug!("listing queries of user {user_id} from offset {offset} limiting to {limit} entries");
+) -> Result<Page<Playlist>> {
+    debug!("listing playlists of user {user_id} from offset {offset} limiting to {limit} entries");
     let total: i64 = client
-        .query_one(sql!("list-queries-total"), &[user_id])
+        .query_one(sql!("list-playlists-total"), &[user_id])
         .await?
         .get(0);
     let rows = client
-        .query(sql!("list-queries-content"), &[user_id, &limit, &offset])
+        .query(sql!("list-playlists-content"), &[user_id, &limit, &offset])
         .await?;
     let res = Page::try_from_rows(rows, total);
     if let Ok(page) = &res {
@@ -363,29 +359,22 @@ pub async fn list_queries(
     res
 }
 
-pub async fn query(
-    base_id: &Uuid,
-    name_prefix: Option<&String>,
-    grouping: Option<&Grouping>,
-    client: &Client,
-) -> Result<Option<Query>> {
-    debug!("fetching query on base {base_id} with {name_prefix:?} {grouping:?}");
-    let res = client
-        .query_opt(sql!("query"), &[base_id, &name_prefix, &grouping])
-        .await;
+pub async fn playlist_by_id(id: &Uuid, client: &Client) -> Result<Option<Playlist>> {
+    debug!("fetching playlist with ID {id}");
+    let res = client.query_opt(sql!("playlist-by-id"), &[id]).await;
     let res = convert_opt_result(res);
-    if let Ok(query) = &res {
-        debug!("query fetched: {query:?}");
+    if let Ok(playlist) = &res {
+        debug!("playlist fetched: {playlist:?}");
     }
     res
 }
 
-pub async fn query_by_id(id: &Uuid, client: &Client) -> Result<Option<Query>> {
-    debug!("fetching query with ID {id}");
-    let res = client.query_opt(sql!("query-by-id"), &[id]).await;
+pub async fn playlist_by_name(name: &str, client: &Client) -> Result<Option<Playlist>> {
+    debug!("fetching playlist with name `{name}`");
+    let res = client.query_opt(sql!("playlist-by-name"), &[&name]).await;
     let res = convert_opt_result(res);
-    if let Ok(query) = &res {
-        debug!("query fetched: {query:?}");
+    if let Ok(playlist) = &res {
+        debug!("playlist fetched: {playlist:?}");
     }
     res
 }

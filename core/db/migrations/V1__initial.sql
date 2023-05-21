@@ -3,10 +3,6 @@ CREATE TYPE base_kind AS ENUM (
     'playlist'
 );
 
-CREATE TYPE grouping AS ENUM (
-    'decades'
-);
-
 CREATE TYPE platform AS ENUM (
     'spotify'
 );
@@ -50,12 +46,11 @@ CREATE TABLE base (
     UNIQUE NULLS NOT DISTINCT (user_id, platform, kind, platform_id)
 );
 
-CREATE TABLE query (
+CREATE TABLE playlist (
     id UUID NOT NULL PRIMARY KEY,
     creation_date TIMESTAMP WITH TIME ZONE NOT NULL,
     user_id UUID NOT NULL REFERENCES "user" ON DELETE CASCADE,
     base_id UUID NOT NULL REFERENCES base ON DELETE CASCADE,
-    name_prefix VARCHAR (50),
-    grouping "grouping",
-    UNIQUE NULLS NOT DISTINCT (user_id, base_id, name_prefix, grouping)
+    name VARCHAR (50) NOT NULL,
+    UNIQUE NULLS NOT DISTINCT (user_id, base_id, name)
 );

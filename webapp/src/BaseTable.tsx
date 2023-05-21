@@ -15,7 +15,7 @@ interface Props {
   pageNbChanged: (nb: number) => void;
 }
 
-export default function QueryTable(props: Props) {
+export default function PlaylistTable(props: Props) {
   const ctx = useContext(Context);
 
   const navigate = useNavigate();

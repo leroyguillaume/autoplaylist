@@ -1,16 +1,17 @@
 use actix_web::{
     body::BoxBody,
     delete, get, post,
-    web::{Data, Json, Path, Query as ActixQuery},
+    web::{Data, Json, Path, Query},
     HttpRequest, HttpResponse, Responder,
 };
 use autoplaylist_core::{
     broker::{send_base_event, BaseEvent, BaseEventKind},
     db::{
-        base, client_from_pool, delete_query as delete_query_from_database, in_transaction,
-        insert_base, insert_query, list_queries as list_queries_from_database, query, query_by_id,
+        base, client_from_pool, delete_playlist as delete_playlist_from_database, in_transaction,
+        insert_base, insert_playlist, list_playlists as list_playlists_from_database,
+        playlist_by_id, playlist_by_name,
     },
-    domain::{Base, Query, Sync},
+    domain::{Base, Playlist, Sync},
 };
 use chrono::Utc;
 use tracing::info;
@@ -18,7 +19,7 @@ use uuid::Uuid;
 
 use crate::{
     dto::{
-        CreateQueryRequest, PageQuery, PageResponse, QueryResponse, DEFAULT_PAGE_LIMIT,
+        CreatePlaylistRequest, PageQuery, PageResponse, PlaylistResponse, DEFAULT_PAGE_LIMIT,
         DEFAULT_PAGE_OFFSET,
     },
     handlers::{current_user, Error, Result},
@@ -27,21 +28,18 @@ use crate::{
 
 // Functions - Handlers
 
-#[post("/query")]
-async fn create_query(
+#[post("/playlist")]
+async fn create_playlist(
     req: HttpRequest,
-    payload: Json<CreateQueryRequest>,
+    payload: Json<CreatePlaylistRequest>,
     cmpts: Data<Components>,
 ) -> Result<impl Responder> {
     let mut db_client = client_from_pool(&cmpts.db_pool)
         .await
         .map_err(Error::DatabasePool)?;
     let auth_user = current_user(&req, &cmpts.jwt_cfg, &db_client).await?;
-    if payload.grouping.is_none() {
-        return Err(Error::EmptyQuery);
-    }
     let now = Utc::now();
-    let (query, base_created) = in_transaction(&mut db_client, move |tx| {
+    let (playlist, base_created) = in_transaction(&mut db_client, move |tx| {
         Box::pin(async move {
             let base = base(
                 &auth_user.id,
@@ -53,16 +51,11 @@ async fn create_query(
             .map_err(Error::DatabaseClient)?;
             let (base, base_created) = match base {
                 Some(base) => {
-                    let query = query(
-                        &base.id,
-                        payload.name_prefix.as_ref(),
-                        payload.grouping.as_ref(),
-                        tx.client(),
-                    )
-                    .await
-                    .map_err(Error::DatabaseClient)?;
-                    if let Some(query) = query {
-                        return Err(Error::QueryAlreadyExists(query.id));
+                    let playlist = playlist_by_name(&payload.name, tx.client())
+                        .await
+                        .map_err(Error::DatabaseClient)?;
+                    if let Some(playlist) = playlist {
+                        return Err(Error::PlaylistAlreadyExists(playlist.id));
                     }
                     (base, false)
                 }
@@ -86,38 +79,37 @@ async fn create_query(
                     (base, true)
                 }
             };
-            let query = Query {
+            let playlist = Playlist {
                 base,
                 creation_date: now,
-                grouping: payload.grouping,
                 id: Uuid::new_v4(),
-                name_prefix: payload.name_prefix.clone(),
+                name: payload.name.clone(),
                 user_id: auth_user.id,
             };
-            insert_query(&query, tx.client())
+            insert_playlist(&playlist, tx.client())
                 .await
                 .map_err(Error::DatabaseClient)?;
-            Ok::<(Query, bool), Error>((query, base_created))
+            Ok::<(Playlist, bool), Error>((playlist, base_created))
         })
     })
     .await
     .map_err(Error::from)?;
-    info!("new query created");
+    info!("new playlist created");
     if base_created {
         let event = BaseEvent {
-            id: query.base.id,
+            id: playlist.base.id,
             kind: BaseEventKind::Created,
         };
         send_base_event(&event, &cmpts.channels.base_event)
             .await
             .map_err(Error::BrokerClient)?;
     }
-    let resp: QueryResponse = query.into();
+    let resp: PlaylistResponse = playlist.into();
     Ok(HttpResponse::Created().json(resp))
 }
 
-#[delete("/query/{id}")]
-async fn delete_query(
+#[delete("/playlist/{id}")]
+async fn delete_playlist(
     req: HttpRequest,
     path: Path<Uuid>,
     cmpts: Data<Components>,
@@ -126,30 +118,30 @@ async fn delete_query(
         .await
         .map_err(Error::DatabasePool)?;
     let auth_user = current_user(&req, &cmpts.jwt_cfg, &db_client).await?;
-    let query = query_by_id(&path, &db_client)
+    let playlist = playlist_by_id(&path, &db_client)
         .await
         .map_err(Error::DatabaseClient)?;
-    let query = match query {
-        Some(query) => query,
+    let playlist = match playlist {
+        Some(playlist) => playlist,
         None => {
-            return Err(Error::QueryNotFound(*path));
+            return Err(Error::PlaylistNotFound(*path));
         }
     };
-    if query.user_id != auth_user.id {
-        return Err(Error::QueryNotOwnedByAuthenticatedUser(query.id));
+    if playlist.user_id != auth_user.id {
+        return Err(Error::PlaylistNotOwnedByAuthenticatedUser(playlist.id));
     }
-    delete_query_from_database(&query.id, &db_client)
+    delete_playlist_from_database(&playlist.id, &db_client)
         .await
         .map_err(Error::DatabaseClient)?;
-    info!("query {} deleted", query.id);
+    info!("playlist {} deleted", playlist.id);
     let resp: HttpResponse<BoxBody> = HttpResponse::NoContent().into();
     Ok(resp)
 }
 
-#[get("/query")]
-async fn list_queries(
+#[get("/playlist")]
+async fn list_playlists(
     req: HttpRequest,
-    page: ActixQuery<PageQuery>,
+    page: Query<PageQuery>,
     cmpts: Data<Components>,
 ) -> Result<impl Responder> {
     let db_client = client_from_pool(&cmpts.db_pool)
@@ -158,9 +150,9 @@ async fn list_queries(
     let auth_user = current_user(&req, &cmpts.jwt_cfg, &db_client).await?;
     let limit = page.limit.unwrap_or(DEFAULT_PAGE_LIMIT);
     let offset = page.offset.unwrap_or(DEFAULT_PAGE_OFFSET);
-    let page = list_queries_from_database(&auth_user.id, limit.into(), offset.into(), &db_client)
+    let page = list_playlists_from_database(&auth_user.id, limit.into(), offset.into(), &db_client)
         .await
         .map_err(Error::DatabaseClient)?;
-    let resp: PageResponse<QueryResponse> = page.into();
+    let resp: PageResponse<PlaylistResponse> = page.into();
     Ok(HttpResponse::Ok().json(resp))
 }

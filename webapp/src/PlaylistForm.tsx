@@ -6,9 +6,9 @@ import { useNavigate } from "react-router-dom";
 import Header from "./Header";
 import { HttpError, doPost } from "./api";
 import { Context, Error, Info } from "./ctx";
-import { BaseKind, Grouping, Platform, Query, QueryRequest } from "./domain";
+import { BaseKind, Platform, Playlist, PlaylistRequest } from "./domain";
 
-export default function QueryForm() {
+export default function PlaylistForm() {
   const ctx = useContext(Context);
 
   const [creating, setProcessing] = useState(false);
@@ -16,26 +16,25 @@ export default function QueryForm() {
 
   const navigate = useNavigate();
 
-  const query: QueryRequest = {
+  const playlist: PlaylistRequest = {
     base: {
       kind: BaseKind.Likes,
       platform: Platform.Spotify,
     },
-    grouping: Grouping.Decades,
-    namePrefix: "",
+    name: "",
   };
 
   const handleSubmit = async (event: any) => {
-    setProcessing(true);
     event.preventDefault();
     event.stopPropagation();
     setValidated(true);
     const valid = event.currentTarget.checkValidity();
 
     if (valid) {
-      doPost<Query>("query", query, ctx)
+      setProcessing(true);
+      doPost<Playlist>("playlist", playlist, ctx)
         .then((_resp) => {
-          ctx.setInfo(Info.QueryCreated);
+          ctx.setInfo(Info.PlaylistCreated);
           navigate("/home");
         })
         .catch((err) => {
@@ -44,7 +43,7 @@ export default function QueryForm() {
               navigate("/");
               break;
             case HttpError.Conflict:
-              ctx.setError(Error.QueryAlreadyExists);
+              ctx.setError(Error.PlaylistAlreadyExists);
               break;
             default:
               ctx.setError(Error.Unexpected);
@@ -78,37 +77,27 @@ export default function QueryForm() {
       <Header />
       <Container>
         <Row>
-          <h3>New query</h3>
+          <h3>New playlist</h3>
           <Form onSubmit={handleSubmit} noValidate validated={validated}>
+            <Form.Group>
+              <Form.Label>Name</Form.Label>
+              <Form.Control
+                max="50"
+                required
+                defaultValue={playlist.name}
+                onChange={(event) => (playlist.name = event.target.value)}
+              />
+            </Form.Group>
             <Form.Group>
               <Form.Label>Base</Form.Label>
               <Form.Select
-                defaultValue={query.base.kind}
+                defaultValue={playlist.base.kind}
                 onChange={(event) =>
-                  (query.base.kind = event.target.value as BaseKind)
+                  (playlist.base.kind = event.target.value as BaseKind)
                 }
               >
                 <option value={BaseKind.Likes}>Likes</option>
               </Form.Select>
-            </Form.Group>
-            <Form.Group>
-              <Form.Label>Group playlists by</Form.Label>
-              <Form.Select
-                defaultValue={query.grouping}
-                onChange={(event) =>
-                  (query.grouping = event.target.value as Grouping)
-                }
-              >
-                <option value={Grouping.Decades}>Decades</option>
-              </Form.Select>
-            </Form.Group>
-            <Form.Group>
-              <Form.Label>Prefix of playlist names</Form.Label>
-              <Form.Control
-                max="50"
-                defaultValue={query.namePrefix}
-                onChange={(event) => (query.namePrefix = event.target.value)}
-              />
             </Form.Group>
             <div className="col-12 text-end">{submitBtn}</div>
           </Form>

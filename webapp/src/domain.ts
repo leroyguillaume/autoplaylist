@@ -15,10 +15,6 @@ export enum BaseKind {
   Likes = "likes",
 }
 
-export enum Grouping {
-  Decades = "decades",
-}
-
 export interface Page<T> {
   content: T[];
   total: number;
@@ -28,18 +24,16 @@ export enum Platform {
   Spotify = "spotify",
 }
 
-export interface Query {
+export interface Playlist {
   base: Base;
   creationDate: string;
-  grouping: Grouping;
   id: string;
-  namePrefix: string;
+  name: string;
 }
 
-export interface QueryRequest {
+export interface PlaylistRequest {
   base: BaseRequest;
-  grouping: Grouping;
-  namePrefix: string;
+  name: string;
 }
 
 export enum Role {

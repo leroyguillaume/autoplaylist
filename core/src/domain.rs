@@ -16,14 +16,6 @@ pub enum BaseKind {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, FromSql, Serialize, ToSql)]
-#[postgres(name = "grouping")]
-#[serde(rename_all = "snake_case")]
-pub enum Grouping {
-    #[postgres(name = "decades")]
-    Decades,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, FromSql, Serialize, ToSql)]
 #[postgres(name = "platform")]
 #[serde(rename_all = "snake_case")]
 pub enum Platform {
@@ -68,12 +60,11 @@ pub struct Base {
 }
 
 #[derive(Debug)]
-pub struct Query {
+pub struct Playlist {
     pub base: Base,
     pub creation_date: DateTime<Utc>,
-    pub grouping: Option<Grouping>,
     pub id: Uuid,
-    pub name_prefix: Option<String>,
+    pub name: String,
     pub user_id: Uuid,
 }
 

@@ -6,7 +6,7 @@ import { useNavigate } from "react-router-dom";
 import Table from "./Table";
 import { doDelete, doGet, handleCommonErrors } from "./api";
 import { Context, Info } from "./ctx";
-import { Page, Query } from "./domain";
+import { Page, Playlist } from "./domain";
 
 const LIMIT = 10;
 
@@ -15,36 +15,36 @@ interface Props {
   pageNbChanged: (nb: number) => void;
 }
 
-export default function QueryTable(props: Props) {
+export default function PlaylistTable(props: Props) {
   const ctx = useContext(Context);
 
   const navigate = useNavigate();
 
   const [fetching, setFetching] = useState(false);
   const [inDeletion, setInDeletion] = useState<string[]>([]);
-  const [page, setPage] = useState<Page<Query> | null>(null);
+  const [page, setPage] = useState<Page<Playlist> | null>(null);
   const [pageNb, setPageNb] = useState(props.initialPageNb);
 
   const thead = (
     <thead>
       <tr>
+        <th>Name</th>
         <th>Creation date</th>
-        <th>Base</th>
         <th>Action</th>
       </tr>
     </thead>
   );
 
-  const buildTrs = (page: Page<Query>) => {
-    return page.content.map((query) => {
-      const creationDate = new Date(query.creationDate);
+  const buildTrs = (page: Page<Playlist>) => {
+    return page.content.map((playlist) => {
+      const creationDate = new Date(playlist.creationDate);
       let deleteBtn;
-      if (inDeletion.indexOf(query.id) === -1) {
+      if (inDeletion.indexOf(playlist.id) === -1) {
         deleteBtn = (
           <Button
             className="btn-sm"
             variant="danger"
-            onClick={() => deleteQuery(query.id)}
+            onClick={() => deletePlaylist(playlist.id)}
           >
             <FontAwesomeIcon icon={faTrash} className="inline" />
             Delete
@@ -59,20 +59,20 @@ export default function QueryTable(props: Props) {
         );
       }
       return (
-        <tr key={query.id}>
+        <tr key={playlist.id}>
+          <td>{playlist.name}</td>
           <td>{creationDate.toLocaleString()}</td>
-          <td>{query.base.kind}</td>
           <td>{deleteBtn}</td>
         </tr>
       );
     });
   };
 
-  const deleteQuery = async (id: string) => {
+  const deletePlaylist = async (id: string) => {
     setInDeletion([...inDeletion, id]);
-    await doDelete(`query/${id}`, ctx)
+    await doDelete(`playlist/${id}`, ctx)
       .then(() => {
-        ctx.setInfo(Info.QueryDeleted);
+        ctx.setInfo(Info.PlaylistDeleted);
       })
       .catch((err) => {
         handleCommonErrors(err, ctx, navigate);
@@ -83,8 +83,8 @@ export default function QueryTable(props: Props) {
   const fetchPage = async (nb: number) => {
     setFetching(true);
     setInDeletion([]);
-    await doGet<Page<Query>>(
-      "query",
+    await doGet<Page<Playlist>>(
+      "playlist",
       {
         limit: LIMIT,
         offset: (nb - 1) * LIMIT,

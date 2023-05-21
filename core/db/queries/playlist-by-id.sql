@@ -1,10 +1,9 @@
 SELECT
-    query.id AS query_id,
-    query.creation_date AS query_creation_date,
-    query.user_id AS query_user_id,
-    query.base_id AS query_base_id,
-    query.name_prefix AS query_name_prefix,
-    query.grouping AS query_grouping,
+    playlist.id AS playlist_id,
+    playlist.creation_date AS playlist_creation_date,
+    playlist.user_id AS playlist_user_id,
+    playlist.base_id AS playlist_base_id,
+    playlist.name AS playlist_name,
     base.id AS base_id,
     base.creation_date AS base_creation_date,
     base.user_id AS base_user_id,
@@ -15,10 +14,7 @@ SELECT
     base.last_sync_start_date AS base_last_sync_start_date,
     base.last_sync_success_date AS base_last_sync_success_date,
     base.last_sync_err_msg AS base_last_sync_err_msg
-FROM query
+FROM playlist
 INNER JOIN base
-    ON base.id = query.base_id
-WHERE
-    query.base_id = $1 AND
-    query.name_prefix IS NOT DISTINCT FROM $2 AND
-    query.grouping IS NOT DISTINCT FROM $3;
+    ON base.id = playlist.base_id
+WHERE playlist.id = $1;

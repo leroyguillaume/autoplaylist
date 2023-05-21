@@ -1,6 +1,6 @@
 use autoplaylist_core::{
     db::Page,
-    domain::{Base, BaseKind, Grouping, Platform, Query, Sync, SyncState},
+    domain::{Base, BaseKind, Platform, Playlist, Sync, SyncState},
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -38,11 +38,10 @@ pub struct BaseRequest {
 
 #[derive(Deserialize, Validate)]
 #[serde(rename_all = "camelCase")]
-pub struct CreateQueryRequest {
+pub struct CreatePlaylistRequest {
     pub base: BaseRequest,
-    pub grouping: Option<Grouping>,
     #[validate(length(min = 1, max = 50))]
-    pub name_prefix: Option<String>,
+    pub name: String,
 }
 
 // Structs - Response
@@ -78,12 +77,11 @@ pub struct PreconditionFailedResponse {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct QueryResponse {
+pub struct PlaylistResponse {
     pub base: BaseResponse,
     pub creation_date: DateTime<Utc>,
-    pub grouping: Option<Grouping>,
     pub id: Uuid,
-    pub name_prefix: Option<String>,
+    pub name: String,
 }
 
 #[derive(Serialize)]
@@ -137,16 +135,15 @@ impl<F, T: From<F>> From<Page<F>> for PageResponse<T> {
     }
 }
 
-// Impl - QueryResponse
+// Impl - PlaylistResponse
 
-impl From<Query> for QueryResponse {
-    fn from(query: Query) -> Self {
+impl From<Playlist> for PlaylistResponse {
+    fn from(playlist: Playlist) -> Self {
         Self {
-            base: query.base.into(),
-            creation_date: query.creation_date,
-            grouping: query.grouping,
-            id: query.id,
-            name_prefix: query.name_prefix,
+            base: playlist.base.into(),
+            creation_date: playlist.creation_date,
+            id: playlist.id,
+            name: playlist.name,
         }
     }
 }
