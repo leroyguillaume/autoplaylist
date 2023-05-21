@@ -14,11 +14,12 @@ use deadpool_postgres::{
 use postgres_types::{FromSql, ToSql};
 use refinery::{embed_migrations, Error as RefineryError};
 use securefmt::Debug as SecureDebug;
+use serde_json::{json, Error as JsonError};
 use tracing::{debug, error, info, trace};
 use uuid::Uuid;
 
 use crate::{
-    domain::{Base, BaseKind, Platform, Playlist, SpotifyAuth, Sync, User},
+    domain::{Base, BaseKind, Platform, Playlist, PlaylistFilter, SpotifyAuth, Sync, User},
     env_var, env_var_opt, env_var_or_default, ConfigError,
 };
 
@@ -32,7 +33,7 @@ macro_rules! sql {
 
 // Types
 
-pub type Result<T> = StdResult<T, TokioPostgresError>;
+pub type Result<T> = StdResult<T, Error>;
 
 // Traits
 
@@ -45,8 +46,14 @@ pub trait TryFromRow {
 // Enums - Errors
 
 #[derive(Debug)]
-pub enum InTransactionError<E: StdError + 'static> {
+pub enum Error {
     Client(TokioPostgresError),
+    Serialization(JsonError),
+}
+
+#[derive(Debug)]
+pub enum InTransactionError<E: StdError + 'static> {
+    Client(Error),
     Execution(E),
 }
 
@@ -91,20 +98,28 @@ pub struct Page<T> {
 impl TryFromRow for Base {
     fn try_from_row(row: &Row) -> Result<Self> {
         Ok(Self {
-            creation_date: row.try_get("base_creation_date")?,
-            id: row.try_get("base_id")?,
-            kind: match row.try_get("base_kind")? {
+            creation_date: row.try_get("base_creation_date").map_err(Error::Client)?,
+            id: row.try_get("base_id").map_err(Error::Client)?,
+            kind: match row.try_get("base_kind").map_err(Error::Client)? {
                 BaseKindSql::Likes => BaseKind::Likes,
-                BaseKindSql::Playlist => BaseKind::Playlist(row.try_get("base_platform_id")?),
+                BaseKindSql::Playlist => {
+                    BaseKind::Playlist(row.try_get("base_platform_id").map_err(Error::Client)?)
+                }
             },
-            platform: row.try_get("base_platform")?,
+            platform: row.try_get("base_platform").map_err(Error::Client)?,
             sync: Sync {
-                last_err_msg: row.try_get("base_last_sync_err_msg")?,
-                last_start_date: row.try_get("base_last_sync_start_date")?,
-                last_success_date: row.try_get("base_last_sync_success_date")?,
-                state: row.try_get("base_sync_state")?,
+                last_err_msg: row
+                    .try_get("base_last_sync_err_msg")
+                    .map_err(Error::Client)?,
+                last_start_date: row
+                    .try_get("base_last_sync_start_date")
+                    .map_err(Error::Client)?,
+                last_success_date: row
+                    .try_get("base_last_sync_success_date")
+                    .map_err(Error::Client)?,
+                state: row.try_get("base_sync_state").map_err(Error::Client)?,
             },
-            user_id: row.try_get("base_user_id")?,
+            user_id: row.try_get("base_user_id").map_err(Error::Client)?,
         })
     }
 }
@@ -137,6 +152,26 @@ impl From<Config> for DeadpoolPostgresConfig {
             port: cfg.port,
             user: Some(cfg.user),
             ..Default::default()
+        }
+    }
+}
+
+// Impl - Error
+
+impl Display for Error {
+    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+        match self {
+            Self::Client(err) => write!(f, "database client failed: {err}"),
+            Self::Serialization(err) => write!(f, "JSON serialization failed: {err}"),
+        }
+    }
+}
+
+impl StdError for Error {
+    fn cause(&self) -> Option<&dyn StdError> {
+        match self {
+            Self::Client(err) => Some(err),
+            Self::Serialization(err) => Some(err),
         }
     }
 }
@@ -205,10 +240,12 @@ impl TryFromRow for Playlist {
     fn try_from_row(row: &Row) -> Result<Self> {
         Ok(Self {
             base: Base::try_from_row(row)?,
-            creation_date: row.try_get("playlist_creation_date")?,
-            id: row.try_get("playlist_id")?,
-            name: row.try_get("playlist_name")?,
-            user_id: row.try_get("playlist_user_id")?,
+            creation_date: row
+                .try_get("playlist_creation_date")
+                .map_err(Error::Client)?,
+            id: row.try_get("playlist_id").map_err(Error::Client)?,
+            name: row.try_get("playlist_name").map_err(Error::Client)?,
+            user_id: row.try_get("playlist_user_id").map_err(Error::Client)?,
         })
     }
 }
@@ -218,9 +255,9 @@ impl TryFromRow for Playlist {
 impl TryFromRow for User {
     fn try_from_row(row: &Row) -> Result<Self> {
         Ok(Self {
-            creation_date: row.try_get("user_creation_date")?,
-            id: row.try_get("user_id")?,
-            role: row.try_get("user_role")?,
+            creation_date: row.try_get("user_creation_date").map_err(Error::Client)?,
+            id: row.try_get("user_id").map_err(Error::Client)?,
+            role: row.try_get("user_role").map_err(Error::Client)?,
         })
     }
 }
@@ -266,7 +303,10 @@ pub async fn base(
 
 pub async fn delete_playlist(id: &Uuid, client: &Client) -> Result<()> {
     debug!("deleting playlist {id}");
-    client.execute(sql!("delete-playlist"), &[id]).await?;
+    client
+        .execute(sql!("delete-playlist"), &[id])
+        .await
+        .map_err(Error::Client)?;
     Ok(())
 }
 
@@ -285,11 +325,16 @@ pub async fn insert_base(base: &Base, client: &Client) -> Result<()> {
                 &platform_id,
             ],
         )
-        .await?;
+        .await
+        .map_err(Error::Client)?;
     Ok(())
 }
 
-pub async fn insert_playlist(playlist: &Playlist, client: &Client) -> Result<()> {
+pub async fn insert_playlist(
+    playlist: &Playlist,
+    filters: &[PlaylistFilter],
+    client: &Client,
+) -> Result<()> {
     debug!("inserting {playlist:?} into database");
     client
         .execute(
@@ -302,7 +347,24 @@ pub async fn insert_playlist(playlist: &Playlist, client: &Client) -> Result<()>
                 &playlist.name,
             ],
         )
-        .await?;
+        .await
+        .map_err(Error::Client)?;
+    let st = client
+        .prepare(sql!("insert-playlist-filter"))
+        .await
+        .map_err(Error::Client)?;
+    for filter in filters {
+        trace!("serializing {filter:?} into JSON");
+        let def = json!(filter);
+        debug!(
+            "inserting filter of playlist {} with definition {def:?} into database",
+            playlist.id
+        );
+        client
+            .execute(&st, &[&playlist.id, &def])
+            .await
+            .map_err(Error::Client)?;
+    }
     Ok(())
 }
 
@@ -313,7 +375,8 @@ pub async fn insert_user(user: &User, client: &Client) -> Result<()> {
             sql!("insert-user"),
             &[&user.id, &user.creation_date, &user.role],
         )
-        .await?;
+        .await
+        .map_err(Error::Client)?;
     Ok(())
 }
 
@@ -326,11 +389,13 @@ pub async fn list_bases(
     debug!("listing bases of user {user_id} from offset {offset} limiting to {limit} entries");
     let total: i64 = client
         .query_one(sql!("list-bases-total"), &[user_id])
-        .await?
+        .await
+        .map_err(Error::Client)?
         .get(0);
     let rows = client
         .query(sql!("list-bases-content"), &[user_id, &limit, &offset])
-        .await?;
+        .await
+        .map_err(Error::Client)?;
     let res = Page::try_from_rows(rows, total);
     if let Ok(page) = &res {
         debug!("page fetched: {page:?}");
@@ -347,11 +412,13 @@ pub async fn list_playlists(
     debug!("listing playlists of user {user_id} from offset {offset} limiting to {limit} entries");
     let total: i64 = client
         .query_one(sql!("list-playlists-total"), &[user_id])
-        .await?
+        .await
+        .map_err(Error::Client)?
         .get(0);
     let rows = client
         .query(sql!("list-playlists-content"), &[user_id, &limit, &offset])
-        .await?;
+        .await
+        .map_err(Error::Client)?;
     let res = Page::try_from_rows(rows, total);
     if let Ok(page) = &res {
         debug!("page fetched: {page:?}");
@@ -391,7 +458,8 @@ pub async fn upsert_spotify_auth(auth: &SpotifyAuth, client: &Client) -> Result<
                 &auth.refresh_token,
             ],
         )
-        .await?;
+        .await
+        .map_err(Error::Client)?;
     Ok(())
 }
 
@@ -437,11 +505,13 @@ pub async fn in_transaction<
     let tx = client
         .transaction()
         .await
-        .map_err(InTransactionError::Client)?;
+        .map_err(|err| InTransactionError::Client(Error::Client(err)))?;
     match f(&tx).await {
         Ok(val) => {
             debug!("committing database transaction");
-            tx.commit().await.map_err(InTransactionError::Client)?;
+            tx.commit()
+                .await
+                .map_err(|err| InTransactionError::Client(Error::Client(err)))?;
             Ok(val)
         }
         Err(err) => {
@@ -455,11 +525,13 @@ pub async fn in_transaction<
 }
 
 #[inline]
-fn convert_opt_result<T: TryFromRow>(res: Result<Option<Row>>) -> Result<Option<T>> {
+fn convert_opt_result<T: TryFromRow>(
+    res: StdResult<Option<Row>, TokioPostgresError>,
+) -> Result<Option<T>> {
     match res {
         Ok(Some(row)) => T::try_from_row(&row).map(Some),
         Ok(None) => Ok(None),
-        Err(err) => Err(err),
+        Err(err) => Err(Error::Client(err)),
     }
 }
 

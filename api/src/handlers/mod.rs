@@ -12,13 +12,12 @@ use actix_web::{
 };
 use autoplaylist_core::{
     broker::Error as BrokerError,
-    db::{user_by_id, InTransactionError},
+    db::{user_by_id, Error as DatabaseError, InTransactionError},
     domain::User,
 };
 use chrono::Utc;
 use deadpool_postgres::{
-    tokio_postgres::Client as TokioPostgresClient, tokio_postgres::Error as TokioPostgresError,
-    PoolError as DeadpoolPostgresPoolError,
+    tokio_postgres::Client as TokioPostgresClient, PoolError as DeadpoolPostgresPoolError,
 };
 use hmac::{digest::InvalidLength as HmacInvalidLength, Hmac, Mac};
 use jwt::{Claims, Error as JwtError, VerifyWithKey};
@@ -46,7 +45,7 @@ enum Error {
     AuthenticatedUserIsNotAdmin(Uuid),
     AuthenticatedUserNotFound(Uuid),
     BrokerClient(BrokerError),
-    DatabaseClient(TokioPostgresError),
+    DatabaseClient(DatabaseError),
     DatabasePool(DeadpoolPostgresPoolError),
     ExpiredJwt,
     InvalidAuthorizationHeader(String),
@@ -74,7 +73,7 @@ impl Display for Error {
             Self::AuthenticatedUserIsNotAdmin(id) => write!(f, "user {id} is not admin"),
             Self::AuthenticatedUserNotFound(id) => write!(f, "user {id} doesn't exist anymore"),
             Self::BrokerClient(err) => write!(f, "{err}"),
-            Self::DatabaseClient(err) => write!(f, "database error: {err}"),
+            Self::DatabaseClient(err) => write!(f, "{err}"),
             Self::DatabasePool(err) => write!(f, "database connection pool error: {err}"),
             Self::ExpiredJwt => write!(f, "JWT is expired"),
             Self::InvalidAuthorizationHeader(val) => {

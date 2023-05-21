@@ -89,7 +89,7 @@ async fn create_playlist(
                 name: payload.name.clone(),
                 user_id: auth_user.id,
             };
-            insert_playlist(&playlist, tx.client())
+            insert_playlist(&playlist, &payload.filters, tx.client())
                 .await
                 .map_err(Error::DatabaseClient)?;
             Ok::<(Playlist, bool), Error>((playlist, base_created))

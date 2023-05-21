@@ -1,6 +1,6 @@
 use autoplaylist_core::{
     db::Page,
-    domain::{Base, BaseKind, Platform, Playlist, Sync, SyncState},
+    domain::{Base, BaseKind, Platform, Playlist, PlaylistFilter, Sync, SyncState},
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -11,20 +11,6 @@ use validator::Validate;
 
 pub const DEFAULT_PAGE_LIMIT: u32 = 10;
 pub const DEFAULT_PAGE_OFFSET: u32 = 0;
-
-// Enums - Requests
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum PlaylistFilterOperatorRequest<T> {
-    Is(T),
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum PlaylistFilterRequest {
-    Artist(PlaylistFilterOperatorRequest<String>),
-}
 
 // Struct - Queries
 
@@ -55,7 +41,7 @@ pub struct BaseRequest {
 pub struct CreatePlaylistRequest {
     pub base: BaseRequest,
     #[validate(length(min = 1))]
-    pub filters: Vec<PlaylistFilterRequest>,
+    pub filters: Vec<PlaylistFilter>,
     #[validate(length(min = 1, max = 50))]
     pub name: String,
 }
