@@ -31,8 +31,23 @@ export interface Playlist {
   name: string;
 }
 
+export interface PlaylistFilter {
+  kind: PlaylistFilterKind;
+  op: PlaylistFilterOperator;
+  value: string;
+}
+
+export enum PlaylistFilterKind {
+  Artist = "artist",
+}
+
+export enum PlaylistFilterOperator {
+  Is = "is",
+}
+
 export interface PlaylistRequest {
   base: BaseRequest;
+  filters: any[];
   name: string;
 }
 

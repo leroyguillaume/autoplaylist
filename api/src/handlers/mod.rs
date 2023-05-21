@@ -27,6 +27,7 @@ use rspotify::ClientError;
 use sha2::Sha512;
 use tracing::{debug, trace};
 use uuid::Uuid;
+use validator::ValidationErrors;
 
 use crate::{cfg::JwtConfig, dto::ConflictResponse};
 
@@ -59,6 +60,7 @@ enum Error {
     PlaylistAlreadyExists(Uuid),
     PlaylistNotFound(Uuid),
     PlaylistNotOwnedByAuthenticatedUser(Uuid),
+    RequestValidation(ValidationErrors),
     SpotifyClient(ClientError),
     SpotifyClientTokenLock,
     TimestampConversion(TryFromIntError),
@@ -101,6 +103,7 @@ impl Display for Error {
             Self::PlaylistNotOwnedByAuthenticatedUser(id) => {
                 write!(f, "playlist {id} is not owned by authenticated user")
             }
+            Self::RequestValidation(_) => write!(f, "request validation failed"),
             Self::SpotifyClient(err) => write!(f, "Spotify error: {err}"),
             Self::SpotifyClientTokenLock => {
                 write!(f, "acquiring lock on Spotify client token failed")
@@ -126,6 +129,7 @@ impl ResponseError for Error {
             Self::PlaylistAlreadyExists(id) => {
                 HttpResponseBuilder::new(status).json(ConflictResponse { id: *id })
             }
+            Self::RequestValidation(errs) => HttpResponseBuilder::new(status).json(errs),
             _ => HttpResponse::new(status),
         }
     }
@@ -142,6 +146,7 @@ impl ResponseError for Error {
             Self::PlaylistAlreadyExists(_) => StatusCode::CONFLICT,
             Self::PlaylistNotFound(_) => StatusCode::NOT_FOUND,
             Self::PlaylistNotOwnedByAuthenticatedUser(_) => StatusCode::FORBIDDEN,
+            Self::RequestValidation(_) => StatusCode::BAD_REQUEST,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -167,6 +172,7 @@ impl StdError for Error {
             Self::PlaylistAlreadyExists(_) => None,
             Self::PlaylistNotFound(_) => None,
             Self::PlaylistNotOwnedByAuthenticatedUser(_) => None,
+            Self::RequestValidation(errs) => Some(errs),
             Self::SpotifyClient(err) => Some(err),
             Self::SpotifyClientTokenLock => None,
             Self::TimestampConversion(err) => Some(err),

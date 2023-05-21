@@ -14,8 +14,9 @@ use autoplaylist_core::{
     domain::{Base, Playlist, Sync},
 };
 use chrono::Utc;
-use tracing::info;
+use tracing::{info, trace};
 use uuid::Uuid;
+use validator::Validate;
 
 use crate::{
     dto::{
@@ -38,6 +39,8 @@ async fn create_playlist(
         .await
         .map_err(Error::DatabasePool)?;
     let auth_user = current_user(&req, &cmpts.jwt_cfg, &db_client).await?;
+    trace!("validating {payload:?}");
+    payload.validate().map_err(Error::RequestValidation)?;
     let now = Utc::now();
     let (playlist, base_created) = in_transaction(&mut db_client, move |tx| {
         Box::pin(async move {

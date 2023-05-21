@@ -2,7 +2,7 @@ use std::fmt::{Display, Formatter, Result as FmtResult};
 
 use chrono::{DateTime, Utc};
 use postgres_types::{FromSql, ToSql};
-use securefmt::Debug;
+use securefmt::Debug as SecureDebug;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -21,6 +21,18 @@ pub enum BaseKind {
 pub enum Platform {
     #[postgres(name = "spotify")]
     Spotify,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlaylistFilter {
+    Artist(PlaylistFilterOperator<String>),
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlaylistFilterOperator<T> {
+    Is(T),
 }
 
 #[derive(Debug, Deserialize, Eq, FromSql, PartialEq, Serialize, ToSql)]
@@ -68,7 +80,7 @@ pub struct Playlist {
     pub user_id: Uuid,
 }
 
-#[derive(Debug)]
+#[derive(SecureDebug)]
 pub struct SpotifyAuth {
     pub email: String,
     #[sensitive]

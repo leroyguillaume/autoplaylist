@@ -12,6 +12,20 @@ use validator::Validate;
 pub const DEFAULT_PAGE_LIMIT: u32 = 10;
 pub const DEFAULT_PAGE_OFFSET: u32 = 0;
 
+// Enums - Requests
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PlaylistFilterOperatorRequest<T> {
+    Is(T),
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PlaylistFilterRequest {
+    Artist(PlaylistFilterOperatorRequest<String>),
+}
+
 // Struct - Queries
 
 #[derive(Deserialize)]
@@ -29,17 +43,19 @@ pub struct AuthWithSpotifyRequest {
     pub code: String,
 }
 
-#[derive(Deserialize, Validate)]
+#[derive(Debug, Deserialize, Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct BaseRequest {
     pub kind: BaseKind,
     pub platform: Platform,
 }
 
-#[derive(Deserialize, Validate)]
+#[derive(Debug, Deserialize, Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct CreatePlaylistRequest {
     pub base: BaseRequest,
+    #[validate(length(min = 1))]
+    pub filters: Vec<PlaylistFilterRequest>,
     #[validate(length(min = 1, max = 50))]
     pub name: String,
 }
@@ -64,6 +80,12 @@ pub struct ConflictResponse {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct JwtResponse {
+    pub jwt: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PageResponse<T> {
     pub content: Vec<T>,
     pub total: i64,
@@ -82,12 +104,6 @@ pub struct PlaylistResponse {
     pub creation_date: DateTime<Utc>,
     pub id: Uuid,
     pub name: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct JwtResponse {
-    pub jwt: String,
 }
 
 #[derive(Serialize)]

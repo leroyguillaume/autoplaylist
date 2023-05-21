@@ -54,3 +54,8 @@ CREATE TABLE playlist (
     name VARCHAR (50) NOT NULL,
     UNIQUE NULLS NOT DISTINCT (user_id, base_id, name)
 );
+
+CREATE TABLE playlist_filter (
+    playlist_id UUID NOT NULL REFERENCES playlist ON DELETE CASCADE,
+    def JSONB NOT NULL
+);
