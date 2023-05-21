@@ -244,7 +244,7 @@ pub async fn open_channels(cfg: Config) -> StdResult<Channels, BrokerInitializat
 // Functions - Consumers
 
 pub async fn start_base_command_consumer<
-    F: Fn(BaseEvent) -> R + Send + Sync + 'static,
+    F: Fn(BaseCommand) -> R + Send + Sync + 'static,
     R: Future<Output = StdResult<(), ConsumerError>> + Send,
 >(
     queue: &'static str,

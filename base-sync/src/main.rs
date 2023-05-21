@@ -2,8 +2,8 @@ use std::{error::Error as StdError, result::Result as StdResult};
 
 use autoplaylist_core::{
     broker::{
-        open_channels, start_base_command_consumer, start_base_event_consumer, BaseEvent,
-        ConsumerError, ConsumerSignal,
+        open_channels, start_base_command_consumer, start_base_event_consumer, BaseCommand,
+        BaseEvent, ConsumerError, ConsumerSignal,
     },
     db::init as init_database,
     init_tracing,
@@ -47,7 +47,7 @@ fn create_signal_listener(kind: SignalKind) -> Result<Signal> {
 
 #[inline]
 async fn handle_base_command(
-    _event: BaseEvent,
+    _cmd: BaseCommand,
     mut sig_rcv: Receiver<ConsumerSignal>,
 ) -> StdResult<(), ConsumerError> {
     loop {
@@ -107,9 +107,9 @@ async fn run() -> Result<()> {
         csm_sig_rcv.clone(),
         {
             let csm_sig_rcv = csm_sig_rcv.clone();
-            move |event| {
+            move |cmd| {
                 let csm_sig_rcv = csm_sig_rcv.clone();
-                async move { handle_base_command(event, csm_sig_rcv).await }
+                async move { handle_base_command(cmd, csm_sig_rcv).await }
             }
         },
     )
