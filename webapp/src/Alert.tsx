@@ -10,6 +10,8 @@ export default function Alert() {
     "success",
     (info) => {
       switch (info) {
+        case Info.BaseSyncWillStart:
+          return "Synchronization will start! ⚙";
         case Info.QueryCreated:
           return "Query successfully created! 🥳";
         case Info.QueryDeleted:

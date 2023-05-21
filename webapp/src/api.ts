@@ -1,3 +1,4 @@
+import { NavigateFunction } from "react-router-dom";
 import { ContextData, Error } from "./ctx";
 
 export const JWT_LOCAL_STORAGE_KEY = "jwt";
@@ -26,6 +27,26 @@ export function doPost<T>(
   ctx: ContextData
 ): Promise<T> {
   return callApi("POST", path, {}, body, ctx);
+}
+
+export function doPut<T>(
+  path: string,
+  body: any | null,
+  ctx: ContextData
+): Promise<T> {
+  return callApi("PUT", path, {}, body, ctx);
+}
+
+export function handleCommonErrors(
+  err: HttpError,
+  ctx: ContextData,
+  navigate: NavigateFunction
+) {
+  if (err === HttpError.Unauthorized) {
+    navigate("/");
+  } else {
+    ctx.setError(Error.Unexpected);
+  }
 }
 
 function callApi<T>(

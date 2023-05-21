@@ -1,16 +1,21 @@
 import { faRightFromBracket } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { useContext } from "react";
 import { Button, Container, Nav, Navbar } from "react-bootstrap";
 import { Link, useNavigate } from "react-router-dom";
 import Alert from "./Alert";
 import { JWT_LOCAL_STORAGE_KEY } from "./api";
+import { Context } from "./ctx";
 import logo from "./logo.webp";
 
 export default function Header() {
+  const ctx = useContext(Context);
+
   const naviage = useNavigate();
 
   const logOut = () => {
     localStorage.removeItem(JWT_LOCAL_STORAGE_KEY);
+    ctx.setAuthUser(null);
     naviage("/");
   };
 

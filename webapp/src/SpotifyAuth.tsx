@@ -4,7 +4,7 @@ import { useContext, useEffect } from "react";
 import { Container, Row } from "react-bootstrap";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { JWT_LOCAL_STORAGE_KEY, doPost } from "./api";
-import { Context, Error } from "./ctx";
+import { Context, Error, loadAuthenticatedUser } from "./ctx";
 
 export default function SpotifyAuth() {
   const ctx = useContext(Context);
@@ -21,6 +21,7 @@ export default function SpotifyAuth() {
         doPost<{ jwt: string }>("auth/spotify", { code }, ctx)
           .then((resp) => {
             window.localStorage.setItem(JWT_LOCAL_STORAGE_KEY, resp.jwt);
+            ctx.setAuthUser(loadAuthenticatedUser());
             navigate("/home");
           })
           .catch(() => {

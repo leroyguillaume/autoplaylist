@@ -1,5 +1,6 @@
 import jwt_decode from "jwt-decode";
 import { createContext } from "react";
+import { JWT_LOCAL_STORAGE_KEY } from "./api";
 import { Role } from "./domain";
 
 export interface AuthenticatedUser {
@@ -14,6 +15,7 @@ export enum Error {
 }
 
 export enum Info {
+  BaseSyncWillStart,
   QueryCreated,
   QueryDeleted,
 }
@@ -36,7 +38,8 @@ export const Context = createContext<ContextData>({
   setInfo: () => {},
 });
 
-export function decodeJwt(jwt: string | null): AuthenticatedUser | null {
+export function loadAuthenticatedUser(): AuthenticatedUser | null {
+  const jwt = localStorage.getItem(JWT_LOCAL_STORAGE_KEY);
   if (jwt === null) {
     return null;
   }
@@ -46,7 +49,7 @@ export function decodeJwt(jwt: string | null): AuthenticatedUser | null {
     return null;
   }
   return {
-    id: jwt_decoded.subj,
+    id: jwt_decoded.sub,
     role: jwt_decoded.role,
   };
 }

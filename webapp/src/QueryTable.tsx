@@ -4,8 +4,8 @@ import { useContext, useEffect, useState } from "react";
 import { Button } from "react-bootstrap";
 import { useNavigate } from "react-router-dom";
 import Table from "./Table";
-import { HttpError, doDelete, doGet } from "./api";
-import { Context, Error, Info } from "./ctx";
+import { doDelete, doGet, handleCommonErrors } from "./api";
+import { Context, Info } from "./ctx";
 import { Page, Query } from "./domain";
 
 const LIMIT = 10;
@@ -73,21 +73,16 @@ export default function QueryTable(props: Props) {
     await doDelete(`query/${id}`, ctx)
       .then(() => {
         ctx.setInfo(Info.QueryDeleted);
-        return fetchPage(pageNb);
       })
-      .finally(() => {
-        const idx = inDeletion.indexOf(id);
-        if (idx > -1) {
-          setInDeletion([
-            ...inDeletion.slice(0, idx),
-            ...inDeletion.slice(idx + 1),
-          ]);
-        }
-      });
+      .catch((err) => {
+        handleCommonErrors(err, ctx, navigate);
+      })
+      .then(() => fetchPage(pageNb));
   };
 
   const fetchPage = async (nb: number) => {
     setFetching(true);
+    setInDeletion([]);
     await doGet<Page<Query>>(
       "query",
       {
@@ -107,11 +102,7 @@ export default function QueryTable(props: Props) {
         }
       })
       .catch((err) => {
-        if (err === HttpError.Unauthorized) {
-          navigate("/");
-        } else {
-          ctx.setError(Error.Unexpected);
-        }
+        handleCommonErrors(err, ctx, navigate);
       })
       .finally(() => {
         setFetching(false);

@@ -7,20 +7,18 @@ import Home from "./Home";
 import LogIn from "./LogIn";
 import QueryForm from "./QueryForm";
 import SpotifyAuth from "./SpotifyAuth";
-import { JWT_LOCAL_STORAGE_KEY } from "./api";
 import {
   AuthenticatedUser,
   Context,
   ContextData,
   Error,
   Info,
-  decodeJwt,
+  loadAuthenticatedUser,
 } from "./ctx";
 
 export default function App() {
-  const jwt = localStorage.getItem(JWT_LOCAL_STORAGE_KEY);
   const [authUser, setAuthUser] = useState<AuthenticatedUser | null>(
-    decodeJwt(jwt)
+    loadAuthenticatedUser()
   );
   const [error, setError] = useState<Error | null>(null);
   const [info, setInfo] = useState<Info | null>(null);
