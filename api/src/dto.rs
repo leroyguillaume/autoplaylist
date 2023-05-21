@@ -1,16 +1,37 @@
+use std::borrow::Cow;
+
 use autoplaylist_core::{
     db::Page,
-    domain::{Base, BaseKind, Platform, Playlist, PlaylistFilter, Sync, SyncState},
+    domain::{
+        Base, BaseKind, Platform, Playlist, PlaylistFilter as DomainPlaylistFilter,
+        PlaylistFilterOperator as DomainPlaylistFilterOperator, Sync, SyncState,
+    },
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_trim::string_trim;
 use uuid::Uuid;
-use validator::Validate;
+use validator::{Validate, ValidationError, ValidationErrors};
 
 // Consts
 
 pub const DEFAULT_PAGE_LIMIT: u32 = 10;
 pub const DEFAULT_PAGE_OFFSET: u32 = 0;
+
+// Enums - Filter
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PlaylistFilter {
+    Artist(PlaylistFilterOperator),
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PlaylistFilterOperator {
+    #[serde(deserialize_with = "string_trim")]
+    Is(String),
+}
 
 // Struct - Queries
 
@@ -40,8 +61,9 @@ pub struct BaseRequest {
 #[serde(rename_all = "camelCase")]
 pub struct CreatePlaylistRequest {
     pub base: BaseRequest,
-    #[validate(length(min = 1))]
+    #[validate(length(min = 1), custom = "validate_filters")]
     pub filters: Vec<PlaylistFilter>,
+    #[serde(deserialize_with = "string_trim")]
     #[validate(length(min = 1, max = 50))]
     pub name: String,
 }
@@ -126,6 +148,26 @@ impl Default for PageQuery {
     }
 }
 
+// Impl - DomainPlaylistFilter
+
+impl From<PlaylistFilter> for DomainPlaylistFilter {
+    fn from(op: PlaylistFilter) -> Self {
+        match op {
+            PlaylistFilter::Artist(op) => Self::Artist(op.into()),
+        }
+    }
+}
+
+// Impl - DomainPlaylistFilterOperator
+
+impl From<PlaylistFilterOperator> for DomainPlaylistFilterOperator {
+    fn from(op: PlaylistFilterOperator) -> Self {
+        match op {
+            PlaylistFilterOperator::Is(val) => Self::Is(val),
+        }
+    }
+}
+
 // Impl - PageResponse
 
 impl<F, T: From<F>> From<Page<F>> for PageResponse<T> {
@@ -133,6 +175,34 @@ impl<F, T: From<F>> From<Page<F>> for PageResponse<T> {
         Self {
             content: page.content.into_iter().map(T::from).collect(),
             total: page.total,
+        }
+    }
+}
+
+// Impl - PlaylistFilter
+
+impl Validate for PlaylistFilter {
+    fn validate(&self) -> Result<(), ValidationErrors> {
+        match self {
+            Self::Artist(op) => op.validate(),
+        }
+    }
+}
+
+// Impl - PlaylistFilterOperator
+
+impl Validate for PlaylistFilterOperator {
+    fn validate(&self) -> Result<(), ValidationErrors> {
+        match self {
+            Self::Is(val) => {
+                if val.is_empty() || val.len() > 255 {
+                    let mut errs = ValidationErrors::new();
+                    errs.add("is", ValidationError::new("length"));
+                    Err(errs)
+                } else {
+                    Ok(())
+                }
+            }
         }
     }
 }
@@ -160,5 +230,27 @@ impl From<Sync> for SyncResponse {
             last_success_date: sync.last_success_date,
             state: sync.state,
         }
+    }
+}
+
+// Functions
+
+fn validate_filters(filters: &[PlaylistFilter]) -> Result<(), ValidationError> {
+    let errs: Vec<(usize, ValidationErrors)> = filters
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, filter)| match filter.validate() {
+            Ok(()) => None,
+            Err(errs) => Some((idx, errs)),
+        })
+        .collect();
+    if errs.is_empty() {
+        Ok(())
+    } else {
+        let mut err = ValidationError::new("filters");
+        for (idx, errs) in errs {
+            err.add_param(Cow::Owned(format!("[{idx}]")), &errs);
+        }
+        Err(err)
     }
 }

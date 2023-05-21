@@ -478,6 +478,7 @@ dependencies = [
  "securefmt",
  "serde",
  "serde_json",
+ "serde_trim",
  "sha2",
  "tracing",
  "tracing-actix-web",
@@ -2466,6 +2467,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_trim"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8da94fa181c3b4f8876b7bcd9b5cf2cddb352eac4722d32613dfa72e64c1075e"
+dependencies = [
+ "serde",
+ "trim-in-place",
+]
+
+[[package]]
 name = "serde_urlencoded"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3025,6 +3036,12 @@ dependencies = [
  "tracing-log",
  "tracing-serde",
 ]
+
+[[package]]
+name = "trim-in-place"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "343e926fc669bc8cde4fa3129ab681c63671bae288b1f1081ceee6d9d37904fc"
 
 [[package]]
 name = "try-lock"

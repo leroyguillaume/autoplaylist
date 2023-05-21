@@ -11,7 +11,7 @@ use autoplaylist_core::{
         insert_base, insert_playlist, list_playlists as list_playlists_from_database,
         playlist_by_id, playlist_by_name,
     },
-    domain::{Base, Playlist, Sync},
+    domain::{Base, Playlist, PlaylistFilter, Sync},
 };
 use chrono::Utc;
 use tracing::{info, trace};
@@ -89,7 +89,13 @@ async fn create_playlist(
                 name: payload.name.clone(),
                 user_id: auth_user.id,
             };
-            insert_playlist(&playlist, &payload.filters, tx.client())
+            let filters: Vec<PlaylistFilter> = payload
+                .filters
+                .clone()
+                .into_iter()
+                .map(PlaylistFilter::from)
+                .collect();
+            insert_playlist(&playlist, &filters, tx.client())
                 .await
                 .map_err(Error::DatabaseClient)?;
             Ok::<(Playlist, bool), Error>((playlist, base_created))

@@ -26,13 +26,13 @@ pub enum Platform {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PlaylistFilter {
-    Artist(PlaylistFilterOperator<String>),
+    Artist(PlaylistFilterOperator),
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum PlaylistFilterOperator<T> {
-    Is(T),
+pub enum PlaylistFilterOperator {
+    Is(String),
 }
 
 #[derive(Debug, Deserialize, Eq, FromSql, PartialEq, Serialize, ToSql)]
