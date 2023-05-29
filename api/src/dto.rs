@@ -96,7 +96,7 @@ pub struct JwtResponse {
 #[serde(rename_all = "camelCase")]
 pub struct PageResponse<T> {
     pub content: Vec<T>,
-    pub total: i64,
+    pub total: u32,
 }
 
 #[derive(Serialize)]

@@ -6,11 +6,7 @@ use actix_web::{
 };
 use autoplaylist_core::{
     broker::{send_base_event, BaseEvent, BaseEventKind},
-    db::{
-        base, client_from_pool, delete_playlist as delete_playlist_from_database, in_transaction,
-        insert_base, insert_playlist, list_playlists as list_playlists_from_database,
-        playlist_by_id, playlist_by_name,
-    },
+    db::in_transaction,
     domain::{Base, Playlist, PlaylistFilter, Sync},
 };
 use chrono::Utc;
@@ -35,26 +31,30 @@ async fn create_playlist(
     payload: Json<CreatePlaylistRequest>,
     cmpts: Data<Components>,
 ) -> Result<impl Responder> {
-    let mut db_client = client_from_pool(&cmpts.db_pool)
-        .await
-        .map_err(Error::DatabasePool)?;
-    let auth_user = current_user(&req, &cmpts.jwt_cfg, &db_client).await?;
+    let mut db_client = cmpts.db_pool.client().await.map_err(Error::DatabasePool)?;
+    let auth_user = current_user(
+        &req,
+        &cmpts.jwt_cfg,
+        db_client.repositories().user().as_ref(),
+    )
+    .await?;
     trace!("validating {payload:?}");
     payload.validate().map_err(Error::RequestValidation)?;
     let now = Utc::now();
-    let (playlist, base_created) = in_transaction(&mut db_client, move |tx| {
+    let (playlist, base_created) = in_transaction(db_client.as_mut(), move |tx| {
         Box::pin(async move {
-            let base = base(
-                &auth_user.id,
-                &payload.base.kind,
-                &payload.base.platform,
-                tx.client(),
-            )
-            .await
-            .map_err(Error::DatabaseClient)?;
+            let repos = tx.repositories();
+            let base_repo = repos.base();
+            let playlist_repo = repos.playlist();
+            let base = base_repo
+                .get_by_user_kind_platform(&auth_user.id, &payload.base.kind, payload.base.platform)
+                .await
+                .map_err(Error::DatabaseClient)?;
             let (base, base_created) = match base {
                 Some(base) => {
-                    let playlist = playlist_by_name(&payload.name, tx.client())
+                    let playlist = repos
+                        .playlist()
+                        .get_by_user_name(&auth_user.id, &payload.name)
                         .await
                         .map_err(Error::DatabaseClient)?;
                     if let Some(playlist) = playlist {
@@ -76,7 +76,8 @@ async fn create_playlist(
                         },
                         user_id: auth_user.id,
                     };
-                    insert_base(&base, tx.client())
+                    base_repo
+                        .insert(&base)
                         .await
                         .map_err(Error::DatabaseClient)?;
                     (base, true)
@@ -95,7 +96,8 @@ async fn create_playlist(
                 .into_iter()
                 .map(PlaylistFilter::from)
                 .collect();
-            insert_playlist(&playlist, &filters, tx.client())
+            playlist_repo
+                .insert(&playlist, &filters)
                 .await
                 .map_err(Error::DatabaseClient)?;
             Ok::<(Playlist, bool), Error>((playlist, base_created))
@@ -123,11 +125,17 @@ async fn delete_playlist(
     path: Path<Uuid>,
     cmpts: Data<Components>,
 ) -> Result<impl Responder> {
-    let db_client = client_from_pool(&cmpts.db_pool)
-        .await
-        .map_err(Error::DatabasePool)?;
-    let auth_user = current_user(&req, &cmpts.jwt_cfg, &db_client).await?;
-    let playlist = playlist_by_id(&path, &db_client)
+    let db_client = cmpts.db_pool.client().await.map_err(Error::DatabasePool)?;
+    let auth_user = current_user(
+        &req,
+        &cmpts.jwt_cfg,
+        db_client.repositories().user().as_ref(),
+    )
+    .await?;
+    let repos = db_client.repositories();
+    let playlist_repo = repos.playlist();
+    let playlist = playlist_repo
+        .get_by_id(&path)
         .await
         .map_err(Error::DatabaseClient)?;
     let playlist = match playlist {
@@ -139,7 +147,8 @@ async fn delete_playlist(
     if playlist.user_id != auth_user.id {
         return Err(Error::PlaylistNotOwnedByAuthenticatedUser(playlist.id));
     }
-    delete_playlist_from_database(&playlist.id, &db_client)
+    playlist_repo
+        .delete(&playlist.id)
         .await
         .map_err(Error::DatabaseClient)?;
     info!("playlist {} deleted", playlist.id);
@@ -153,13 +162,19 @@ async fn list_playlists(
     page: Query<PageQuery>,
     cmpts: Data<Components>,
 ) -> Result<impl Responder> {
-    let db_client = client_from_pool(&cmpts.db_pool)
-        .await
-        .map_err(Error::DatabasePool)?;
-    let auth_user = current_user(&req, &cmpts.jwt_cfg, &db_client).await?;
+    let db_client = cmpts.db_pool.client().await.map_err(Error::DatabasePool)?;
+    let auth_user = current_user(
+        &req,
+        &cmpts.jwt_cfg,
+        db_client.repositories().user().as_ref(),
+    )
+    .await?;
     let limit = page.limit.unwrap_or(DEFAULT_PAGE_LIMIT);
     let offset = page.offset.unwrap_or(DEFAULT_PAGE_OFFSET);
-    let page = list_playlists_from_database(&auth_user.id, limit.into(), offset.into(), &db_client)
+    let page = db_client
+        .repositories()
+        .playlist()
+        .list_by_user(&auth_user.id, limit, offset)
         .await
         .map_err(Error::DatabaseClient)?;
     let resp: PageResponse<PlaylistResponse> = page.into();

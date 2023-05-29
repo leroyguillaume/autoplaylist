@@ -17,4 +17,6 @@ SELECT
 FROM playlist
 INNER JOIN base
     ON base.id = playlist.base_id
-WHERE playlist.name = $1;
+WHERE
+    playlist.user_id = $1 AND
+    playlist.name = $2;

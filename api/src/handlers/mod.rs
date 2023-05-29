@@ -12,13 +12,10 @@ use actix_web::{
 };
 use autoplaylist_core::{
     broker::Error as BrokerError,
-    db::{user_by_id, Error as DatabaseError, InTransactionError},
+    db::{InTransactionError, UserRepository},
     domain::User,
 };
 use chrono::Utc;
-use deadpool_postgres::{
-    tokio_postgres::Client as TokioPostgresClient, PoolError as DeadpoolPostgresPoolError,
-};
 use hmac::{digest::InvalidLength as HmacInvalidLength, Hmac, Mac};
 use jwt::{Claims, Error as JwtError, VerifyWithKey};
 use regex::Regex;
@@ -45,8 +42,8 @@ enum Error {
     AuthenticatedUserIsNotAdmin(Uuid),
     AuthenticatedUserNotFound(Uuid),
     BrokerClient(BrokerError),
-    DatabaseClient(DatabaseError),
-    DatabasePool(DeadpoolPostgresPoolError),
+    DatabaseClient(Box<dyn StdError + Send + Sync>),
+    DatabasePool(Box<dyn StdError + Send + Sync>),
     ExpiredJwt,
     InvalidAuthorizationHeader(String),
     InvalidJwtSubject(Option<String>),
@@ -157,8 +154,8 @@ impl StdError for Error {
             Self::AuthenticatedUserIsNotAdmin(_) => None,
             Self::AuthenticatedUserNotFound(_) => None,
             Self::BrokerClient(err) => Some(err),
-            Self::DatabaseClient(err) => Some(err),
-            Self::DatabasePool(err) => Some(err),
+            Self::DatabaseClient(err) => Some(err.as_ref()),
+            Self::DatabasePool(err) => Some(err.as_ref()),
             Self::ExpiredJwt => None,
             Self::InvalidAuthorizationHeader(_) => None,
             Self::InvalidJwtSubject(_) => None,
@@ -185,7 +182,7 @@ impl StdError for Error {
 async fn current_user(
     req: &HttpRequest,
     cfg: &JwtConfig,
-    db_client: &TokioPostgresClient,
+    user_repo: &dyn UserRepository,
 ) -> Result<User> {
     trace!("parsing {} header", header::AUTHORIZATION);
     let val = req
@@ -225,7 +222,8 @@ async fn current_user(
     let id: Uuid = subj
         .parse()
         .map_err(|_| Error::InvalidJwtSubject(Some(subj)))?;
-    user_by_id(&id, db_client)
+    user_repo
+        .get_by_id(&id)
         .await
         .map_err(Error::DatabaseClient)?
         .ok_or_else(|| Error::AuthenticatedUserNotFound(id))

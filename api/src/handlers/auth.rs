@@ -9,9 +9,7 @@ use actix_web::{
     HttpResponse, Responder,
 };
 use autoplaylist_core::{
-    db::{
-        client_from_pool, in_transaction, insert_user, upsert_spotify_auth, user_by_spotify_email,
-    },
+    db::in_transaction,
     domain::{Role, SpotifyAuth, User},
 };
 use chrono::Utc;
@@ -52,12 +50,13 @@ async fn auth_with_spotify(
         .clone()
         .ok_or(Error::NoSpotifyToken)?;
     let email = user.email.ok_or(Error::NoSpotifyUserEmail)?;
-    let mut db_client = client_from_pool(&cmpts.db_pool)
-        .await
-        .map_err(Error::DatabasePool)?;
-    let (user, user_created) = in_transaction(&mut db_client, move |tx| {
+    let mut db_client = cmpts.db_pool.client().await.map_err(Error::DatabasePool)?;
+    let (user, user_created) = in_transaction(db_client.as_mut(), move |tx| {
         Box::pin(async move {
-            let user = user_by_spotify_email(&email, tx.client())
+            let repos = tx.repositories();
+            let user_repo = repos.user();
+            let user = user_repo
+                .get_by_spotify_email(&email)
                 .await
                 .map_err(Error::DatabaseClient)?;
             let (user, user_created) = match user {
@@ -68,7 +67,8 @@ async fn auth_with_spotify(
                         id: Uuid::new_v4(),
                         role: Role::User,
                     };
-                    insert_user(&user, tx.client())
+                    user_repo
+                        .insert(&user)
                         .await
                         .map_err(Error::DatabaseClient)?;
                     (user, true)
@@ -80,7 +80,8 @@ async fn auth_with_spotify(
                 refresh_token: token.refresh_token,
                 user_id: user.id,
             };
-            upsert_spotify_auth(&auth, tx.client())
+            user_repo
+                .upsert_spotify_auth(&auth)
                 .await
                 .map_err(Error::DatabaseClient)?;
             Ok::<(User, bool), Error>((user, user_created))

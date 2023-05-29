@@ -11,5 +11,6 @@ SELECT
     base.last_sync_err_msg AS base_last_sync_err_msg
 FROM base
 WHERE base.user_id = $1
+ORDER BY base.creation_date DESC
 LIMIT $2
 OFFSET $3;

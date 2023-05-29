@@ -1,7 +1,6 @@
 use std::fmt::{Display, Formatter, Result as FmtResult};
 
 use chrono::{DateTime, Utc};
-use postgres_types::{FromSql, ToSql};
 use securefmt::Debug as SecureDebug;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -15,11 +14,9 @@ pub enum BaseKind {
     Playlist(String),
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, FromSql, Serialize, ToSql)]
-#[postgres(name = "platform")]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Platform {
-    #[postgres(name = "spotify")]
     Spotify,
 }
 
@@ -35,27 +32,19 @@ pub enum PlaylistFilterOperator {
     Is(String),
 }
 
-#[derive(Debug, Deserialize, Eq, FromSql, PartialEq, Serialize, ToSql)]
-#[postgres(name = "role")]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Role {
-    #[postgres(name = "admin")]
     Admin,
-    #[postgres(name = "user")]
     User,
 }
 
-#[derive(Debug, Deserialize, FromSql, Serialize, ToSql)]
-#[postgres(name = "sync_state")]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SyncState {
-    #[postgres(name = "aborted")]
     Aborted,
-    #[postgres(name = "failed")]
     Failed,
-    #[postgres(name = "running")]
     Running,
-    #[postgres(name = "succeeded")]
     Succeeded,
 }
 

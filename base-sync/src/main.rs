@@ -5,7 +5,7 @@ use autoplaylist_core::{
         open_channels, start_base_command_consumer, start_base_event_consumer, BaseCommand,
         BaseEvent, ConsumerError, ConsumerSignal,
     },
-    db::init as init_database,
+    db::postgres::PostgresPool,
     init_tracing,
 };
 use futures::FutureExt;
@@ -98,7 +98,7 @@ async fn run() -> Result<()> {
     let mut sig_int = create_signal_listener(SignalKind::interrupt())?;
     let mut sig_term = create_signal_listener(SignalKind::terminate())?;
     let cfg = Config::from_env().map_err(Box::new)?;
-    let _db_pool = init_database(cfg.db).await.map_err(Box::new)?;
+    let _db_pool = PostgresPool::init(cfg.db).await.map_err(Box::new)?;
     let channels = open_channels(cfg.broker).await.map_err(Box::new)?;
     let (csm_sig_sdr, csm_sig_rcv) = watch_channel(ConsumerSignal::Start);
     let base_cmd_csm_handle = start_base_command_consumer(

@@ -6,7 +6,6 @@ use actix_web::{
 };
 use autoplaylist_core::{
     broker::{send_base_command, BaseCommand, BaseCommandKind},
-    db::{client_from_pool, list_bases as list_bases_from_database},
     domain::Role,
 };
 use tracing::info;
@@ -24,13 +23,14 @@ async fn list_bases(
     page: Query<PageQuery>,
     cmpts: Data<Components>,
 ) -> Result<impl Responder> {
-    let db_client = client_from_pool(&cmpts.db_pool)
-        .await
-        .map_err(Error::DatabasePool)?;
-    let auth_user = current_user(&req, &cmpts.jwt_cfg, &db_client).await?;
+    let db_client = cmpts.db_pool.client().await.map_err(Error::DatabasePool)?;
+    let repos = db_client.repositories();
+    let auth_user = current_user(&req, &cmpts.jwt_cfg, repos.user().as_ref()).await?;
     let limit = page.limit.unwrap_or(DEFAULT_PAGE_LIMIT);
     let offset = page.offset.unwrap_or(DEFAULT_PAGE_OFFSET);
-    let page = list_bases_from_database(&auth_user.id, limit.into(), offset.into(), &db_client)
+    let page = repos
+        .base()
+        .list_by_user(&auth_user.id, limit, offset)
         .await
         .map_err(Error::DatabaseClient)?;
     let resp: PageResponse<BaseResponse> = page.into();
@@ -43,10 +43,13 @@ async fn start_base_sync(
     path: Path<Uuid>,
     cmpts: Data<Components>,
 ) -> Result<impl Responder> {
-    let db_client = client_from_pool(&cmpts.db_pool)
-        .await
-        .map_err(Error::DatabasePool)?;
-    let auth_user = current_user(&req, &cmpts.jwt_cfg, &db_client).await?;
+    let db_client = cmpts.db_pool.client().await.map_err(Error::DatabasePool)?;
+    let auth_user = current_user(
+        &req,
+        &cmpts.jwt_cfg,
+        db_client.repositories().user().as_ref(),
+    )
+    .await?;
     if auth_user.role != Role::Admin {
         return Err(Error::AuthenticatedUserIsNotAdmin(auth_user.id));
     }

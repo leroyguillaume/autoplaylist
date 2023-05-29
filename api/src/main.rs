@@ -1,14 +1,13 @@
-use std::{error::Error as StdError, result::Result as StdResult};
+use std::{error::Error as StdError, result::Result as StdResult, sync::Arc};
 
 use actix_cors::Cors;
 use actix_web::{get, web::Data, App, HttpResponse, HttpServer, Responder};
 use autoplaylist_core::{
     broker::{open_channels, Channels},
-    db::init as init_database,
+    db::{postgres::PostgresPool, Pool},
     init_tracing,
 };
 use cfg::{JwtConfig, SpotifyConfig};
-use deadpool_postgres::Pool as DeadpoolPostresPool;
 use opentelemetry::global::shutdown_tracer_provider;
 use tracing::{debug, error, info};
 use tracing_actix_web::TracingLogger;
@@ -33,7 +32,7 @@ type Result<T> = StdResult<T, Box<dyn StdError>>;
 #[derive(Clone)]
 struct Components {
     channels: Channels,
-    db_pool: DeadpoolPostresPool,
+    db_pool: Arc<Box<dyn Pool>>,
     jwt_cfg: JwtConfig,
     spotify_cfg: SpotifyConfig,
 }
@@ -63,11 +62,11 @@ async fn health() -> impl Responder {
 #[inline]
 async fn run() -> Result<()> {
     let cfg = Config::from_env()?;
-    let db_pool = init_database(cfg.db).await.map_err(Box::new)?;
+    let db_pool = PostgresPool::init(cfg.db).await.map_err(Box::new)?;
     let channels = open_channels(cfg.broker).await.map_err(Box::new)?;
     let cmpts = Components {
         channels,
-        db_pool,
+        db_pool: Arc::new(Box::new(db_pool)),
         jwt_cfg: cfg.jwt,
         spotify_cfg: cfg.spotify,
     };
