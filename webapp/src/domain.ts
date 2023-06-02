@@ -3,7 +3,7 @@ export interface Base {
   id: string;
   kind: BaseKind;
   platform: Platform;
-  sync: Sync;
+  sync: Sync | null;
 }
 
 export interface BaseRequest {
@@ -58,9 +58,9 @@ export enum Role {
 
 export interface Sync {
   lastErrMsg: string | null;
-  lastStartDate: string | null;
+  lastStartDate: string;
   lastSuccessDate: string | null;
-  state: SyncState | null;
+  state: SyncState;
 }
 
 export enum SyncState {

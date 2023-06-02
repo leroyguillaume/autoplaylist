@@ -77,7 +77,7 @@ pub struct BaseResponse {
     pub id: Uuid,
     pub kind: BaseKind,
     pub platform: Platform,
-    pub sync: SyncResponse,
+    pub sync: Option<SyncResponse>,
 }
 
 #[derive(Serialize)]
@@ -118,9 +118,9 @@ pub struct PlaylistResponse {
 #[serde(rename_all = "camelCase")]
 pub struct SyncResponse {
     pub last_err_msg: Option<String>,
-    pub last_start_date: Option<DateTime<Utc>>,
+    pub last_start_date: DateTime<Utc>,
     pub last_success_date: Option<DateTime<Utc>>,
-    pub state: Option<SyncState>,
+    pub state: SyncState,
 }
 
 // Impl - BaseResponse
@@ -132,7 +132,7 @@ impl From<Base> for BaseResponse {
             id: base.id,
             kind: base.kind,
             platform: base.platform,
-            sync: base.sync.into(),
+            sync: base.sync.map(|sync| sync.into()),
         }
     }
 }

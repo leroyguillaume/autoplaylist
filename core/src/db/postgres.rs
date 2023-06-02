@@ -146,7 +146,7 @@ impl TryFrom<BaseSql<'_>> for Base {
             id: base.id.into_owned(),
             kind,
             platform: base.platform.into(),
-            sync: Sync::try_from(base.sync)?,
+            sync: base.sync.map(Sync::try_from).transpose()?,
             user_id: base.user_id.into_owned(),
         })
     }
@@ -161,7 +161,7 @@ struct BaseSql<'a> {
     kind: BaseKindSql,
     platform: PlatformSql,
     platform_id: Option<Cow<'a, String>>,
-    sync: SyncSql<'a>,
+    sync: Option<SyncSql<'a>>,
     user_id: Cow<'a, Uuid>,
 }
 
@@ -174,7 +174,7 @@ impl<'a> BaseSql<'a> {
             kind,
             platform: base.platform.into(),
             platform_id: platform_id.map(Cow::Borrowed),
-            sync: SyncSql::from_sync(&base.sync),
+            sync: base.sync.as_ref().map(SyncSql::from_sync),
             user_id: Cow::Borrowed(&base.user_id),
         }
     }
@@ -395,9 +395,9 @@ impl From<SyncSql<'_>> for Sync {
         trace!("converting {sync:?} into sync");
         Self {
             last_err_msg: sync.last_err_msg.map(|msg| msg.into_owned()),
-            last_start_date: sync.last_start_date.map(|date| date.into_owned()),
+            last_start_date: sync.last_start_date.into_owned(),
             last_success_date: sync.last_success_date.map(|date| date.into_owned()),
-            state: sync.state.map(|state| state.into()),
+            state: sync.state.into(),
         }
     }
 }
@@ -407,28 +407,32 @@ impl From<SyncSql<'_>> for Sync {
 #[derive(Clone, Debug)]
 struct SyncSql<'a> {
     last_err_msg: Option<Cow<'a, String>>,
-    last_start_date: Option<Cow<'a, DateTime<Utc>>>,
+    last_start_date: Cow<'a, DateTime<Utc>>,
     last_success_date: Option<Cow<'a, DateTime<Utc>>>,
-    state: Option<SyncStateSql>,
+    state: SyncStateSql,
 }
 
 impl<'a> SyncSql<'a> {
-    fn try_from_row(alias: &str, row: &'a Row) -> Result<Self> {
+    fn try_from_row(alias: &str, row: &'a Row) -> Result<Option<Self>> {
         trace!("extracting playlist from {row:?}");
-        Ok(Self {
-            last_err_msg: try_get_opt_cowed(alias, "last_sync_err_msg", row)?,
-            last_start_date: try_get_opt_cowed(alias, "last_sync_start_date", row)?,
-            last_success_date: try_get_opt_cowed(alias, "last_sync_success_date", row)?,
-            state: try_get(alias, "sync_state", row)?,
-        })
+        try_get::<Option<SyncStateSql>>(alias, "sync_state", row)?
+            .map(|state| {
+                Ok(Self {
+                    last_err_msg: try_get_opt_cowed(alias, "last_sync_err_msg", row)?,
+                    last_start_date: try_get_cowed(alias, "last_sync_start_date", row)?,
+                    last_success_date: try_get_opt_cowed(alias, "last_sync_success_date", row)?,
+                    state,
+                })
+            })
+            .transpose()
     }
 
     fn from_sync(sync: &'a Sync) -> Self {
         Self {
             last_err_msg: sync.last_err_msg.as_ref().map(Cow::Borrowed),
-            last_start_date: sync.last_start_date.as_ref().map(Cow::Borrowed),
+            last_start_date: Cow::Borrowed(&sync.last_start_date),
             last_success_date: sync.last_success_date.as_ref().map(Cow::Borrowed),
-            state: sync.state.map(SyncStateSql::from),
+            state: sync.state.into(),
         }
     }
 }

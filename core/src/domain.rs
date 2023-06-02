@@ -56,7 +56,7 @@ pub struct Base {
     pub id: Uuid,
     pub kind: BaseKind,
     pub platform: Platform,
-    pub sync: Sync,
+    pub sync: Option<Sync>,
     pub user_id: Uuid,
 }
 
@@ -82,9 +82,9 @@ pub struct SpotifyAuth {
 #[derive(Debug)]
 pub struct Sync {
     pub last_err_msg: Option<String>,
-    pub last_start_date: Option<DateTime<Utc>>,
+    pub last_start_date: DateTime<Utc>,
     pub last_success_date: Option<DateTime<Utc>>,
-    pub state: Option<SyncState>,
+    pub state: SyncState,
 }
 
 #[derive(Debug)]

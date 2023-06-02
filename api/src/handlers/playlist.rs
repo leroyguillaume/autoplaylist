@@ -7,7 +7,7 @@ use actix_web::{
 use autoplaylist_core::{
     broker::{send_base_event, BaseEvent, BaseEventKind},
     db::in_transaction,
-    domain::{Base, Playlist, PlaylistFilter, Sync},
+    domain::{Base, Playlist, PlaylistFilter},
 };
 use chrono::Utc;
 use tracing::{info, trace};
@@ -68,12 +68,7 @@ async fn create_playlist(
                         id: Uuid::new_v4(),
                         kind: payload.base.kind.clone(),
                         platform: payload.base.platform,
-                        sync: Sync {
-                            last_err_msg: None,
-                            last_start_date: None,
-                            last_success_date: None,
-                            state: None,
-                        },
+                        sync: None,
                         user_id: auth_user.id,
                     };
                     base_repo

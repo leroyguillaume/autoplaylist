@@ -51,15 +51,15 @@ export default function PlaylistTable(props: Props) {
     return page.content.map((base) => {
       let status;
       let syncBtnDisabled = false;
-      if (base.sync.state === SyncState.Running) {
+      if (base.sync?.state === SyncState.Running) {
         status = "synchronizing";
         syncBtnDisabled = true;
       } else {
-        const lastSuccessDate = base.sync.lastSuccessDate;
-        if (lastSuccessDate === null) {
+        const lastSuccessDate = base.sync?.lastSuccessDate;
+        if (lastSuccessDate === null || lastSuccessDate === undefined) {
           status = "never synchronized";
         } else {
-          const date = new Date(lastSuccessDate).toLocaleString();
+          const date = new Date(lastSuccessDate!!).toLocaleString();
           status = `synchronized at ${date}`;
         }
       }
