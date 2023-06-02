@@ -79,7 +79,7 @@ async fn create_playlist(
                 }
             };
             let playlist = Playlist {
-                base,
+                base_id: base.id,
                 creation_date: now,
                 id: Uuid::new_v4(),
                 name: payload.name.clone(),
@@ -103,7 +103,7 @@ async fn create_playlist(
     info!("new playlist created");
     if base_created {
         let event = BaseEvent {
-            id: playlist.base.id,
+            id: playlist.base_id,
             kind: BaseEventKind::Created,
         };
         send_base_event(&event, &cmpts.channels.base_event)

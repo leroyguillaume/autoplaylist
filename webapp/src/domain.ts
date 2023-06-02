@@ -25,7 +25,6 @@ export enum Platform {
 }
 
 export interface Playlist {
-  base: Base;
   creationDate: string;
   id: string;
   name: string;

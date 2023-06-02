@@ -62,7 +62,7 @@ pub struct Base {
 
 #[derive(Debug)]
 pub struct Playlist {
-    pub base: Base,
+    pub base_id: Uuid,
     pub creation_date: DateTime<Utc>,
     pub id: Uuid,
     pub name: String,

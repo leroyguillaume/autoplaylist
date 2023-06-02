@@ -108,7 +108,7 @@ pub struct PreconditionFailedResponse {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlaylistResponse {
-    pub base: BaseResponse,
+    pub base_id: Uuid,
     pub creation_date: DateTime<Utc>,
     pub id: Uuid,
     pub name: String,
@@ -212,7 +212,7 @@ impl Validate for PlaylistFilterOperator {
 impl From<Playlist> for PlaylistResponse {
     fn from(playlist: Playlist) -> Self {
         Self {
-            base: playlist.base.into(),
+            base_id: playlist.base_id,
             creation_date: playlist.creation_date,
             id: playlist.id,
             name: playlist.name,

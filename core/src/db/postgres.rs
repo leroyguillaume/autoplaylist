@@ -248,7 +248,7 @@ impl TryFrom<PlaylistSql<'_>> for Playlist {
     fn try_from(playlist: PlaylistSql) -> Result<Self> {
         trace!("converting {playlist:?} into playlist");
         Ok(Self {
-            base: playlist.base.try_into()?,
+            base_id: playlist.base_id.into_owned(),
             creation_date: playlist.creation_date.into_owned(),
             id: playlist.id.into_owned(),
             name: playlist.name.into_owned(),
@@ -261,7 +261,7 @@ impl TryFrom<PlaylistSql<'_>> for Playlist {
 
 #[derive(Clone, Debug)]
 struct PlaylistSql<'a> {
-    base: BaseSql<'a>,
+    base_id: Cow<'a, Uuid>,
     creation_date: Cow<'a, DateTime<Utc>>,
     id: Cow<'a, Uuid>,
     name: Cow<'a, String>,
@@ -271,7 +271,7 @@ struct PlaylistSql<'a> {
 impl<'a> PlaylistSql<'a> {
     fn from_playlist(playlist: &'a Playlist) -> Self {
         Self {
-            base: BaseSql::from_base(&playlist.base),
+            base_id: Cow::Borrowed(&playlist.base_id),
             creation_date: Cow::Borrowed(&playlist.creation_date),
             id: Cow::Borrowed(&playlist.id),
             name: Cow::Borrowed(&playlist.name),
@@ -279,14 +279,14 @@ impl<'a> PlaylistSql<'a> {
         }
     }
 
-    fn try_from_row(playlist_alias: &str, base_alias: &str, row: &'a Row) -> Result<Self> {
+    fn try_from_row(alias: &str, row: &'a Row) -> Result<Self> {
         trace!("extracting playlist from {row:?}");
         Ok(Self {
-            base: BaseSql::try_from_row(base_alias, row)?,
-            creation_date: try_get_cowed(playlist_alias, "creation_date", row)?,
-            id: try_get_cowed(playlist_alias, "id", row)?,
-            name: try_get_cowed(playlist_alias, "name", row)?,
-            user_id: try_get_cowed(playlist_alias, "user_id", row)?,
+            base_id: try_get_cowed(alias, "base_id", row)?,
+            creation_date: try_get_cowed(alias, "creation_date", row)?,
+            id: try_get_cowed(alias, "id", row)?,
+            name: try_get_cowed(alias, "name", row)?,
+            user_id: try_get_cowed(alias, "user_id", row)?,
         })
     }
 }
@@ -708,7 +708,7 @@ impl PlaylistRepository for PostgresPlaylistRepository<'_> {
             .map_err(Error::client_boxed)
             .map(|row| {
                 row.map(|row| {
-                    PlaylistSql::try_from_row("playlist", "base", &row).and_then(Playlist::try_from)
+                    PlaylistSql::try_from_row("playlist", &row).and_then(Playlist::try_from)
                 })
             })?
             .transpose()?;
@@ -725,7 +725,7 @@ impl PlaylistRepository for PostgresPlaylistRepository<'_> {
             .map_err(Error::client_boxed)
             .map(|row| {
                 row.map(|row| {
-                    PlaylistSql::try_from_row("playlist", "base", &row).and_then(Playlist::try_from)
+                    PlaylistSql::try_from_row("playlist", &row).and_then(Playlist::try_from)
                 })
             })?
             .transpose()?;
@@ -744,7 +744,7 @@ impl PlaylistRepository for PostgresPlaylistRepository<'_> {
                     playlist.id.as_ref(),
                     playlist.creation_date.as_ref(),
                     playlist.user_id.as_ref(),
-                    playlist.base.id.as_ref(),
+                    playlist.base_id.as_ref(),
                     playlist.name.as_ref(),
                 ],
             )
@@ -788,9 +788,7 @@ impl PlaylistRepository for PostgresPlaylistRepository<'_> {
             .await
             .map_err(Error::client_boxed)?
             .into_iter()
-            .map(|row| {
-                PlaylistSql::try_from_row("playlist", "base", &row).and_then(Playlist::try_from)
-            })
+            .map(|row| PlaylistSql::try_from_row("playlist", &row).and_then(Playlist::try_from))
             .collect::<Result<Vec<Playlist>>>()?;
         let page = Page {
             content,
