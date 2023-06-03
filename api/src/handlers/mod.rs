@@ -11,7 +11,6 @@ use actix_web::{
     HttpRequest, HttpResponse, HttpResponseBuilder, ResponseError,
 };
 use autoplaylist_core::{
-    broker::Error as BrokerError,
     db::{InTransactionError, UserRepository},
     domain::User,
 };
@@ -35,13 +34,13 @@ const ROLE_JWT_CLAIM_KEY: &str = "role";
 
 type Result<T> = StdResult<T, Error>;
 
-// Enums
+// Error
 
 #[derive(Debug)]
 enum Error {
     AuthenticatedUserIsNotAdmin(Uuid),
     AuthenticatedUserNotFound(Uuid),
-    BrokerClient(BrokerError),
+    BrokerClient(Box<dyn StdError + Send + Sync>),
     DatabaseClient(Box<dyn StdError + Send + Sync>),
     DatabasePool(Box<dyn StdError + Send + Sync>),
     ExpiredJwt,
@@ -62,7 +61,11 @@ enum Error {
     TimestampConversion(TryFromIntError),
 }
 
-// Impl - Error
+impl Error {
+    fn broker_client<E: StdError + Send + Sync + 'static>(err: E) -> Self {
+        Self::BrokerClient(Box::new(err))
+    }
+}
 
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
@@ -153,7 +156,7 @@ impl StdError for Error {
         match self {
             Self::AuthenticatedUserIsNotAdmin(_) => None,
             Self::AuthenticatedUserNotFound(_) => None,
-            Self::BrokerClient(err) => Some(err),
+            Self::BrokerClient(err) => Some(err.as_ref()),
             Self::DatabaseClient(err) => Some(err.as_ref()),
             Self::DatabasePool(err) => Some(err.as_ref()),
             Self::ExpiredJwt => None,
@@ -176,7 +179,7 @@ impl StdError for Error {
     }
 }
 
-// Functions - Utils
+// current_user
 
 #[inline]
 async fn current_user(
@@ -228,6 +231,8 @@ async fn current_user(
         .map_err(Error::DatabaseClient)?
         .ok_or_else(|| Error::AuthenticatedUserNotFound(id))
 }
+
+// generate_jwt_key
 
 #[inline]
 fn generate_jwt_key(cfg: &JwtConfig) -> Result<Hmac<Sha512>> {

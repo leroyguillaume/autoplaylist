@@ -16,18 +16,16 @@ use tracing_bunyan_formatter::{BunyanFormattingLayer, JsonStorageLayer};
 use tracing_opentelemetry::layer;
 use tracing_subscriber::{prelude::__tracing_subscriber_SubscriberExt, EnvFilter, Registry};
 
-// Enums
+// ConfigError
 
 #[derive(Debug)]
 pub enum ConfigError {
     MissingEnvVar(&'static str),
     Parsing {
         key: &'static str,
-        err: Box<dyn StdError>,
+        err: Box<dyn StdError + Send + Sync>,
     },
 }
-
-// Impl - Error
 
 impl Display for ConfigError {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
@@ -49,9 +47,9 @@ impl StdError for ConfigError {
     }
 }
 
-// Functions
+// init_tracing
 
-pub fn init_tracing(service: &str) -> Result<(), Box<dyn StdError>> {
+pub fn init_tracing(service: &str) -> Result<(), Box<dyn StdError + Send + Sync>> {
     let jaeger_host: String =
         env_var_or_default("JAEGER_HOST", || "127.0.0.1".into()).map_err(Box::new)?;
     let jaeger_port = env_var_or_default("JAEGER_PORT", || 6831).map_err(Box::new)?;
@@ -74,12 +72,12 @@ pub fn init_tracing(service: &str) -> Result<(), Box<dyn StdError>> {
         .with(telemetry)
         .with(JsonStorageLayer)
         .with(logs);
-    set_global_default(subscriber).map_err(|err| Box::new(err) as Box<dyn StdError>)
+    set_global_default(subscriber).map_err(|err| Box::new(err) as Box<dyn StdError + Send + Sync>)
 }
 
-// Functions - Utils
+// env_var
 
-pub fn env_var<E: StdError + 'static, T: FromStr<Err = E>>(
+pub fn env_var<E: StdError + Send + Sync + 'static, T: FromStr<Err = E>>(
     key: &'static str,
 ) -> Result<T, ConfigError> {
     match env_var_opt(key) {
@@ -89,7 +87,9 @@ pub fn env_var<E: StdError + 'static, T: FromStr<Err = E>>(
     }
 }
 
-pub fn env_var_opt<E: StdError + 'static, T: FromStr<Err = E>>(
+// env_var_opt
+
+pub fn env_var_opt<E: StdError + Send + Sync + 'static, T: FromStr<Err = E>>(
     key: &'static str,
 ) -> Result<Option<T>, ConfigError> {
     match var(key) {
@@ -109,7 +109,13 @@ pub fn env_var_opt<E: StdError + 'static, T: FromStr<Err = E>>(
     }
 }
 
-pub fn env_var_or_default<E: StdError + 'static, F: Fn() -> T, T: FromStr<Err = E>>(
+// env_var_or_default
+
+pub fn env_var_or_default<
+    E: StdError + Send + Sync + 'static,
+    F: Fn() -> T,
+    T: FromStr<Err = E>,
+>(
     key: &'static str,
     default: F,
 ) -> Result<T, ConfigError> {

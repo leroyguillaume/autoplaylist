@@ -1,20 +1,18 @@
 use std::{error::Error as StdError, result::Result as StdResult};
 
+use async_trait::async_trait;
 use autoplaylist_core::{
     broker::{
-        open_channels, start_base_command_consumer, start_base_event_consumer, BaseCommand,
-        BaseEvent, ConsumerError, ConsumerSignal,
+        rabbitmq::RabbitMqBroker, BaseCommand, BaseEvent, Broker, ConsumerError, ConsumerHandler,
     },
     db::postgres::PostgresPool,
     init_tracing,
 };
-use futures::FutureExt;
 use opentelemetry::global::shutdown_tracer_provider;
 use tokio::{
     select,
     signal::unix::{signal, Signal, SignalKind},
-    sync::watch::{channel as watch_channel, Receiver, Sender},
-    task::JoinHandle,
+    sync::watch::{channel as watch_channel, Sender},
 };
 use tracing::{debug, error, info, trace};
 
@@ -22,9 +20,29 @@ use self::cfg::Config;
 
 // Types
 
-type Result<T> = StdResult<T, Box<dyn StdError>>;
+type Result<T> = StdResult<T, Box<dyn StdError + Send + Sync>>;
 
-// Functions
+// Handler
+
+struct Handler;
+
+#[async_trait]
+impl ConsumerHandler<BaseCommand> for Handler {
+    async fn handle(&self, _cmd: BaseCommand) -> StdResult<(), ConsumerError> {
+        debug!("ok");
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl ConsumerHandler<BaseEvent> for Handler {
+    async fn handle(&self, _event: BaseEvent) -> StdResult<(), ConsumerError> {
+        debug!("ok");
+        Ok(())
+    }
+}
+
+// main
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -37,126 +55,52 @@ async fn main() -> Result<()> {
     res
 }
 
-// Functions - Utils
+// signal_listener
 
 #[inline]
-fn create_signal_listener(kind: SignalKind) -> Result<Signal> {
+fn signal_listener(kind: SignalKind) -> Result<Signal> {
     trace!("creating UNIX signal listener on {kind:?}");
-    signal(kind).map_err(|err| Box::new(err) as Box<dyn StdError>)
+    signal(kind).map_err(|err| Box::new(err) as Box<dyn StdError + Send + Sync>)
 }
 
-#[inline]
-async fn handle_base_command(
-    _cmd: BaseCommand,
-    mut sig_rcv: Receiver<ConsumerSignal>,
-) -> StdResult<(), ConsumerError> {
-    loop {
-        match sig_rcv.changed().now_or_never() {
-            Some(Ok(())) => {
-                let sig = *sig_rcv.borrow();
-                trace!("base command worker received {sig:?}");
-                if let ConsumerSignal::Stop = sig {
-                    break;
-                }
-            }
-            Some(Err(err)) => {
-                error!("base command worker failed to listen consumer signal: {err}");
-            }
-            None => (),
-        }
-    }
-    debug!("base command worker stopped");
-    Ok(())
-}
-
-#[inline]
-async fn handle_base_event(
-    _event: BaseEvent,
-    mut sig_rcv: Receiver<ConsumerSignal>,
-) -> StdResult<(), ConsumerError> {
-    loop {
-        match sig_rcv.changed().now_or_never() {
-            Some(Ok(())) => {
-                let sig = *sig_rcv.borrow();
-                trace!("base event worker received {sig:?}");
-                if let ConsumerSignal::Stop = sig {
-                    break;
-                }
-            }
-            Some(Err(err)) => {
-                error!("base event worker failed to listen consumer signal: {err}");
-            }
-            None => (),
-        }
-    }
-    debug!("base event worker stopped");
-    Ok(())
-}
+// run
 
 #[inline]
 async fn run() -> Result<()> {
-    let mut sig_int = create_signal_listener(SignalKind::interrupt())?;
-    let mut sig_term = create_signal_listener(SignalKind::terminate())?;
+    let mut sig_int = signal_listener(SignalKind::interrupt())?;
+    let mut sig_term = signal_listener(SignalKind::terminate())?;
     let cfg = Config::from_env().map_err(Box::new)?;
     let _db_pool = PostgresPool::init(cfg.db).await.map_err(Box::new)?;
-    let channels = open_channels(cfg.broker).await.map_err(Box::new)?;
-    let (csm_sig_sdr, csm_sig_rcv) = watch_channel(ConsumerSignal::Start);
-    let base_cmd_csm_handle = start_base_command_consumer(
-        "base-sync_base-cmd",
-        &channels.base_cmd,
-        csm_sig_rcv.clone(),
-        {
-            let csm_sig_rcv = csm_sig_rcv.clone();
-            move |cmd| {
-                let csm_sig_rcv = csm_sig_rcv.clone();
-                async move { handle_base_command(cmd, csm_sig_rcv).await }
-            }
-        },
-    )
-    .await
-    .map_err(Box::new)?;
-    let base_event_csm_handle = start_base_event_consumer(
-        "base-sync_base-event",
-        &channels.base_event,
-        csm_sig_rcv.clone(),
-        move |event| {
-            let csm_sig_rcv = csm_sig_rcv.clone();
-            async move { handle_base_event(event, csm_sig_rcv).await }
-        },
-    )
-    .await
-    .map_err(Box::new)?;
+    let broker = RabbitMqBroker::init(cfg.rabbitmq).await.map_err(Box::new)?;
+    let (stop_sig_tx, stop_sig_rx) = watch_channel(());
+    let base_cmd_handler: Box<dyn ConsumerHandler<BaseCommand>> = Box::new(Handler);
+    let base_event_handler: Box<dyn ConsumerHandler<BaseEvent>> = Box::new(Handler);
+    let base_cmd_csm = broker
+        .start_base_command_consumer(cfg.queues.base_cmd, stop_sig_rx.clone(), base_cmd_handler)
+        .await?;
+    let base_event_csm = broker
+        .start_base_event_consumer(cfg.queues.base_event, stop_sig_rx, base_event_handler)
+        .await?;
     info!("synchronizer is started");
-    let handles = vec![base_cmd_csm_handle, base_event_csm_handle];
     select! {
-        _ = sig_int.recv() => shutdown(SignalKind::interrupt(), csm_sig_sdr, handles).await,
-        _ = sig_term.recv() => shutdown(SignalKind::terminate(), csm_sig_sdr, handles).await,
+        _ = sig_int.recv() => send_stop_signal(SignalKind::interrupt(), stop_sig_tx).await,
+        _ = sig_term.recv() => send_stop_signal(SignalKind::terminate(), stop_sig_tx).await,
     }
+    debug!("waiting for consumers shutdown");
+    base_cmd_csm.wait_for_shutdown().await;
+    base_event_csm.wait_for_shutdown().await;
     info!("synchronizer stopped");
     Ok(())
 }
 
+// send_stop_signal
+
 #[inline]
-async fn shutdown(
-    sig_kind: SignalKind,
-    csm_sig_sdr: Sender<ConsumerSignal>,
-    handles: Vec<JoinHandle<()>>,
-) {
+async fn send_stop_signal(sig_kind: SignalKind, stop_sig_tx: Sender<()>) {
     debug!("{sig_kind:?} received, synchronizer will shutdown");
-    let csm_sig = ConsumerSignal::Stop;
-    trace!("sending {csm_sig:?} to all consumers");
-    info!("waiting for consumers stop");
-    match csm_sig_sdr.send(csm_sig) {
-        Ok(()) => {
-            for handle in handles {
-                if let Err(err) = handle.await {
-                    error!("waiting for consumer stop failed: {err}");
-                }
-            }
-        }
-        Err(err) => {
-            error!("sending {csm_sig:?} to all consumers failed: {err}");
-        }
+    trace!("sending stop signal");
+    if let Err(err) = stop_sig_tx.send(()) {
+        error!("sending stop signal to all consumers failed: {err}");
     }
 }
 

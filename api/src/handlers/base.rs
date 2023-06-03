@@ -5,7 +5,7 @@ use actix_web::{
     HttpRequest, HttpResponse, Responder,
 };
 use autoplaylist_core::{
-    broker::{send_base_command, BaseCommand, BaseCommandKind},
+    broker::{BaseCommand, BaseCommandKind},
     domain::Role,
 };
 use tracing::info;
@@ -57,9 +57,11 @@ async fn start_base_sync(
         id: *path,
         kind: BaseCommandKind::Sync,
     };
-    send_base_command(&cmd, &cmpts.channels.base_cmd)
+    cmpts
+        .base_cmd_prd
+        .produce(&cmd)
         .await
-        .map_err(Error::BrokerClient)?;
+        .map_err(Error::broker_client)?;
     info!("synchronization requested for base {}", *path);
     Ok::<HttpResponse<BoxBody>, Error>(HttpResponse::NoContent().into())
 }

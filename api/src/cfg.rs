@@ -4,8 +4,8 @@ use std::{
 };
 
 use autoplaylist_core::{
-    broker::Config as BrokerConfig, db::Config as DatabaseConfig, env_var, env_var_or_default,
-    ConfigError,
+    broker::rabbitmq::Config as RabbitMqConfig, db::Config as DatabaseConfig, env_var,
+    env_var_or_default, ConfigError,
 };
 use chrono::Duration;
 use securefmt::Debug;
@@ -19,9 +19,9 @@ pub type Result<T> = StdResult<T, ConfigError>;
 
 #[derive(Debug, Clone)]
 pub struct Config {
-    pub broker: BrokerConfig,
     pub db: DatabaseConfig,
     pub jwt: JwtConfig,
+    pub rabbitmq: RabbitMqConfig,
     pub server: ServerConfig,
     pub spotify: SpotifyConfig,
 }
@@ -56,7 +56,6 @@ impl Config {
         let webapp_url: String = env_var("WEBAPP_URL")?;
         let spotify_redirect_url = format!("{webapp_url}/auth/spotify");
         let cfg = Config {
-            broker: BrokerConfig::from_env()?,
             db: DatabaseConfig::from_env()?,
             jwt: JwtConfig {
                 issuer: env_var("DOMAIN")?,
@@ -64,6 +63,7 @@ impl Config {
                 validity: env_var_or_default("JWT_VALIDITY", || 12 * 60 * 60)
                     .map(Duration::seconds)?,
             },
+            rabbitmq: RabbitMqConfig::from_env()?,
             server: ServerConfig {
                 addr: env_var_or_default("SERVER_ADDRESS", || {
                     SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 8080))

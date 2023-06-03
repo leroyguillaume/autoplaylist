@@ -4,6 +4,7 @@ edition.workspace = true
 version.workspace = true
 
 [dependencies]
+async-trait = "0.1"
 autoplaylist-core = { path = "../core" }
 futures = "0.3"
 opentelemetry = { version = "0.18" }

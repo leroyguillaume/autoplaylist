@@ -5,7 +5,7 @@ use actix_web::{
     HttpRequest, HttpResponse, Responder,
 };
 use autoplaylist_core::{
-    broker::{send_base_event, BaseEvent, BaseEventKind},
+    broker::{BaseEvent, BaseEventKind},
     db::in_transaction,
     domain::{Base, Playlist, PlaylistFilter},
 };
@@ -106,9 +106,11 @@ async fn create_playlist(
             id: playlist.base_id,
             kind: BaseEventKind::Created,
         };
-        send_base_event(&event, &cmpts.channels.base_event)
+        cmpts
+            .base_event_prd
+            .produce(&event)
             .await
-            .map_err(Error::BrokerClient)?;
+            .map_err(Error::broker_client)?;
     }
     let resp: PlaylistResponse = playlist.into();
     Ok(HttpResponse::Created().json(resp))
