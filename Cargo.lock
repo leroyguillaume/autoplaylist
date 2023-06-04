@@ -512,6 +512,7 @@ dependencies = [
  "opentelemetry-jaeger",
  "postgres-types",
  "refinery",
+ "rspotify",
  "securefmt",
  "serde",
  "serde_json",

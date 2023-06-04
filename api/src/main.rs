@@ -4,10 +4,11 @@ use actix_cors::Cors;
 use actix_web::{get, web::Data, App, HttpResponse, HttpServer, Responder};
 use autoplaylist_core::{
     broker::{rabbitmq::RabbitMqBroker, BaseCommand, BaseEvent, Broker, Producer},
-    db::{postgres::PostgresPool, Pool},
+    db::{postgres::PostgresPool, Pool as DatabasePool},
     init_tracing,
+    spotify::{rspotify::RSpotifyClient, Client as SpotifyClient},
 };
-use cfg::{JwtConfig, SpotifyConfig};
+use cfg::JwtConfig;
 use opentelemetry::global::shutdown_tracer_provider;
 use tracing::{debug, error, info};
 use tracing_actix_web::TracingLogger;
@@ -33,9 +34,9 @@ type Result<T> = StdResult<T, Box<dyn StdError + Send + Sync>>;
 struct Components {
     base_cmd_prd: Arc<Box<dyn Producer<BaseCommand>>>,
     base_event_prd: Arc<Box<dyn Producer<BaseEvent>>>,
-    db_pool: Arc<Box<dyn Pool>>,
+    db_pool: Arc<Box<dyn DatabasePool>>,
     jwt_cfg: JwtConfig,
-    spotify_cfg: SpotifyConfig,
+    spotify_client: Arc<Box<dyn SpotifyClient>>,
 }
 
 // Functions - Main
@@ -65,12 +66,13 @@ async fn run() -> Result<()> {
     let cfg = Config::from_env()?;
     let db_pool = PostgresPool::init(cfg.db).await.map_err(Box::new)?;
     let broker = RabbitMqBroker::init(cfg.rabbitmq).await.map_err(Box::new)?;
+    let spotify_client = RSpotifyClient::new(cfg.spotify);
     let cmpts = Components {
         base_cmd_prd: Arc::new(broker.base_command_producer()),
         base_event_prd: Arc::new(broker.base_event_producer()),
         db_pool: Arc::new(Box::new(db_pool)),
         jwt_cfg: cfg.jwt,
-        spotify_cfg: cfg.spotify,
+        spotify_client: Arc::new(Box::new(spotify_client)),
     };
     debug!("starting server on {}", cfg.server.addr);
     let server = HttpServer::new(move || {

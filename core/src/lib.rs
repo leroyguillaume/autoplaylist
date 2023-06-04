@@ -131,3 +131,4 @@ pub fn env_var_or_default<
 pub mod broker;
 pub mod db;
 pub mod domain;
+pub mod spotify;

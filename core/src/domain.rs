@@ -76,7 +76,7 @@ pub struct SpotifyAuth {
     pub user_id: Uuid,
 }
 
-#[derive(SecureDebug)]
+#[derive(Clone, SecureDebug)]
 pub struct SpotifyToken {
     #[sensitive]
     pub access_token: String,

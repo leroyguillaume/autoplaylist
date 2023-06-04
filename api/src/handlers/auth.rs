@@ -10,17 +10,16 @@ use actix_web::{
 };
 use autoplaylist_core::{
     db::in_transaction,
-    domain::{Role, SpotifyAuth, SpotifyToken, User},
+    domain::{Role, SpotifyAuth, User},
 };
 use chrono::Utc;
 use jwt::{Claims, RegisteredClaims, SignWithKey};
-use rspotify::{prelude::OAuthClient, scopes, AuthCodeSpotify, Credentials, OAuth};
 use serde_json::json;
 use tracing::{debug, info};
 use uuid::Uuid;
 
 use crate::{
-    cfg::{JwtConfig, SpotifyConfig},
+    cfg::JwtConfig,
     dto::{AuthWithSpotifyRequest, JwtResponse},
     handlers::{generate_jwt_key, Error, Result, ROLE_JWT_CLAIM_KEY},
     Components,
@@ -33,23 +32,16 @@ async fn auth_with_spotify(
     payload: Json<AuthWithSpotifyRequest>,
     cmpts: Data<Components>,
 ) -> Result<impl Responder> {
-    let spotify = spotify_oauth_client(cmpts.spotify_cfg.clone());
-    debug!("requesting Spotify token");
-    spotify
+    let token = cmpts
+        .spotify_client
         .request_token(&payload.code)
         .await
         .map_err(Error::SpotifyClient)?;
-    debug!("requesting Spotify user");
-    let user = spotify.current_user().await.map_err(Error::SpotifyClient)?;
-    debug!("Spotify user fetched: {user:?}");
-    let token = spotify
-        .token
-        .lock()
+    let email = cmpts
+        .spotify_client
+        .user_email(&token)
         .await
-        .map_err(|_| Error::SpotifyClientTokenLock)?
-        .clone()
-        .ok_or(Error::NoSpotifyToken)?;
-    let email = user.email.ok_or(Error::NoSpotifyUserEmail)?;
+        .map_err(Error::SpotifyClient)?;
     let mut db_client = cmpts.db_pool.client().await.map_err(Error::DatabasePool)?;
     let (user, user_created) = in_transaction(db_client.as_mut(), move |tx| {
         Box::pin(async move {
@@ -76,11 +68,7 @@ async fn auth_with_spotify(
             };
             let auth = SpotifyAuth {
                 email,
-                token: SpotifyToken {
-                    access_token: token.access_token,
-                    expiration_date: Utc::now() + token.expires_in,
-                    refresh_token: token.refresh_token,
-                },
+                token,
                 user_id: user.id,
             };
             user_repo
@@ -101,10 +89,10 @@ async fn auth_with_spotify(
 
 #[get("/auth/spotify")]
 async fn spotify_redirect(cmpts: Data<Components>) -> Result<impl Responder> {
-    let spotify = spotify_oauth_client(cmpts.spotify_cfg.clone());
-    debug!("computing Spotify authorize URL");
-    let url = spotify
-        .get_authorize_url(false)
+    let url = cmpts
+        .spotify_client
+        .auth_url()
+        .await
         .map_err(Error::SpotifyClient)?;
     debug!("sending redirect to {url}");
     let mut resp = HttpResponse::TemporaryRedirect();
@@ -134,33 +122,4 @@ fn generate_jwt(user: &User, cfg: &JwtConfig) -> Result<String> {
     };
     let key = generate_jwt_key(cfg)?;
     claims.sign_with_key(&key).map_err(Error::JwtGeneration)
-}
-
-#[inline]
-fn spotify_oauth_client(cfg: SpotifyConfig) -> AuthCodeSpotify {
-    let creds = Credentials {
-        id: cfg.id,
-        secret: Some(cfg.secret),
-    };
-    let oauth = OAuth {
-        redirect_uri: cfg.redirect_url,
-        scopes: scopes!(
-            "playlist-modify-private",
-            "playlist-modify-public",
-            "playlist-read-collaborative",
-            "playlist-read-private",
-            "user-follow-read",
-            "user-library-read",
-            "user-modify-playback-state",
-            "user-read-currently-playing",
-            "user-read-playback-position",
-            "user-read-playback-state",
-            "user-read-recently-played",
-            "user-read-email",
-            "user-read-private",
-            "user-top-read"
-        ),
-        ..Default::default()
-    };
-    AuthCodeSpotify::new(creds, oauth)
 }

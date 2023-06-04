@@ -5,17 +5,35 @@ use std::{
 
 use autoplaylist_core::{
     broker::rabbitmq::Config as RabbitMqConfig, db::Config as DatabaseConfig, env_var,
-    env_var_or_default, ConfigError,
+    env_var_or_default, spotify::rspotify::Config as SpotifyConfig, ConfigError,
 };
 use chrono::Duration;
 use securefmt::Debug;
 use tracing::{debug, trace};
 
-// Types
+// Result
 
 pub type Result<T> = StdResult<T, ConfigError>;
 
-// Structs
+// JwtConfig
+
+#[derive(Debug, Clone)]
+pub struct JwtConfig {
+    pub issuer: String,
+    #[sensitive]
+    pub secret: String,
+    pub validity: Duration,
+}
+
+// ServerConfig
+
+#[derive(Debug, Clone)]
+pub struct ServerConfig {
+    pub addr: SocketAddr,
+    pub allowed_origin: String,
+}
+
+// Config
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -26,35 +44,11 @@ pub struct Config {
     pub spotify: SpotifyConfig,
 }
 
-#[derive(Debug, Clone)]
-pub struct JwtConfig {
-    pub issuer: String,
-    #[sensitive]
-    pub secret: String,
-    pub validity: Duration,
-}
-
-#[derive(Debug, Clone)]
-pub struct ServerConfig {
-    pub addr: SocketAddr,
-    pub allowed_origin: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct SpotifyConfig {
-    pub id: String,
-    pub redirect_url: String,
-    #[sensitive]
-    pub secret: String,
-}
-
-// Impl - Config
-
 impl Config {
     pub fn from_env() -> Result<Self> {
         trace!("loading configuration");
         let webapp_url: String = env_var("WEBAPP_URL")?;
-        let spotify_redirect_url = format!("{webapp_url}/auth/spotify");
+        let spotify_redirect_uri = format!("{webapp_url}/auth/spotify");
         let cfg = Config {
             db: DatabaseConfig::from_env()?,
             jwt: JwtConfig {
@@ -70,11 +64,7 @@ impl Config {
                 })?,
                 allowed_origin: webapp_url,
             },
-            spotify: SpotifyConfig {
-                id: env_var("SPOTIFY_CLIENT_ID")?,
-                redirect_url: spotify_redirect_url,
-                secret: env_var("SPOTIFY_CLIENT_SECRET")?,
-            },
+            spotify: SpotifyConfig::from_env(spotify_redirect_uri)?,
         };
         debug!("configuration loaded: {cfg:?}");
         Ok(cfg)

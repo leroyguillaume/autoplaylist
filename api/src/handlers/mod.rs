@@ -18,7 +18,6 @@ use chrono::Utc;
 use hmac::{digest::InvalidLength as HmacInvalidLength, Hmac, Mac};
 use jwt::{Claims, Error as JwtError, VerifyWithKey};
 use regex::Regex;
-use rspotify::ClientError;
 use sha2::Sha512;
 use tracing::{debug, trace};
 use uuid::Uuid;
@@ -50,14 +49,11 @@ enum Error {
     JwtKeyGeneration(HmacInvalidLength),
     JwtSignatureVerification(JwtError),
     MissingAuthorizationHeader,
-    NoSpotifyToken,
-    NoSpotifyUserEmail,
     PlaylistAlreadyExists(Uuid),
     PlaylistNotFound(Uuid),
     PlaylistNotOwnedByAuthenticatedUser(Uuid),
     RequestValidation(ValidationErrors),
-    SpotifyClient(ClientError),
-    SpotifyClientTokenLock,
+    SpotifyClient(Box<dyn StdError + Send + Sync>),
     TimestampConversion(TryFromIntError),
 }
 
@@ -93,8 +89,6 @@ impl Display for Error {
                 "request doesn't contain {} header",
                 header::AUTHORIZATION
             ),
-            Self::NoSpotifyToken => write!(f, "Spotify client doesn't have token"),
-            Self::NoSpotifyUserEmail => write!(f, "Spotify user doesn't have email"),
             Self::PlaylistAlreadyExists(id) => {
                 write!(f, "similar playlist already exists with ID {id}")
             }
@@ -103,10 +97,7 @@ impl Display for Error {
                 write!(f, "playlist {id} is not owned by authenticated user")
             }
             Self::RequestValidation(_) => write!(f, "request validation failed"),
-            Self::SpotifyClient(err) => write!(f, "Spotify error: {err}"),
-            Self::SpotifyClientTokenLock => {
-                write!(f, "acquiring lock on Spotify client token failed")
-            }
+            Self::SpotifyClient(err) => write!(f, "{err}"),
             Self::TimestampConversion(err) => write!(f, "timestamp conversion failed: {err}"),
         }
     }
@@ -166,14 +157,11 @@ impl StdError for Error {
             Self::JwtKeyGeneration(err) => Some(err),
             Self::JwtSignatureVerification(err) => Some(err),
             Self::MissingAuthorizationHeader => None,
-            Self::NoSpotifyToken => None,
-            Self::NoSpotifyUserEmail => None,
             Self::PlaylistAlreadyExists(_) => None,
             Self::PlaylistNotFound(_) => None,
             Self::PlaylistNotOwnedByAuthenticatedUser(_) => None,
             Self::RequestValidation(errs) => Some(errs),
-            Self::SpotifyClient(err) => Some(err),
-            Self::SpotifyClientTokenLock => None,
+            Self::SpotifyClient(err) => Some(err.as_ref()),
             Self::TimestampConversion(err) => Some(err),
         }
     }
