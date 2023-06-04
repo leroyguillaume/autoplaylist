@@ -356,6 +356,19 @@ impl From<Role> for RoleSql {
     }
 }
 
+// SpotifyAuth
+
+impl From<SpotifyAuthSql<'_>> for SpotifyAuth {
+    fn from(auth: SpotifyAuthSql<'_>) -> Self {
+        Self {
+            access_token: auth.access_token.into_owned(),
+            email: auth.email.into_owned(),
+            refresh_token: auth.refresh_token.map(|token| token.into_owned()),
+            user_id: auth.user_id.into_owned(),
+        }
+    }
+}
+
 // SpotifyAuthSql
 
 #[derive(Clone)]
@@ -364,6 +377,18 @@ pub struct SpotifyAuthSql<'a> {
     pub access_token: Cow<'a, String>,
     pub refresh_token: Option<Cow<'a, String>>,
     pub user_id: Cow<'a, Uuid>,
+}
+
+impl<'a> SpotifyAuthSql<'a> {
+    fn try_from_row(alias: &str, row: &'a Row) -> Result<Self> {
+        trace!("extracting Spotify auth from {row:?}");
+        Ok(Self {
+            access_token: try_get_cowed(alias, "access_token", row)?,
+            email: try_get_cowed(alias, "email", row)?,
+            refresh_token: try_get_opt_cowed(alias, "refresh_token", row)?,
+            user_id: try_get_cowed(alias, "user_id", row)?,
+        })
+    }
 }
 
 impl Debug for SpotifyAuthSql<'_> {
@@ -612,6 +637,19 @@ pub struct PostgresBaseRepository<'a>(&'a TokioPostgresClient);
 
 #[async_trait]
 impl BaseRepository for PostgresBaseRepository<'_> {
+    async fn get_by_id(&self, id: &Uuid) -> Result<Option<Base>> {
+        debug!("fetching base from database with id {id}");
+        let base = self
+            .0
+            .query_opt(sql!("base/get-by-id"), &[id])
+            .await
+            .map_err(Error::client_boxed)
+            .map(|row| row.map(|row| BaseSql::try_from_row("base", &row).and_then(Base::try_from)))?
+            .transpose()?;
+        debug!("base fetched: {base:?}");
+        Ok(base)
+    }
+
     async fn get_by_user_kind_platform(
         &self,
         user_id: &Uuid,
@@ -829,6 +867,21 @@ impl UserRepository for PostgresUserRepository<'_> {
             .transpose()?;
         debug!("user fetched: {user:?}");
         Ok(user)
+    }
+
+    async fn get_spotify_auth_by_id(&self, id: &Uuid) -> Result<Option<SpotifyAuth>> {
+        debug!("fetching Spotify auth of user {id} from database");
+        let auth = self
+            .0
+            .query_opt(sql!("user/get-spotify-auth-by-id"), &[id])
+            .await
+            .map_err(Error::client_boxed)
+            .map(|row| {
+                row.map(|row| SpotifyAuthSql::try_from_row("auth", &row).map(SpotifyAuth::from))
+            })?
+            .transpose()?;
+        debug!("Spotify auth fetched: {auth:?}");
+        Ok(auth)
     }
 
     async fn insert(&self, user: &User) -> Result<()> {

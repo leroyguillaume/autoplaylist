@@ -17,6 +17,12 @@ pub struct ConsumerError {
     requeue: bool,
 }
 
+impl ConsumerError {
+    pub fn with_requeue(err: Box<dyn StdError + Send + Sync>) -> Self {
+        Self { err, requeue: true }
+    }
+}
+
 impl Display for ConsumerError {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         write!(f, "{}", self.err)

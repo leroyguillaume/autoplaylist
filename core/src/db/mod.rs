@@ -31,7 +31,7 @@ pub struct Page<T> {
 // Client
 
 #[async_trait]
-pub trait Client {
+pub trait Client: Send + Sync {
     fn repositories(&self) -> Box<dyn Repositories + '_>;
 
     async fn transaction(&mut self) -> Result<Box<dyn Transaction + '_>>;
@@ -61,7 +61,9 @@ pub trait Repositories: Send + Sync {
 // BaseRepository
 
 #[async_trait]
-pub trait BaseRepository {
+pub trait BaseRepository: Send + Sync {
+    async fn get_by_id(&self, id: &Uuid) -> Result<Option<Base>>;
+
     async fn get_by_user_kind_platform(
         &self,
         user_id: &Uuid,
@@ -77,7 +79,7 @@ pub trait BaseRepository {
 // PlaylistRepository
 
 #[async_trait]
-pub trait PlaylistRepository {
+pub trait PlaylistRepository: Send + Sync {
     async fn delete(&self, id: &Uuid) -> Result<()>;
 
     async fn get_by_id(&self, id: &Uuid) -> Result<Option<Playlist>>;
@@ -93,10 +95,12 @@ pub trait PlaylistRepository {
 // UserRepository
 
 #[async_trait]
-pub trait UserRepository {
+pub trait UserRepository: Send + Sync {
     async fn get_by_id(&self, id: &Uuid) -> Result<Option<User>>;
 
     async fn get_by_spotify_email(&self, email: &str) -> Result<Option<User>>;
+
+    async fn get_spotify_auth_by_id(&self, id: &Uuid) -> Result<Option<SpotifyAuth>>;
 
     async fn insert(&self, user: &User) -> Result<()>;
 
@@ -170,7 +174,7 @@ pub async fn in_transaction<
     E: StdError + Send + Sync + 'static,
     F: for<'b> FnOnce(
         &'b (dyn Transaction + 'b),
-    ) -> Pin<Box<dyn Future<Output = StdResult<T, E>> + 'b>>,
+    ) -> Pin<Box<dyn Future<Output = StdResult<T, E>> + Send + 'b>>,
     T,
 >(
     client: &'a mut dyn Client,

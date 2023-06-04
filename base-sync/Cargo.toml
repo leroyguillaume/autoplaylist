@@ -10,3 +10,4 @@ futures = "0.3"
 opentelemetry = { version = "0.18" }
 tokio = { version = "1.28", features = ["full"] }
 tracing = "0.1"
+uuid = "0.8"
