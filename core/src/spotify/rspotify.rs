@@ -7,11 +7,18 @@ use std::{
 
 use async_trait::async_trait;
 use chrono::Utc;
-use rspotify::{prelude::OAuthClient, AuthCodeSpotify, ClientError, Credentials, OAuth, Token};
+use rspotify::{
+    model::{SavedTrack, SimplifiedAlbum, SimplifiedArtist},
+    prelude::OAuthClient,
+    AuthCodeSpotify, ClientError, Credentials, OAuth, Token,
+};
 use securefmt::Debug;
 use tracing::{debug, trace};
 
-use crate::{domain::SpotifyToken, env_var, ConfigError};
+use crate::{
+    domain::{SpotifyAlbum, SpotifyArtist, SpotifyToken, SpotifyTrack},
+    env_var, ConfigError,
+};
 
 use super::{Client, Result};
 
@@ -136,6 +143,45 @@ impl From<Token> for SpotifyToken {
     }
 }
 
+// SpotifyArtist
+
+impl From<SimplifiedArtist> for SpotifyArtist {
+    fn from(artist: SimplifiedArtist) -> Self {
+        Self {
+            id: artist.id.map(|id| id.to_string()),
+            name: artist.name,
+        }
+    }
+}
+
+// SpotifyAlbum
+
+impl From<SimplifiedAlbum> for SpotifyAlbum {
+    fn from(album: SimplifiedAlbum) -> Self {
+        Self {
+            id: album.id.map(|id| id.to_string()),
+            name: album.name,
+        }
+    }
+}
+
+// SpotifyTrack
+
+impl From<SavedTrack> for SpotifyTrack {
+    fn from(track: SavedTrack) -> Self {
+        Self {
+            album: track.track.album.into(),
+            artists: track
+                .track
+                .artists
+                .into_iter()
+                .map(SpotifyArtist::from)
+                .collect(),
+            id: track.track.id.map(|id| id.to_string()),
+        }
+    }
+}
+
 // RSpotifyClient
 
 pub struct RSpotifyClient {
@@ -204,5 +250,23 @@ impl Client for RSpotifyClient {
         debug!("fetching Spotify user");
         let user = client.current_user().await.map_err(Error::client_boxed)?;
         user.email.ok_or_else(Error::no_email_boxed)
+    }
+
+    async fn user_liked_tacks(
+        &self,
+        limit: u32,
+        offset: u32,
+        token: &SpotifyToken,
+    ) -> Result<Vec<SpotifyTrack>> {
+        let client = self.oauth_client(Some(token)).await?;
+        debug!(
+            "fetching Spotify user liked tracks from offset {offset} limiting to {limit} results"
+        );
+        let page = client
+            .current_user_saved_tracks_manual(None, Some(limit), Some(offset))
+            .await
+            .map_err(Error::client_boxed)?;
+        debug!("page fetched: {page:?}");
+        Ok(page.items.into_iter().map(SpotifyTrack::from).collect())
     }
 }
