@@ -1,5 +1,4 @@
 use std::{
-    borrow::Cow,
     error::Error as StdError,
     fmt::{Debug, Display, Formatter, Result as FmtResult},
     marker::Sync as StdSync,
@@ -9,7 +8,6 @@ use std::{
 };
 
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
 use deadpool_postgres::{
     tokio_postgres::{Client as TokioPostgresClient, Error as TokioPosgresError, NoTls, Row},
     Config as DeadpoolConfig, CreatePoolError, Object, Pool as DeadpoolPool, PoolError,
@@ -17,14 +15,13 @@ use deadpool_postgres::{
 };
 use postgres_types::{FromSql, ToSql};
 use refinery::{embed_migrations, Error as RefineryError};
-use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{debug, info, trace};
 use uuid::Uuid;
 
 use crate::domain::{
-    Base, BaseKind, Platform, Playlist, PlaylistFilter, PlaylistFilterOperator, Role, SpotifyAuth,
-    SpotifyToken, Sync, SyncState, User,
+    Base, BaseKind, Platform, Playlist, PlaylistFilter, Role, SpotifyAuth, SpotifyToken, Sync,
+    SyncState, User,
 };
 
 use super::{
@@ -125,68 +122,35 @@ impl StdError for InitializationError {
     }
 }
 
+// Traits
+
+trait TryFromRow {
+    fn try_from_row(alias: &str, row: &Row) -> Result<Self>
+    where
+        Self: Sized;
+}
+
 // Base
 
-impl TryFrom<BaseSql<'_>> for Base {
-    type Error = Box<dyn StdError + Send + StdSync>;
-
-    fn try_from(base: BaseSql<'_>) -> Result<Self> {
-        let kind = match base.kind {
+impl TryFromRow for Base {
+    fn try_from_row(alias: &str, row: &Row) -> Result<Self> {
+        let platform: PlatformSql = try_get(alias, "platform", row)?;
+        let platform_id: Option<String> = try_get(alias, "platform_id", row)?;
+        let kind: BaseKindSql = try_get(alias, "kind", row)?;
+        let kind = match kind {
             BaseKindSql::Likes => BaseKind::Likes,
             BaseKindSql::Playlist => {
-                let platform_id = base
-                    .platform_id
-                    .ok_or_else(Error::missing_platform_id_boxed)?;
-                BaseKind::Playlist(platform_id.into_owned())
+                let platform_id = platform_id.ok_or_else(Error::missing_platform_id_boxed)?;
+                BaseKind::Playlist(platform_id)
             }
         };
         Ok(Self {
-            creation_date: base.creation_date.into_owned(),
-            id: base.id.into_owned(),
+            creation_date: try_get(alias, "creation_date", row)?,
+            id: try_get(alias, "id", row)?,
             kind,
-            platform: base.platform.into(),
-            sync: base.sync.map(Sync::try_from).transpose()?,
-            user_id: base.user_id.into_owned(),
-        })
-    }
-}
-
-// BaseSql
-
-#[derive(Clone, Debug)]
-struct BaseSql<'a> {
-    creation_date: Cow<'a, DateTime<Utc>>,
-    id: Cow<'a, Uuid>,
-    kind: BaseKindSql,
-    platform: PlatformSql,
-    platform_id: Option<Cow<'a, String>>,
-    sync: Option<SyncSql<'a>>,
-    user_id: Cow<'a, Uuid>,
-}
-
-impl<'a> BaseSql<'a> {
-    fn from_base(base: &'a Base) -> Self {
-        let (kind, platform_id) = BaseKindSql::from_base_kind(&base.kind);
-        Self {
-            creation_date: Cow::Borrowed(&base.creation_date),
-            id: Cow::Borrowed(&base.id),
-            kind,
-            platform: base.platform.into(),
-            platform_id: platform_id.map(Cow::Borrowed),
-            sync: base.sync.as_ref().map(SyncSql::from_sync),
-            user_id: Cow::Borrowed(&base.user_id),
-        }
-    }
-
-    fn try_from_row(alias: &str, row: &'a Row) -> Result<Self> {
-        Ok(Self {
-            creation_date: try_get_cowed(alias, "creation_date", row)?,
-            id: try_get_cowed(alias, "id", row)?,
-            kind: try_get(alias, "kind", row)?,
-            platform: try_get(alias, "platform", row)?,
-            platform_id: try_get_opt_cowed(alias, "platform_id", row)?,
-            sync: SyncSql::try_from_row_opt(alias, row)?,
-            user_id: try_get_cowed(alias, "user_id", row)?,
+            platform: platform.into(),
+            sync: Sync::try_from_row_opt(alias, row)?,
+            user_id: try_get(alias, "user_id", row)?,
         })
     }
 }
@@ -240,84 +204,15 @@ impl From<Platform> for PlatformSql {
 
 // Playlist
 
-impl TryFrom<PlaylistSql<'_>> for Playlist {
-    type Error = Box<dyn StdError + Send + StdSync>;
-
-    fn try_from(playlist: PlaylistSql) -> Result<Self> {
+impl TryFromRow for Playlist {
+    fn try_from_row(alias: &str, row: &Row) -> Result<Self> {
         Ok(Self {
-            base_id: playlist.base_id.into_owned(),
-            creation_date: playlist.creation_date.into_owned(),
-            id: playlist.id.into_owned(),
-            name: playlist.name.into_owned(),
-            user_id: playlist.user_id.into_owned(),
+            base_id: try_get(alias, "base_id", row)?,
+            creation_date: try_get(alias, "creation_date", row)?,
+            id: try_get(alias, "id", row)?,
+            name: try_get(alias, "name", row)?,
+            user_id: try_get(alias, "user_id", row)?,
         })
-    }
-}
-
-// PlaylistSql
-
-#[derive(Clone, Debug)]
-struct PlaylistSql<'a> {
-    base_id: Cow<'a, Uuid>,
-    creation_date: Cow<'a, DateTime<Utc>>,
-    id: Cow<'a, Uuid>,
-    name: Cow<'a, String>,
-    user_id: Cow<'a, Uuid>,
-}
-
-impl<'a> PlaylistSql<'a> {
-    fn from_playlist(playlist: &'a Playlist) -> Self {
-        Self {
-            base_id: Cow::Borrowed(&playlist.base_id),
-            creation_date: Cow::Borrowed(&playlist.creation_date),
-            id: Cow::Borrowed(&playlist.id),
-            name: Cow::Borrowed(&playlist.name),
-            user_id: Cow::Borrowed(&playlist.user_id),
-        }
-    }
-
-    fn try_from_row(alias: &str, row: &'a Row) -> Result<Self> {
-        Ok(Self {
-            base_id: try_get_cowed(alias, "base_id", row)?,
-            creation_date: try_get_cowed(alias, "creation_date", row)?,
-            id: try_get_cowed(alias, "id", row)?,
-            name: try_get_cowed(alias, "name", row)?,
-            user_id: try_get_cowed(alias, "user_id", row)?,
-        })
-    }
-}
-
-// PlaylistFilterSql
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PlaylistFilterSql<'a> {
-    Artist(PlaylistFilterOperatorSql<'a>),
-}
-
-impl<'a> PlaylistFilterSql<'a> {
-    fn from_filter(filter: &'a PlaylistFilter) -> Self {
-        match filter {
-            PlaylistFilter::Artist(op) => {
-                Self::Artist(PlaylistFilterOperatorSql::from_operator(op))
-            }
-        }
-    }
-}
-
-// PlaylsitFilterOperatorSql
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PlaylistFilterOperatorSql<'a> {
-    Is(Cow<'a, String>),
-}
-
-impl<'a> PlaylistFilterOperatorSql<'a> {
-    fn from_operator(op: &'a PlaylistFilterOperator) -> Self {
-        match op {
-            PlaylistFilterOperator::Is(val) => Self::Is(Cow::Borrowed(val)),
-        }
     }
 }
 
@@ -354,121 +249,46 @@ impl From<Role> for RoleSql {
 
 // SpotifyAuth
 
-impl From<SpotifyAuthSql<'_>> for SpotifyAuth {
-    fn from(auth: SpotifyAuthSql<'_>) -> Self {
-        Self {
-            email: auth.email.into_owned(),
-            token: SpotifyToken {
-                access_token: auth.access_token.into_owned(),
-                expiration_date: auth.expiration_date.into_owned(),
-                refresh_token: auth.refresh_token.map(|token| token.into_owned()),
-            },
-            user_id: auth.user_id.into_owned(),
-        }
-    }
-}
-
-// SpotifyAuthSql
-
-#[derive(Clone)]
-pub struct SpotifyAuthSql<'a> {
-    pub access_token: Cow<'a, String>,
-    pub email: Cow<'a, String>,
-    pub expiration_date: Cow<'a, DateTime<Utc>>,
-    pub refresh_token: Option<Cow<'a, String>>,
-    pub user_id: Cow<'a, Uuid>,
-}
-
-impl<'a> SpotifyAuthSql<'a> {
-    fn try_from_row(alias: &str, row: &'a Row) -> Result<Self> {
+impl TryFromRow for SpotifyAuth {
+    fn try_from_row(alias: &str, row: &Row) -> Result<Self> {
         Ok(Self {
-            access_token: try_get_cowed(alias, "access_token", row)?,
-            email: try_get_cowed(alias, "email", row)?,
-            expiration_date: try_get_cowed(alias, "expiration_date", row)?,
-            refresh_token: try_get_opt_cowed(alias, "refresh_token", row)?,
-            user_id: try_get_cowed(alias, "user_id", row)?,
+            email: try_get(alias, "email", row)?,
+            token: SpotifyToken {
+                access_token: try_get(alias, "access_token", row)?,
+                expiration_date: try_get(alias, "expiration_date", row)?,
+                refresh_token: try_get(alias, "refresh_token", row)?,
+            },
+            user_id: try_get(alias, "user_id", row)?,
         })
-    }
-}
-
-impl Debug for SpotifyAuthSql<'_> {
-    fn fmt(&self, f: &mut Formatter) -> FmtResult {
-        f.debug_struct("SpotifyAuthSql")
-            .field("email", &self.email)
-            .field("access_token", &"<redacted>")
-            .field("refresh_token", &"<redacted>")
-            .field("user_id", &"<redacted>")
-            .finish()
-    }
-}
-
-impl<'a> SpotifyAuthSql<'a> {
-    fn from_spotify_auth(auth: &'a SpotifyAuth) -> Self {
-        Self {
-            access_token: Cow::Borrowed(&auth.token.access_token),
-            email: Cow::Borrowed(&auth.email),
-            expiration_date: Cow::Borrowed(&auth.token.expiration_date),
-            refresh_token: auth.token.refresh_token.as_ref().map(Cow::Borrowed),
-            user_id: Cow::Borrowed(&auth.user_id),
-        }
     }
 }
 
 // Sync
 
-impl From<SyncSql<'_>> for Sync {
-    fn from(sync: SyncSql) -> Self {
-        Self {
-            last_err_msg: sync.last_err_msg.map(|msg| msg.into_owned()),
-            last_offset: sync.last_offset,
-            last_start_date: sync.last_start_date.into_owned(),
-            last_success_date: sync.last_success_date.map(|date| date.into_owned()),
-            state: sync.state.into(),
-        }
-    }
-}
-
-// SyncSql
-
-#[derive(Clone, Debug)]
-struct SyncSql<'a> {
-    last_err_msg: Option<Cow<'a, String>>,
-    last_offset: u32,
-    last_start_date: Cow<'a, DateTime<Utc>>,
-    last_success_date: Option<Cow<'a, DateTime<Utc>>>,
-    state: SyncStateSql,
-}
-
-impl<'a> SyncSql<'a> {
-    fn extract_from_row(state: SyncStateSql, alias: &str, row: &'a Row) -> Result<Self> {
+impl Sync {
+    fn try_from_row(state: SyncStateSql, alias: &str, row: &Row) -> Result<Self> {
         Ok(Self {
-            last_err_msg: try_get_opt_cowed(alias, "last_sync_err_msg", row)?,
+            last_err_msg: try_get(alias, "last_sync_err_msg", row)?,
             last_offset: try_get_u32(alias, "last_sync_offset", row)?,
-            last_start_date: try_get_cowed(alias, "last_sync_start_date", row)?,
-            last_success_date: try_get_opt_cowed(alias, "last_sync_success_date", row)?,
-            state,
+            last_start_date: try_get(alias, "last_sync_start_date", row)?,
+            last_success_date: try_get(alias, "last_sync_success_date", row)?,
+            state: state.into(),
         })
     }
 
-    fn try_from_row(alias: &str, row: &'a Row) -> Result<Self> {
-        let state = try_get(alias, "sync_state", row)?;
-        Self::extract_from_row(state, alias, row)
-    }
-
-    fn try_from_row_opt(alias: &str, row: &'a Row) -> Result<Option<Self>> {
-        try_get::<Option<SyncStateSql>>(alias, "sync_state", row)?
-            .map(|state| Self::extract_from_row(state, alias, row))
-            .transpose()
-    }
-
-    fn from_sync(sync: &'a Sync) -> Self {
-        Self {
-            last_err_msg: sync.last_err_msg.as_ref().map(Cow::Borrowed),
-            last_offset: sync.last_offset,
-            last_start_date: Cow::Borrowed(&sync.last_start_date),
-            last_success_date: sync.last_success_date.as_ref().map(Cow::Borrowed),
-            state: sync.state.into(),
+    fn try_from_row_opt(alias: &str, row: &Row) -> Result<Option<Self>> {
+        let state: Option<SyncStateSql> = try_get(alias, "sync_state", row)?;
+        match state {
+            Some(state) => Ok(Some(Self::try_from_row(state, alias, row)?)),
+            None => Ok(None),
         }
+    }
+}
+
+impl TryFromRow for Sync {
+    fn try_from_row(alias: &str, row: &Row) -> Result<Self> {
+        let state: SyncStateSql = try_get(alias, "sync_state", row)?;
+        Self::try_from_row(state, alias, row)
     }
 }
 
@@ -513,39 +333,13 @@ impl From<SyncState> for SyncStateSql {
 
 // User
 
-impl From<UserSql<'_>> for User {
-    fn from(user: UserSql) -> Self {
-        Self {
-            creation_date: user.creation_date.into_owned(),
-            id: user.id.into_owned(),
-            role: user.role.into(),
-        }
-    }
-}
-
-// UserSql
-
-#[derive(Clone, Debug)]
-struct UserSql<'a> {
-    creation_date: Cow<'a, DateTime<Utc>>,
-    id: Cow<'a, Uuid>,
-    role: RoleSql,
-}
-
-impl<'a> UserSql<'a> {
-    fn from_user(user: &'a User) -> Self {
-        Self {
-            creation_date: Cow::Borrowed(&user.creation_date),
-            id: Cow::Borrowed(&user.id),
-            role: user.role.into(),
-        }
-    }
-
-    fn try_from_row(alias: &str, row: &'a Row) -> Result<Self> {
+impl TryFromRow for User {
+    fn try_from_row(alias: &str, row: &Row) -> Result<Self> {
+        let role: RoleSql = try_get(alias, "role", row)?;
         Ok(Self {
-            creation_date: try_get_cowed(alias, "creation_date", row)?,
-            id: try_get_cowed(alias, "id", row)?,
-            role: try_get(alias, "role", row)?,
+            creation_date: try_get(alias, "creation_date", row)?,
+            id: try_get(alias, "id", row)?,
+            role: role.into(),
         })
     }
 }
@@ -647,13 +441,7 @@ pub struct PostgresBaseRepository<'a>(&'a TokioPostgresClient);
 impl BaseRepository for PostgresBaseRepository<'_> {
     async fn get_by_id(&self, id: &Uuid) -> Result<Option<Base>> {
         debug!("fetching base from database with id {id}");
-        let base = self
-            .0
-            .query_opt(sql!("base/get-by-id"), &[id])
-            .await
-            .map_err(Error::client_boxed)
-            .map(|row| row.map(|row| BaseSql::try_from_row("base", &row).and_then(Base::try_from)))?
-            .transpose()?;
+        let base = query_opt(sql!("base/get-by-id"), &[id], "base", self.0).await?;
         debug!("base fetched: {base:?}");
         Ok(base)
     }
@@ -667,34 +455,31 @@ impl BaseRepository for PostgresBaseRepository<'_> {
         debug!("fetching base from database owned by user {user_id} with {kind:?} on {platform}");
         let (kind, platform_id) = BaseKindSql::from_base_kind(kind);
         let platform: PlatformSql = platform.into();
-        let base = self
-            .0
-            .query_opt(
-                sql!("base/get-by-user-kind-platform"),
-                &[user_id, &platform, &kind, &platform_id],
-            )
-            .await
-            .map_err(Error::client_boxed)?
-            .map(|row| BaseSql::try_from_row("base", &row).and_then(Base::try_from))
-            .transpose()?;
+        let base = query_opt(
+            sql!("base/get-by-user-kind-platform"),
+            &[user_id, &platform, &kind, &platform_id],
+            "base",
+            self.0,
+        )
+        .await?;
         debug!("base fetched: {base:?}");
         Ok(base)
     }
 
     async fn insert(&self, base: &Base) -> Result<()> {
         debug!("inserting {base:?} into database");
-        let base = BaseSql::from_base(base);
-        trace!("inserting {base:?} into database");
+        let platform: PlatformSql = base.platform.into();
+        let (kind, platform_id) = BaseKindSql::from_base_kind(&base.kind);
         self.0
             .query(
                 sql!("base/insert"),
                 &[
-                    base.id.as_ref(),
-                    base.creation_date.as_ref(),
-                    base.user_id.as_ref(),
-                    &base.platform,
-                    &base.kind,
-                    &base.platform_id.as_ref().map(|id| id.as_ref()),
+                    &base.id,
+                    &base.creation_date,
+                    &base.user_id,
+                    &platform,
+                    &kind,
+                    &platform_id,
                 ],
             )
             .await
@@ -704,57 +489,41 @@ impl BaseRepository for PostgresBaseRepository<'_> {
 
     async fn list_by_user(&self, user_id: &Uuid, limit: u32, offset: u32) -> Result<Page<Base>> {
         debug!("counting total of bases owned by user {user_id}");
-        let total: i64 = self
-            .0
-            .query_one(sql!("base/count-by-user"), &[user_id])
-            .await
-            .map_err(Error::client_boxed)?
-            .get(0);
+        let total = count(sql!("base/count-by-user"), &[user_id], self.0).await?;
         debug!("listing bases owned by user {user_id} from offset {offset} limiting to {limit} results");
         let limit: i64 = limit.into();
         let offset: i64 = offset.into();
-        let content = self
-            .0
-            .query(sql!("base/list-by-user"), &[user_id, &limit, &offset])
-            .await
-            .map_err(Error::client_boxed)?
-            .into_iter()
-            .map(|row| BaseSql::try_from_row("base", &row).and_then(Base::try_from))
-            .collect::<Result<Vec<Base>>>()?;
-        let page = Page {
-            content,
-            total: total.try_into().map_err(Error::int_conversion_boxed)?,
-        };
+        let items = query(
+            sql!("base/list-by-user"),
+            &[user_id, &limit, &offset],
+            "base",
+            self.0,
+        )
+        .await?;
+        let page = Page { items, total };
         debug!("page fetched: {page:?}");
         Ok(page)
     }
 
     async fn lock_sync(&self, id: &Uuid) -> Result<Option<Sync>> {
-        debug!("locking base {id} synchronization");
-        let sync = self
-            .0
-            .query_opt(sql!("base/lock-sync"), &[&id])
-            .await
-            .map_err(Error::client_boxed)?
-            .map(|row| SyncSql::try_from_row("base", &row).map(Sync::from))
-            .transpose()?;
-        debug!("base synchronization fetched: {sync:?}");
+        debug!("locking sync of base {id}");
+        let sync = query_opt(sql!("base/lock-sync"), &[&id], "base", self.0).await?;
+        debug!("base sync fetched: {sync:?}");
         Ok(sync)
     }
 
     async fn update_sync(&self, id: &Uuid, sync: &Sync) -> Result<()> {
         debug!("updating sync of base {id} with {sync:?}");
-        let sync = SyncSql::from_sync(sync);
-        trace!("updating sync of base {id} with {sync:?}");
+        let state: SyncStateSql = sync.state.into();
         self.0
             .execute(
                 sql!("base/update-sync"),
                 &[
                     &id,
-                    &sync.state,
-                    sync.last_start_date.as_ref(),
-                    &sync.last_success_date.as_ref().map(|date| date.as_ref()),
-                    &sync.last_err_msg.as_ref().map(|msg| msg.as_ref()),
+                    &state,
+                    &sync.last_start_date,
+                    &sync.last_success_date,
+                    &sync.last_err_msg,
                 ],
             )
             .await
@@ -780,51 +549,35 @@ impl PlaylistRepository for PostgresPlaylistRepository<'_> {
 
     async fn get_by_id(&self, id: &Uuid) -> Result<Option<Playlist>> {
         debug!("fetching playlist from database with id {id}");
-        let playlist = self
-            .0
-            .query_opt(sql!("playlist/get-by-id"), &[id])
-            .await
-            .map_err(Error::client_boxed)
-            .map(|row| {
-                row.map(|row| {
-                    PlaylistSql::try_from_row("playlist", &row).and_then(Playlist::try_from)
-                })
-            })?
-            .transpose()?;
+        let playlist = query_opt(sql!("playlist/get-by-id"), &[id], "playlist", self.0).await?;
         debug!("playlist fetched: {playlist:?}");
         Ok(playlist)
     }
 
     async fn get_by_user_name(&self, user_id: &Uuid, name: &str) -> Result<Option<Playlist>> {
         debug!("fetching playlist from database owned by user {user_id} named `{name}`");
-        let playlist = self
-            .0
-            .query_opt(sql!("playlist/get-by-user-name"), &[user_id, &name])
-            .await
-            .map_err(Error::client_boxed)
-            .map(|row| {
-                row.map(|row| {
-                    PlaylistSql::try_from_row("playlist", &row).and_then(Playlist::try_from)
-                })
-            })?
-            .transpose()?;
+        let playlist = query_opt(
+            sql!("playlist/get-by-user-name"),
+            &[user_id, &name],
+            "playlist",
+            self.0,
+        )
+        .await?;
         debug!("playlist fetched: {playlist:?}");
         Ok(playlist)
     }
 
     async fn insert(&self, playlist: &Playlist, filters: &[PlaylistFilter]) -> Result<()> {
         debug!("inserting {playlist:?} with {filters:?} into database");
-        let playlist = PlaylistSql::from_playlist(playlist);
-        trace!("inserting {playlist:?} into database");
         self.0
             .query(
                 sql!("playlist/insert"),
                 &[
-                    playlist.id.as_ref(),
-                    playlist.creation_date.as_ref(),
-                    playlist.user_id.as_ref(),
-                    playlist.base_id.as_ref(),
-                    playlist.name.as_ref(),
+                    &playlist.id,
+                    &playlist.creation_date,
+                    &playlist.user_id,
+                    &playlist.base_id,
+                    &playlist.name,
                 ],
             )
             .await
@@ -835,10 +588,9 @@ impl PlaylistRepository for PostgresPlaylistRepository<'_> {
             .await
             .map_err(Box::new)?;
         for filter in filters {
-            let filter = PlaylistFilterSql::from_filter(filter);
             trace!("inserting {filter:?} into database");
             self.0
-                .query(&st, &[playlist.id.as_ref(), &json!(filter)])
+                .query(&st, &[&playlist.id, &json!(filter)])
                 .await
                 .map_err(Box::new)?;
         }
@@ -852,27 +604,18 @@ impl PlaylistRepository for PostgresPlaylistRepository<'_> {
         offset: u32,
     ) -> Result<Page<Playlist>> {
         debug!("counting total of playlists owned by user {user_id}");
-        let total: i64 = self
-            .0
-            .query_one(sql!("playlist/count-by-user"), &[user_id])
-            .await
-            .map_err(Error::client_boxed)?
-            .get(0);
+        let total = count(sql!("playlist/count-by-user"), &[user_id], self.0).await?;
         debug!("listing playlists owned by user {user_id} from offset {offset} limiting to {limit} results");
         let limit: i64 = limit.into();
         let offset: i64 = offset.into();
-        let content = self
-            .0
-            .query(sql!("playlist/list-by-user"), &[user_id, &limit, &offset])
-            .await
-            .map_err(Error::client_boxed)?
-            .into_iter()
-            .map(|row| PlaylistSql::try_from_row("playlist", &row).and_then(Playlist::try_from))
-            .collect::<Result<Vec<Playlist>>>()?;
-        let page = Page {
-            content,
-            total: total.try_into().map_err(Error::int_conversion_boxed)?,
-        };
+        let items = query(
+            sql!("playlist/list-by-user"),
+            &[user_id, &limit, &offset],
+            "playlist",
+            self.0,
+        )
+        .await?;
+        let page = Page { items, total };
         debug!("page fetched: {page:?}");
         Ok(page)
     }
@@ -886,54 +629,30 @@ pub struct PostgresUserRepository<'a>(&'a TokioPostgresClient);
 impl UserRepository for PostgresUserRepository<'_> {
     async fn get_by_id(&self, id: &Uuid) -> Result<Option<User>> {
         debug!("fetching user from database with id {id}");
-        let user = self
-            .0
-            .query_opt(sql!("user/get-by-id"), &[id])
-            .await
-            .map_err(Error::client_boxed)
-            .map(|row| row.map(|row| UserSql::try_from_row("user", &row).map(User::from)))?
-            .transpose()?;
+        let user = query_opt(sql!("user/get-by-id"), &[id], "user", self.0).await?;
         debug!("user fetched: {user:?}");
         Ok(user)
     }
 
     async fn get_by_spotify_email(&self, email: &str) -> Result<Option<User>> {
         debug!("fetching user from database with Spotify email `{email}`");
-        let user = self
-            .0
-            .query_opt(sql!("user/get-by-spotify-email"), &[&email])
-            .await
-            .map_err(Error::client_boxed)
-            .map(|row| row.map(|row| UserSql::try_from_row("user", &row).map(User::from)))?
-            .transpose()?;
+        let user = query_opt(sql!("user/get-by-spotify-email"), &[&email], "user", self.0).await?;
         debug!("user fetched: {user:?}");
         Ok(user)
     }
 
     async fn get_spotify_auth_by_id(&self, id: &Uuid) -> Result<Option<SpotifyAuth>> {
         debug!("fetching Spotify auth of user {id} from database");
-        let auth = self
-            .0
-            .query_opt(sql!("user/get-spotify-auth-by-id"), &[id])
-            .await
-            .map_err(Error::client_boxed)
-            .map(|row| {
-                row.map(|row| SpotifyAuthSql::try_from_row("auth", &row).map(SpotifyAuth::from))
-            })?
-            .transpose()?;
+        let auth = query_opt(sql!("user/get-spotify-auth-by-id"), &[id], "auth", self.0).await?;
         debug!("Spotify auth fetched: {auth:?}");
         Ok(auth)
     }
 
     async fn insert(&self, user: &User) -> Result<()> {
         debug!("inserting {user:?} into database");
-        let user = UserSql::from_user(user);
-        trace!("inserting {user:?} into database");
+        let role: RoleSql = user.role.into();
         self.0
-            .query(
-                sql!("user/insert"),
-                &[user.id.as_ref(), user.creation_date.as_ref(), &user.role],
-            )
+            .query(sql!("user/insert"), &[&user.id, &user.creation_date, &role])
             .await
             .map_err(Box::new)?;
         Ok(())
@@ -941,17 +660,15 @@ impl UserRepository for PostgresUserRepository<'_> {
 
     async fn upsert_spotify_auth(&self, auth: &SpotifyAuth) -> Result<()> {
         debug!("upserting {auth:?} into database");
-        let auth = SpotifyAuthSql::from_spotify_auth(auth);
-        trace!("upserting {auth:?} into database");
         self.0
             .query(
                 sql!("user/upsert-spotify-auth"),
                 &[
-                    auth.user_id.as_ref(),
-                    auth.email.as_ref(),
-                    auth.access_token.as_ref(),
-                    auth.expiration_date.as_ref(),
-                    &auth.refresh_token.as_ref().map(|token| token.as_ref()),
+                    &auth.user_id,
+                    &auth.email,
+                    &auth.token.access_token,
+                    &auth.token.expiration_date,
+                    &auth.token.refresh_token,
                 ],
             )
             .await
@@ -999,7 +716,7 @@ impl Pool for PostgresPool {
     }
 }
 
-// Impl - Config
+// DeadpoolConfig
 
 impl From<Config> for DeadpoolConfig {
     fn from(cfg: Config) -> Self {
@@ -1014,34 +731,66 @@ impl From<Config> for DeadpoolConfig {
     }
 }
 
+// count
+
+#[inline]
+async fn count(
+    sql: &str,
+    params: &[&(dyn ToSql + StdSync)],
+    client: &TokioPostgresClient,
+) -> Result<u32> {
+    trace!("executing `{sql}`");
+    let row = client
+        .query_one(sql, params)
+        .await
+        .map_err(Error::client_boxed)?;
+    trace!("row fetched: {row:?}");
+    let total: i64 = row.try_get(0).map_err(Error::client_boxed)?;
+    total.try_into().map_err(Error::int_conversion_boxed)
+}
+
+// query
+
+#[inline]
+async fn query<T: TryFromRow>(
+    sql: &str,
+    params: &[&(dyn ToSql + StdSync)],
+    alias: &str,
+    client: &TokioPostgresClient,
+) -> Result<Vec<T>> {
+    trace!("executing `{sql}`");
+    let rows = client
+        .query(sql, params)
+        .await
+        .map_err(Error::client_boxed)?;
+    trace!("rows fetched: {rows:?}");
+    rows.iter().map(|row| T::try_from_row(alias, row)).collect()
+}
+
+// query_opt
+
+#[inline]
+async fn query_opt<T: TryFromRow>(
+    sql: &str,
+    params: &[&(dyn ToSql + StdSync)],
+    alias: &str,
+    client: &TokioPostgresClient,
+) -> Result<Option<T>> {
+    trace!("executing `{sql}`");
+    let row = client
+        .query_opt(sql, params)
+        .await
+        .map_err(Error::client_boxed)?;
+    trace!("row fetched: {row:?}");
+    row.map(|row| T::try_from_row(alias, &row)).transpose()
+}
+
 // try_get
 
 #[inline]
 fn try_get<'a, T: FromSql<'a>>(alias: &str, key: &str, row: &'a Row) -> Result<T> {
     row.try_get(format!("{alias}_{key}").as_str())
         .map_err(Error::client_boxed)
-}
-
-// try_get_cowed
-
-#[inline]
-fn try_get_cowed<'a, T: Clone + FromSql<'a>>(
-    alias: &str,
-    key: &str,
-    row: &'a Row,
-) -> Result<Cow<'a, T>> {
-    try_get::<T>(alias, key, row).map(Cow::Owned)
-}
-
-// try_get_opt_cowed
-
-#[inline]
-fn try_get_opt_cowed<'a, T: Clone + FromSql<'a>>(
-    alias: &str,
-    key: &str,
-    row: &'a Row,
-) -> Result<Option<Cow<'a, T>>> {
-    try_get::<Option<T>>(alias, key, row).map(|val| val.map(Cow::Owned))
 }
 
 // try_get_u32

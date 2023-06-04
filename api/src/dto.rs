@@ -173,7 +173,7 @@ impl From<PlaylistFilterOperator> for DomainPlaylistFilterOperator {
 impl<F, T: From<F>> From<Page<F>> for PageResponse<T> {
     fn from(page: Page<F>) -> Self {
         Self {
-            content: page.content.into_iter().map(T::from).collect(),
+            content: page.items.into_iter().map(T::from).collect(),
             total: page.total,
         }
     }

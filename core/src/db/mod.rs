@@ -25,7 +25,7 @@ pub type Result<T> = StdResult<T, Box<dyn StdError + Send + StdSync>>;
 
 #[derive(Debug)]
 pub struct Page<T> {
-    pub content: Vec<T>,
+    pub items: Vec<T>,
     pub total: u32,
 }
 
