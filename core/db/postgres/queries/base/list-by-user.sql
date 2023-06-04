@@ -8,7 +8,8 @@ SELECT
     base.sync_state AS base_sync_state,
     base.last_sync_start_date AS base_last_sync_start_date,
     base.last_sync_success_date AS base_last_sync_success_date,
-    base.last_sync_err_msg AS base_last_sync_err_msg
+    base.last_sync_err_msg AS base_last_sync_err_msg,
+    base.last_sync_offset AS base_last_sync_offset
 FROM base
 WHERE base.user_id = $1
 ORDER BY base.creation_date DESC

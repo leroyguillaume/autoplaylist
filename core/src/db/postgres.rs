@@ -45,14 +45,18 @@ macro_rules! sql {
 #[derive(Debug)]
 pub enum Error {
     Client(TokioPosgresError),
+    IntConversion(TryFromIntError),
     MissingPlatformId,
     Pool(PoolError),
-    TotalConversion(TryFromIntError),
 }
 
 impl Error {
     fn client_boxed(err: TokioPosgresError) -> Box<dyn StdError + Send + StdSync> {
         Box::new(Error::Client(err))
+    }
+
+    fn int_conversion_boxed(err: TryFromIntError) -> Box<dyn StdError + Send + StdSync> {
+        Box::new(Error::IntConversion(err))
     }
 
     fn missing_platform_id_boxed() -> Box<dyn StdError + Send + StdSync> {
@@ -61,10 +65,6 @@ impl Error {
 
     fn pool_boxed(err: PoolError) -> Box<dyn StdError + Send + StdSync> {
         Box::new(Error::Pool(err))
-    }
-
-    fn total_conversion_boxed(err: TryFromIntError) -> Box<dyn StdError + Send + StdSync> {
-        Box::new(Error::TotalConversion(err))
     }
 }
 
@@ -76,8 +76,8 @@ impl Display for Error {
                 write!(f, "incoherent data in database: missing platform ID")
             }
             Self::Pool(err) => write!(f, "getting database connection from pool failed: {err}"),
-            Self::TotalConversion(err) => {
-                write!(f, "conversion of total into unsigned number failed: {err}")
+            Self::IntConversion(err) => {
+                write!(f, "conversion of numeric type failed: {err}")
             }
         }
     }
@@ -89,7 +89,7 @@ impl StdError for Error {
             Self::Client(err) => Some(err),
             Self::MissingPlatformId => None,
             Self::Pool(err) => Some(err),
-            Self::TotalConversion(err) => Some(err),
+            Self::IntConversion(err) => Some(err),
         }
     }
 }
@@ -131,7 +131,6 @@ impl TryFrom<BaseSql<'_>> for Base {
     type Error = Box<dyn StdError + Send + StdSync>;
 
     fn try_from(base: BaseSql<'_>) -> Result<Self> {
-        trace!("converting {base:?} into base");
         let kind = match base.kind {
             BaseKindSql::Likes => BaseKind::Likes,
             BaseKindSql::Playlist => {
@@ -180,14 +179,13 @@ impl<'a> BaseSql<'a> {
     }
 
     fn try_from_row(alias: &str, row: &'a Row) -> Result<Self> {
-        trace!("extracting base from {row:?}");
         Ok(Self {
             creation_date: try_get_cowed(alias, "creation_date", row)?,
             id: try_get_cowed(alias, "id", row)?,
             kind: try_get(alias, "kind", row)?,
             platform: try_get(alias, "platform", row)?,
             platform_id: try_get_opt_cowed(alias, "platform_id", row)?,
-            sync: SyncSql::try_from_row(alias, row)?,
+            sync: SyncSql::try_from_row_opt(alias, row)?,
             user_id: try_get_cowed(alias, "user_id", row)?,
         })
     }
@@ -246,7 +244,6 @@ impl TryFrom<PlaylistSql<'_>> for Playlist {
     type Error = Box<dyn StdError + Send + StdSync>;
 
     fn try_from(playlist: PlaylistSql) -> Result<Self> {
-        trace!("converting {playlist:?} into playlist");
         Ok(Self {
             base_id: playlist.base_id.into_owned(),
             creation_date: playlist.creation_date.into_owned(),
@@ -280,7 +277,6 @@ impl<'a> PlaylistSql<'a> {
     }
 
     fn try_from_row(alias: &str, row: &'a Row) -> Result<Self> {
-        trace!("extracting playlist from {row:?}");
         Ok(Self {
             base_id: try_get_cowed(alias, "base_id", row)?,
             creation_date: try_get_cowed(alias, "creation_date", row)?,
@@ -385,7 +381,6 @@ pub struct SpotifyAuthSql<'a> {
 
 impl<'a> SpotifyAuthSql<'a> {
     fn try_from_row(alias: &str, row: &'a Row) -> Result<Self> {
-        trace!("extracting Spotify auth from {row:?}");
         Ok(Self {
             access_token: try_get_cowed(alias, "access_token", row)?,
             email: try_get_cowed(alias, "email", row)?,
@@ -423,9 +418,9 @@ impl<'a> SpotifyAuthSql<'a> {
 
 impl From<SyncSql<'_>> for Sync {
     fn from(sync: SyncSql) -> Self {
-        trace!("converting {sync:?} into sync");
         Self {
             last_err_msg: sync.last_err_msg.map(|msg| msg.into_owned()),
+            last_offset: sync.last_offset,
             last_start_date: sync.last_start_date.into_owned(),
             last_success_date: sync.last_success_date.map(|date| date.into_owned()),
             state: sync.state.into(),
@@ -438,29 +433,38 @@ impl From<SyncSql<'_>> for Sync {
 #[derive(Clone, Debug)]
 struct SyncSql<'a> {
     last_err_msg: Option<Cow<'a, String>>,
+    last_offset: u32,
     last_start_date: Cow<'a, DateTime<Utc>>,
     last_success_date: Option<Cow<'a, DateTime<Utc>>>,
     state: SyncStateSql,
 }
 
 impl<'a> SyncSql<'a> {
-    fn try_from_row(alias: &str, row: &'a Row) -> Result<Option<Self>> {
-        trace!("extracting playlist from {row:?}");
+    fn extract_from_row(state: SyncStateSql, alias: &str, row: &'a Row) -> Result<Self> {
+        Ok(Self {
+            last_err_msg: try_get_opt_cowed(alias, "last_sync_err_msg", row)?,
+            last_offset: try_get_u32(alias, "last_sync_offset", row)?,
+            last_start_date: try_get_cowed(alias, "last_sync_start_date", row)?,
+            last_success_date: try_get_opt_cowed(alias, "last_sync_success_date", row)?,
+            state,
+        })
+    }
+
+    fn try_from_row(alias: &str, row: &'a Row) -> Result<Self> {
+        let state = try_get(alias, "sync_state", row)?;
+        Self::extract_from_row(state, alias, row)
+    }
+
+    fn try_from_row_opt(alias: &str, row: &'a Row) -> Result<Option<Self>> {
         try_get::<Option<SyncStateSql>>(alias, "sync_state", row)?
-            .map(|state| {
-                Ok(Self {
-                    last_err_msg: try_get_opt_cowed(alias, "last_sync_err_msg", row)?,
-                    last_start_date: try_get_cowed(alias, "last_sync_start_date", row)?,
-                    last_success_date: try_get_opt_cowed(alias, "last_sync_success_date", row)?,
-                    state,
-                })
-            })
+            .map(|state| Self::extract_from_row(state, alias, row))
             .transpose()
     }
 
     fn from_sync(sync: &'a Sync) -> Self {
         Self {
             last_err_msg: sync.last_err_msg.as_ref().map(Cow::Borrowed),
+            last_offset: sync.last_offset,
             last_start_date: Cow::Borrowed(&sync.last_start_date),
             last_success_date: sync.last_success_date.as_ref().map(Cow::Borrowed),
             state: sync.state.into(),
@@ -511,7 +515,6 @@ impl From<SyncState> for SyncStateSql {
 
 impl From<UserSql<'_>> for User {
     fn from(user: UserSql) -> Self {
-        trace!("converting {user:?} into user");
         Self {
             creation_date: user.creation_date.into_owned(),
             id: user.id.into_owned(),
@@ -539,7 +542,6 @@ impl<'a> UserSql<'a> {
     }
 
     fn try_from_row(alias: &str, row: &'a Row) -> Result<Self> {
-        trace!("extracting user from {row:?}");
         Ok(Self {
             creation_date: try_get_cowed(alias, "creation_date", row)?,
             id: try_get_cowed(alias, "id", row)?,
@@ -721,10 +723,43 @@ impl BaseRepository for PostgresBaseRepository<'_> {
             .collect::<Result<Vec<Base>>>()?;
         let page = Page {
             content,
-            total: total.try_into().map_err(Error::total_conversion_boxed)?,
+            total: total.try_into().map_err(Error::int_conversion_boxed)?,
         };
         debug!("page fetched: {page:?}");
         Ok(page)
+    }
+
+    async fn lock_sync(&self, id: &Uuid) -> Result<Option<Sync>> {
+        debug!("locking base {id} synchronization");
+        let sync = self
+            .0
+            .query_opt(sql!("base/lock-sync"), &[&id])
+            .await
+            .map_err(Error::client_boxed)?
+            .map(|row| SyncSql::try_from_row("base", &row).map(Sync::from))
+            .transpose()?;
+        debug!("base synchronization fetched: {sync:?}");
+        Ok(sync)
+    }
+
+    async fn update_sync(&self, id: &Uuid, sync: &Sync) -> Result<()> {
+        debug!("updating sync of base {id} with {sync:?}");
+        let sync = SyncSql::from_sync(sync);
+        trace!("updating sync of base {id} with {sync:?}");
+        self.0
+            .execute(
+                sql!("base/update-sync"),
+                &[
+                    &id,
+                    &sync.state,
+                    sync.last_start_date.as_ref(),
+                    &sync.last_success_date.as_ref().map(|date| date.as_ref()),
+                    &sync.last_err_msg.as_ref().map(|msg| msg.as_ref()),
+                ],
+            )
+            .await
+            .map_err(Error::client_boxed)?;
+        Ok(())
     }
 }
 
@@ -836,7 +871,7 @@ impl PlaylistRepository for PostgresPlaylistRepository<'_> {
             .collect::<Result<Vec<Playlist>>>()?;
         let page = Page {
             content,
-            total: total.try_into().map_err(Error::total_conversion_boxed)?,
+            total: total.try_into().map_err(Error::int_conversion_boxed)?,
         };
         debug!("page fetched: {page:?}");
         Ok(page)
@@ -1007,6 +1042,14 @@ fn try_get_opt_cowed<'a, T: Clone + FromSql<'a>>(
     row: &'a Row,
 ) -> Result<Option<Cow<'a, T>>> {
     try_get::<Option<T>>(alias, key, row).map(|val| val.map(Cow::Owned))
+}
+
+// try_get_u32
+
+#[inline]
+fn try_get_u32(alias: &str, key: &str, row: &Row) -> Result<u32> {
+    try_get::<i64>(alias, key, row)
+        .and_then(|val| val.try_into().map_err(Error::int_conversion_boxed))
 }
 
 // Mods

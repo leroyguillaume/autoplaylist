@@ -44,6 +44,7 @@ CREATE TABLE base (
     last_sync_start_date TIMESTAMP WITH TIME ZONE DEFAULT NULL,
     last_sync_success_date TIMESTAMP WITH TIME ZONE DEFAULT NULL,
     last_sync_err_msg TEXT DEFAULT NULL,
+    last_sync_offset BIGINT NOT NULL DEFAULT 0,
     UNIQUE NULLS NOT DISTINCT (user_id, platform, kind, platform_id)
 );
 

@@ -88,6 +88,7 @@ pub struct SpotifyToken {
 #[derive(Debug)]
 pub struct Sync {
     pub last_err_msg: Option<String>,
+    pub last_offset: u32,
     pub last_start_date: DateTime<Utc>,
     pub last_success_date: Option<DateTime<Utc>>,
     pub state: SyncState,

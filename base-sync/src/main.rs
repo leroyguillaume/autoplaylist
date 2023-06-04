@@ -1,9 +1,4 @@
-use std::{
-    error::Error as StdError,
-    fmt::{Display, Formatter, Result as FmtResult},
-    result::Result as StdResult,
-    sync::Arc,
-};
+use std::{error::Error as StdError, result::Result as StdResult, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use autoplaylist_core::{
@@ -11,15 +6,17 @@ use autoplaylist_core::{
         rabbitmq::RabbitMqBroker, BaseCommand, BaseCommandKind, BaseEvent, BaseEventKind, Broker,
         ConsumerError, ConsumerHandler,
     },
-    db::{in_transaction, postgres::PostgresPool, Client, InTransactionError, Pool},
+    db::{postgres::PostgresPool, Client as DatabaseClient, Pool as DatabasePool},
     domain::{Base, Platform, User},
     init_tracing,
+    spotify::{rspotify::RSpotifyClient, Client as SpotifyClient},
 };
 use opentelemetry::global::shutdown_tracer_provider;
 use tokio::{
     select,
     signal::unix::{signal, Signal, SignalKind},
-    sync::watch::{channel as watch_channel, Sender},
+    sync::watch::{channel as watch_channel, Receiver, Sender},
+    time::sleep,
 };
 use tracing::{debug, error, info, trace, warn};
 use uuid::Uuid;
@@ -30,32 +27,13 @@ use self::cfg::Config;
 
 type Result<T> = StdResult<T, Box<dyn StdError + Send + Sync>>;
 
-// Error
-
-#[derive(Debug)]
-pub enum Error {
-    DatabaseClient(Box<dyn StdError + Send + Sync>),
-}
-
-impl Display for Error {
-    fn fmt(&self, f: &mut Formatter) -> FmtResult {
-        match self {
-            Self::DatabaseClient(err) => write!(f, "{err}"),
-        }
-    }
-}
-
-impl StdError for Error {
-    fn source(&self) -> Option<&(dyn StdError + 'static)> {
-        match self {
-            Self::DatabaseClient(err) => Some(err.as_ref()),
-        }
-    }
-}
-
 // Handler
 
-struct Handler(Arc<Box<dyn Pool>>);
+struct Handler {
+    db_pool: Arc<Box<dyn DatabasePool>>,
+    _spotify_client: Arc<Box<dyn SpotifyClient>>,
+    stop_rx: Receiver<()>,
+}
 
 impl Handler {
     #[inline]
@@ -63,9 +41,10 @@ impl Handler {
         &self,
         base: Base,
         user: User,
-        mut client: Box<dyn Client>,
+        db_client: Box<dyn DatabaseClient>,
     ) -> StdResult<(), ConsumerError> {
-        let repos = client.repositories();
+        let repos = db_client.repositories();
+        let base_repo = repos.base();
         let user_repo = repos.user();
         let auth = user_repo
             .get_spotify_auth_by_id(&user.id)
@@ -74,31 +53,49 @@ impl Handler {
         let _auth = match auth {
             Some(auth) => auth,
             None => {
-                warn!("ignoring synchronization of base {} because user {} is not authenticated with Spotify", base.id, user.id);
+                warn!(
+                    "ignoring sync of base {} because user {} is not authenticated with Spotify",
+                    base.id, user.id
+                );
                 return Ok(());
             }
         };
-        drop(user_repo);
-        drop(repos);
-        let res = in_transaction(client.as_mut(), move |_tx| {
-            Box::pin(async move { Ok::<(), Error>(()) })
-        })
-        .await;
-        match res {
-            Ok(()) => Ok(()),
-            Err(err) => match err {
-                InTransactionError::Client(err) => Err(ConsumerError::with_requeue(err)),
-                InTransactionError::Execution(err) => match err {
-                    Error::DatabaseClient(err) => Err(ConsumerError::with_requeue(err)),
+        let sync = base_repo
+            .lock_sync(&base.id)
+            .await
+            .map_err(ConsumerError::with_requeue)?;
+        let _sync = match sync {
+            Some(sync) => sync,
+            None => {
+                info!(
+                    "ignoring sync of base {} because it's already running",
+                    base.id
+                );
+                return Ok(());
+            }
+        };
+        let mut stop_rx = self.stop_rx.clone();
+        info!("sync of base {} started", base.id);
+        loop {
+            select! {
+                _ = sleep(Duration::from_secs(60)) => info!("sleep"),
+                _ = stop_rx.changed() => {
+                    debug!("stop signal received");
+                    break;
                 },
-            },
+            }
         }
+        Ok(())
     }
 
     #[inline]
     async fn start_sync(&self, base_id: Uuid) -> StdResult<(), ConsumerError> {
-        let client = self.0.client().await.map_err(ConsumerError::with_requeue)?;
-        let repos = client.repositories();
+        let db_client = self
+            .db_pool
+            .client()
+            .await
+            .map_err(ConsumerError::with_requeue)?;
+        let repos = db_client.repositories();
         let base_repo = repos.base();
         let user_repo = repos.user();
         let base = base_repo
@@ -108,7 +105,7 @@ impl Handler {
         let base = match base {
             Some(base) => base,
             None => {
-                warn!("ignoring synchronization of base {base_id} because it doesn't exist");
+                warn!("ignoring sync of base {base_id} because it doesn't exist");
                 return Ok(());
             }
         };
@@ -120,7 +117,7 @@ impl Handler {
             Some(user) => user,
             None => {
                 warn!(
-                    "ignoring synchronization of base {base_id} because user {} doesn't exist",
+                    "ignoring sync of base {base_id} because user {} doesn't exist",
                     base.user_id
                 );
                 return Ok(());
@@ -130,7 +127,7 @@ impl Handler {
         drop(base_repo);
         drop(repos);
         match base.platform {
-            Platform::Spotify => self.start_spotify_sync(base, user, client).await,
+            Platform::Spotify => self.start_spotify_sync(base, user, db_client).await,
         }
     }
 }
@@ -182,22 +179,31 @@ async fn run() -> Result<()> {
     let mut sig_term = signal_listener(SignalKind::terminate())?;
     let cfg = Config::from_env().map_err(Box::new)?;
     let db_pool = PostgresPool::init(cfg.db).await.map_err(Box::new)?;
-    let db_pool: Arc<Box<dyn Pool>> = Arc::new(Box::new(db_pool));
+    let db_pool: Arc<Box<dyn DatabasePool>> = Arc::new(Box::new(db_pool));
     let broker = RabbitMqBroker::init(cfg.rabbitmq).await.map_err(Box::new)?;
-    let (stop_sig_tx, stop_sig_rx) = watch_channel(());
-    let base_cmd_handler: Box<dyn ConsumerHandler<BaseCommand>> =
-        Box::new(Handler(db_pool.clone()));
-    let base_event_handler: Box<dyn ConsumerHandler<BaseEvent>> = Box::new(Handler(db_pool));
+    let spotify_client = RSpotifyClient::new(cfg.spotify);
+    let spotify_client: Arc<Box<dyn SpotifyClient>> = Arc::new(Box::new(spotify_client));
+    let (stop_tx, stop_rx) = watch_channel(());
+    let base_cmd_handler: Box<dyn ConsumerHandler<BaseCommand>> = Box::new(Handler {
+        db_pool: db_pool.clone(),
+        stop_rx: stop_rx.clone(),
+        _spotify_client: spotify_client.clone(),
+    });
+    let base_event_handler: Box<dyn ConsumerHandler<BaseEvent>> = Box::new(Handler {
+        db_pool: db_pool.clone(),
+        stop_rx: stop_rx.clone(),
+        _spotify_client: spotify_client,
+    });
     let base_cmd_csm = broker
-        .start_base_command_consumer(cfg.queues.base_cmd, stop_sig_rx.clone(), base_cmd_handler)
+        .start_base_command_consumer(cfg.queues.base_cmd, stop_rx.clone(), base_cmd_handler)
         .await?;
     let base_event_csm = broker
-        .start_base_event_consumer(cfg.queues.base_event, stop_sig_rx, base_event_handler)
+        .start_base_event_consumer(cfg.queues.base_event, stop_rx, base_event_handler)
         .await?;
     info!("synchronizer is started");
     select! {
-        _ = sig_int.recv() => send_stop_signal(SignalKind::interrupt(), stop_sig_tx).await,
-        _ = sig_term.recv() => send_stop_signal(SignalKind::terminate(), stop_sig_tx).await,
+        _ = sig_int.recv() => send_stop_signal(SignalKind::interrupt(), stop_tx).await,
+        _ = sig_term.recv() => send_stop_signal(SignalKind::terminate(), stop_tx).await,
     }
     debug!("waiting for consumers shutdown");
     base_cmd_csm.wait_for_shutdown().await;

@@ -2,7 +2,7 @@ use std::result::Result as StdResult;
 
 use autoplaylist_core::{
     broker::rabbitmq::Config as RabbitMqConfig, db::Config as DatabaseConfig, env_var_or_default,
-    ConfigError,
+    spotify::rspotify::Config as SpotifyConfig, ConfigError,
 };
 use tracing::{debug, trace};
 
@@ -37,6 +37,7 @@ pub struct Config {
     pub rabbitmq: RabbitMqConfig,
     pub db: DatabaseConfig,
     pub queues: QueuesConfig,
+    pub spotify: SpotifyConfig,
 }
 
 impl Config {
@@ -46,6 +47,7 @@ impl Config {
             db: DatabaseConfig::from_env()?,
             queues: QueuesConfig::from_env()?,
             rabbitmq: RabbitMqConfig::from_env()?,
+            spotify: SpotifyConfig::from_env()?,
         };
         debug!("configuration loaded: {cfg:?}");
         Ok(cfg)

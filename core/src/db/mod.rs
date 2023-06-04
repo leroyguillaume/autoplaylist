@@ -1,6 +1,7 @@
 use std::{
     error::Error as StdError,
     fmt::{Display, Formatter, Result as FmtResult},
+    marker::Sync as StdSync,
     pin::Pin,
     result::Result as StdResult,
 };
@@ -12,13 +13,13 @@ use tracing::{error, trace};
 use uuid::Uuid;
 
 use crate::{
-    domain::{Base, BaseKind, Platform, Playlist, PlaylistFilter, SpotifyAuth, User},
+    domain::{Base, BaseKind, Platform, Playlist, PlaylistFilter, SpotifyAuth, Sync, User},
     env_var, env_var_opt, env_var_or_default, ConfigError,
 };
 
 // Result
 
-pub type Result<T> = StdResult<T, Box<dyn StdError + Send + Sync>>;
+pub type Result<T> = StdResult<T, Box<dyn StdError + Send + StdSync>>;
 
 // Page
 
@@ -31,7 +32,7 @@ pub struct Page<T> {
 // Client
 
 #[async_trait]
-pub trait Client: Send + Sync {
+pub trait Client: Send + StdSync {
     fn repositories(&self) -> Box<dyn Repositories + '_>;
 
     async fn transaction(&mut self) -> Result<Box<dyn Transaction + '_>>;
@@ -40,7 +41,7 @@ pub trait Client: Send + Sync {
 // Transaction
 
 #[async_trait]
-pub trait Transaction: Send + Sync {
+pub trait Transaction: Send + StdSync {
     async fn commit(self: Box<Self>) -> Result<()>;
 
     fn repositories(&self) -> Box<dyn Repositories + '_>;
@@ -50,7 +51,7 @@ pub trait Transaction: Send + Sync {
 
 // Repositories
 
-pub trait Repositories: Send + Sync {
+pub trait Repositories: Send + StdSync {
     fn base(&self) -> Box<dyn BaseRepository + '_>;
 
     fn playlist(&self) -> Box<dyn PlaylistRepository + '_>;
@@ -61,7 +62,7 @@ pub trait Repositories: Send + Sync {
 // BaseRepository
 
 #[async_trait]
-pub trait BaseRepository: Send + Sync {
+pub trait BaseRepository: Send + StdSync {
     async fn get_by_id(&self, id: &Uuid) -> Result<Option<Base>>;
 
     async fn get_by_user_kind_platform(
@@ -74,12 +75,16 @@ pub trait BaseRepository: Send + Sync {
     async fn insert(&self, base: &Base) -> Result<()>;
 
     async fn list_by_user(&self, user_id: &Uuid, limit: u32, offset: u32) -> Result<Page<Base>>;
+
+    async fn lock_sync(&self, id: &Uuid) -> Result<Option<Sync>>;
+
+    async fn update_sync(&self, id: &Uuid, sync: &Sync) -> Result<()>;
 }
 
 // PlaylistRepository
 
 #[async_trait]
-pub trait PlaylistRepository: Send + Sync {
+pub trait PlaylistRepository: Send + StdSync {
     async fn delete(&self, id: &Uuid) -> Result<()>;
 
     async fn get_by_id(&self, id: &Uuid) -> Result<Option<Playlist>>;
@@ -95,7 +100,7 @@ pub trait PlaylistRepository: Send + Sync {
 // UserRepository
 
 #[async_trait]
-pub trait UserRepository: Send + Sync {
+pub trait UserRepository: Send + StdSync {
     async fn get_by_id(&self, id: &Uuid) -> Result<Option<User>>;
 
     async fn get_by_spotify_email(&self, email: &str) -> Result<Option<User>>;
@@ -110,7 +115,7 @@ pub trait UserRepository: Send + Sync {
 // Pool
 
 #[async_trait]
-pub trait Pool: Send + Sync {
+pub trait Pool: Send + StdSync {
     async fn client(&self) -> Result<Box<dyn Client>>;
 }
 
@@ -144,12 +149,12 @@ impl Config {
 // InTransactionError
 
 #[derive(Debug)]
-pub enum InTransactionError<E: StdError + Send + Sync + 'static> {
-    Client(Box<dyn StdError + Send + Sync>),
+pub enum InTransactionError<E: StdError + Send + StdSync + 'static> {
+    Client(Box<dyn StdError + Send + StdSync>),
     Execution(E),
 }
 
-impl<E: StdError + Send + Sync + 'static> Display for InTransactionError<E> {
+impl<E: StdError + Send + StdSync + 'static> Display for InTransactionError<E> {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         match self {
             Self::Client(err) => write!(f, "{err}"),
@@ -158,7 +163,7 @@ impl<E: StdError + Send + Sync + 'static> Display for InTransactionError<E> {
     }
 }
 
-impl<E: StdError + Send + Sync + 'static> StdError for InTransactionError<E> {
+impl<E: StdError + Send + StdSync + 'static> StdError for InTransactionError<E> {
     fn source(&self) -> Option<&(dyn StdError + 'static)> {
         match self {
             Self::Client(err) => Some(err.as_ref()),
@@ -171,7 +176,7 @@ impl<E: StdError + Send + Sync + 'static> StdError for InTransactionError<E> {
 
 pub async fn in_transaction<
     'a,
-    E: StdError + Send + Sync + 'static,
+    E: StdError + Send + StdSync + 'static,
     F: for<'b> FnOnce(
         &'b (dyn Transaction + 'b),
     ) -> Pin<Box<dyn Future<Output = StdResult<T, E>> + Send + 'b>>,
