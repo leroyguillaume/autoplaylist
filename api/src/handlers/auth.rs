@@ -10,7 +10,7 @@ use actix_web::{
 };
 use autoplaylist_core::{
     db::in_transaction,
-    domain::{Role, SpotifyAuth, User},
+    domain::{Role, SpotifyAuth, SpotifyToken, User},
 };
 use chrono::Utc;
 use jwt::{Claims, RegisteredClaims, SignWithKey};
@@ -75,9 +75,12 @@ async fn auth_with_spotify(
                 }
             };
             let auth = SpotifyAuth {
-                access_token: token.access_token,
                 email,
-                refresh_token: token.refresh_token,
+                token: SpotifyToken {
+                    access_token: token.access_token,
+                    expiration_date: Utc::now() + token.expires_in,
+                    refresh_token: token.refresh_token,
+                },
                 user_id: user.id,
             };
             user_repo

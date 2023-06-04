@@ -24,7 +24,7 @@ use uuid::Uuid;
 
 use crate::domain::{
     Base, BaseKind, Platform, Playlist, PlaylistFilter, PlaylistFilterOperator, Role, SpotifyAuth,
-    Sync, SyncState, User,
+    SpotifyToken, Sync, SyncState, User,
 };
 
 use super::{
@@ -361,9 +361,12 @@ impl From<Role> for RoleSql {
 impl From<SpotifyAuthSql<'_>> for SpotifyAuth {
     fn from(auth: SpotifyAuthSql<'_>) -> Self {
         Self {
-            access_token: auth.access_token.into_owned(),
             email: auth.email.into_owned(),
-            refresh_token: auth.refresh_token.map(|token| token.into_owned()),
+            token: SpotifyToken {
+                access_token: auth.access_token.into_owned(),
+                expiration_date: auth.expiration_date.into_owned(),
+                refresh_token: auth.refresh_token.map(|token| token.into_owned()),
+            },
             user_id: auth.user_id.into_owned(),
         }
     }
@@ -373,8 +376,9 @@ impl From<SpotifyAuthSql<'_>> for SpotifyAuth {
 
 #[derive(Clone)]
 pub struct SpotifyAuthSql<'a> {
-    pub email: Cow<'a, String>,
     pub access_token: Cow<'a, String>,
+    pub email: Cow<'a, String>,
+    pub expiration_date: Cow<'a, DateTime<Utc>>,
     pub refresh_token: Option<Cow<'a, String>>,
     pub user_id: Cow<'a, Uuid>,
 }
@@ -385,6 +389,7 @@ impl<'a> SpotifyAuthSql<'a> {
         Ok(Self {
             access_token: try_get_cowed(alias, "access_token", row)?,
             email: try_get_cowed(alias, "email", row)?,
+            expiration_date: try_get_cowed(alias, "expiration_date", row)?,
             refresh_token: try_get_opt_cowed(alias, "refresh_token", row)?,
             user_id: try_get_cowed(alias, "user_id", row)?,
         })
@@ -405,9 +410,10 @@ impl Debug for SpotifyAuthSql<'_> {
 impl<'a> SpotifyAuthSql<'a> {
     fn from_spotify_auth(auth: &'a SpotifyAuth) -> Self {
         Self {
+            access_token: Cow::Borrowed(&auth.token.access_token),
             email: Cow::Borrowed(&auth.email),
-            access_token: Cow::Borrowed(&auth.access_token),
-            refresh_token: auth.refresh_token.as_ref().map(Cow::Borrowed),
+            expiration_date: Cow::Borrowed(&auth.token.expiration_date),
+            refresh_token: auth.token.refresh_token.as_ref().map(Cow::Borrowed),
             user_id: Cow::Borrowed(&auth.user_id),
         }
     }
@@ -909,6 +915,7 @@ impl UserRepository for PostgresUserRepository<'_> {
                     auth.user_id.as_ref(),
                     auth.email.as_ref(),
                     auth.access_token.as_ref(),
+                    auth.expiration_date.as_ref(),
                     &auth.refresh_token.as_ref().map(|token| token.as_ref()),
                 ],
             )

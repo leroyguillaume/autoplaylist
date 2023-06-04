@@ -29,6 +29,7 @@ CREATE TABLE spotify_auth (
     user_id UUID NOT NULL PRIMARY KEY REFERENCES "user" ON DELETE CASCADE,
     email VARCHAR (255) NOT NULL UNIQUE,
     access_token TEXT NOT NULL,
+    expiration_date TIMESTAMP WITH TIME ZONE NOT NULL,
     refresh_token TEXT
 );
 

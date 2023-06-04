@@ -69,14 +69,20 @@ pub struct Playlist {
     pub user_id: Uuid,
 }
 
-#[derive(SecureDebug)]
+#[derive(Debug)]
 pub struct SpotifyAuth {
     pub email: String,
+    pub token: SpotifyToken,
+    pub user_id: Uuid,
+}
+
+#[derive(SecureDebug)]
+pub struct SpotifyToken {
     #[sensitive]
     pub access_token: String,
+    pub expiration_date: DateTime<Utc>,
     #[sensitive]
     pub refresh_token: Option<String>,
-    pub user_id: Uuid,
 }
 
 #[derive(Debug)]
