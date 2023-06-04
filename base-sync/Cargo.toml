@@ -6,7 +6,6 @@ version.workspace = true
 [dependencies]
 async-trait = "0.1"
 autoplaylist-core = { path = "../core" }
-futures = "0.3"
 opentelemetry = { version = "0.18" }
 tokio = { version = "1.28", features = ["full"] }
 tracing = "0.1"

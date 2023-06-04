@@ -253,9 +253,9 @@ dependencies = [
 
 [[package]]
 name = "amq-protocol"
-version = "7.1.0"
+version = "7.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "de7ec72218cc1c9063bdf559a60f40405980ee56bca469ad1e549cc0d76deb46"
+checksum = "1d40d8b2465c7959dd40cee32ba6ac334b5de57e9fca0cc756759894a4152a5d"
 dependencies = [
  "amq-protocol-tcp",
  "amq-protocol-types",
@@ -267,9 +267,9 @@ dependencies = [
 
 [[package]]
 name = "amq-protocol-tcp"
-version = "7.1.0"
+version = "7.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09fae6d8a492462d268b48b7bc14d76a53e5310414f909c61cb3a509dbe7ca9b"
+checksum = "9cb2100adae7da61953a2c3a01935d86caae13329fadce3333f524d6d6ce12e2"
 dependencies = [
  "amq-protocol-uri",
  "tcp-stream",
@@ -278,9 +278,9 @@ dependencies = [
 
 [[package]]
 name = "amq-protocol-types"
-version = "7.1.0"
+version = "7.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7891a2fc253f8919d3caa49fccd06d721002e015940c8592f7824c0b4e80a485"
+checksum = "156ff13c8a3ced600b4e54ed826a2ae6242b6069d00dd98466827cef07d3daff"
 dependencies = [
  "cookie-factory",
  "nom",
@@ -290,9 +290,9 @@ dependencies = [
 
 [[package]]
 name = "amq-protocol-uri"
-version = "7.1.0"
+version = "7.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "da3649e6751a8fb43330f2a442409970f10f51c79b987fcbbfc7093f4edb6a5e"
+checksum = "751bbd7d440576066233e740576f1b31fdc6ab86cfabfbd48c548de77eca73e4"
 dependencies = [
  "amq-protocol-types",
  "percent-encoding",
@@ -465,16 +465,10 @@ dependencies = [
  "actix-web",
  "autoplaylist-core",
  "chrono",
- "concat-idents",
- "deadpool-postgres",
  "hmac",
  "jwt",
- "lapin",
  "opentelemetry",
- "postgres-types",
- "refinery",
  "regex",
- "rspotify",
  "securefmt",
  "serde",
  "serde_json",
@@ -492,7 +486,6 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "autoplaylist-core",
- "futures",
  "opentelemetry",
  "tokio",
  "tracing",
@@ -677,16 +670,6 @@ checksum = "773f3b9af64447d2ce9850330c473515014aa235e6a783b02db81ff39e4a3dad"
 dependencies = [
  "crypto-common",
  "inout",
-]
-
-[[package]]
-name = "concat-idents"
-version = "1.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0fe0e1d9f7de897d18e590a7496b5facbe87813f746cf4b8db596ba77e07e832"
-dependencies = [
- "quote",
- "syn 1.0.109",
 ]
 
 [[package]]
@@ -1410,9 +1393,9 @@ checksum = "d4345964bb142484797b161f473a503a434de77149dd8c7427788c6e13379388"
 
 [[package]]
 name = "lapin"
-version = "2.1.1"
+version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd03ea5831b44775e296239a64851e2fd14a80a363d202ba147009ffc994ff0f"
+checksum = "acc13beaa09eed710f406201f46b961345b4d061dd90ec3d3ccc70721e70342a"
 dependencies = [
  "amq-protocol",
  "async-global-executor-trait",
@@ -2299,9 +2282,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-connector"
-version = "0.17.0"
+version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "692d857261c41e2915b8ee70e40265e51010ee5d3c7a9b7d50837bc5cee86207"
+checksum = "67c8d6cf0e464eff7cee6ba0419f56a65d29999fc164dd719c8633fbb401365f"
 dependencies = [
  "log",
  "rustls",
@@ -2650,9 +2633,9 @@ dependencies = [
 
 [[package]]
 name = "tcp-stream"
-version = "0.25.0"
+version = "0.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6918876e41110757f36b734388e17834e69abf7ca4456ebe8a38af21f5a651d7"
+checksum = "1322b18a9e329ba45e4430b19543045b85cd1dcb2892e77d27ab471ba2039bd1"
 dependencies = [
  "cfg-if",
  "p12",
