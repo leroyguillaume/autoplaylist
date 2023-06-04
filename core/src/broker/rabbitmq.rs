@@ -20,7 +20,11 @@ use lapin::{
 use securefmt::Debug as SecureDebug;
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{from_slice, to_string};
-use tokio::{select, spawn, sync::watch::Receiver, task::JoinHandle};
+use tokio::{
+    select, spawn,
+    sync::watch::Receiver,
+    task::{JoinHandle, JoinSet},
+};
 use tracing::{debug, error, trace};
 
 use crate::{env_var, env_var_or_default, ConfigError};
@@ -189,19 +193,23 @@ impl<T: Debug + DeserializeOwned + Send + Sync + 'static> RabbitMqConsumer<T> {
         mut stop_rx: Receiver<()>,
         handler: Box<dyn ConsumerHandler<T>>,
     ) -> Self {
-        let join_handle = spawn(async move {
+        let csm_join_handle = spawn(async move {
+            let mut handler_join_set = JoinSet::new();
             let handler = Arc::new(handler);
             loop {
                 select! {
                     res = consumer.next() => match res {
-                        Some(Ok(delivery)) => Self::handle(delivery, handler.clone()).await,
+                        Some(Ok(delivery)) => {
+                            let handler = handler.clone();
+                            handler_join_set.spawn(async move { Self::handle(delivery, handler).await });
+                        }
                         Some(Err(err)) => {
                             error!("consumer of queue `{queue}` failed: {err}");
-                        },
+                        }
                         None => {
                             debug!("stream on queue `{queue}` closed");
                             break;
-                        },
+                        }
                     },
                     _ = stop_rx.changed() => {
                         debug!("consumer of queue `{queue}` received stop signal");
@@ -209,9 +217,15 @@ impl<T: Debug + DeserializeOwned + Send + Sync + 'static> RabbitMqConsumer<T> {
                     },
                 }
             }
+            debug!("waiting for handlers abort");
+            while let Some(res) = handler_join_set.join_next().await {
+                if let Err(err) = res {
+                    error!("waiting for handler abort failed: {err}");
+                }
+            }
         });
         Self {
-            join_handle,
+            join_handle: csm_join_handle,
             _phantom: PhantomData::default(),
         }
     }
