@@ -95,12 +95,16 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn from_env(redirect_uri: String) -> StdResult<Self, ConfigError> {
-        Ok(Self {
+    pub fn from_env() -> StdResult<Self, ConfigError> {
+        trace!("loading Spotify configuration");
+        let webapp_url: String = env_var("WEBAPP_URL")?;
+        let cfg = Self {
             id: env_var("SPOTIFY_CLIENT_ID")?,
-            redirect_uri,
+            redirect_uri: format!("{webapp_url}/auth/spotify"),
             secret: env_var("SPOTIFY_CLIENT_SECRET")?,
-        })
+        };
+        trace!("Spotify configuration loaded: {cfg:?}");
+        Ok(cfg)
     }
 }
 

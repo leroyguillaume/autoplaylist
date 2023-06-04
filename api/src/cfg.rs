@@ -47,8 +47,6 @@ pub struct Config {
 impl Config {
     pub fn from_env() -> Result<Self> {
         trace!("loading configuration");
-        let webapp_url: String = env_var("WEBAPP_URL")?;
-        let spotify_redirect_uri = format!("{webapp_url}/auth/spotify");
         let cfg = Config {
             db: DatabaseConfig::from_env()?,
             jwt: JwtConfig {
@@ -62,9 +60,9 @@ impl Config {
                 addr: env_var_or_default("SERVER_ADDRESS", || {
                     SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 8080))
                 })?,
-                allowed_origin: webapp_url,
+                allowed_origin: env_var("WEBAPP_URL")?,
             },
-            spotify: SpotifyConfig::from_env(spotify_redirect_uri)?,
+            spotify: SpotifyConfig::from_env()?,
         };
         debug!("configuration loaded: {cfg:?}");
         Ok(cfg)
