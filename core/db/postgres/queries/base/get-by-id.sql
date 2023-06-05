@@ -9,7 +9,8 @@ SELECT
     base.last_sync_start_date AS base_last_sync_start_date,
     base.last_sync_success_date AS base_last_sync_success_date,
     base.last_sync_err_msg AS base_last_sync_err_msg,
-    base.last_sync_offset AS base_last_sync_offset
+    base.last_sync_offset AS base_last_sync_offset,
+    base.last_sync_total AS base_last_sync_total
 FROM base
 WHERE
     base.id = $1;

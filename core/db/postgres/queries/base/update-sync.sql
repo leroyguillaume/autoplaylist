@@ -6,4 +6,4 @@ SET
     base.last_sync_err_msg = $5,
     base.last_sync_offset = $6,
     base.last_sync_total = $7
-WHERE base.id = $1;
+WHERE id = $1;
