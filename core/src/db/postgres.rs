@@ -272,6 +272,7 @@ impl Sync {
             last_offset: try_get_u32(alias, "last_sync_offset", row)?,
             last_start_date: try_get(alias, "last_sync_start_date", row)?,
             last_success_date: try_get(alias, "last_sync_success_date", row)?,
+            last_total: try_get_u32(alias, "last_sync_total", row)?,
             state: state.into(),
         })
     }
@@ -519,6 +520,8 @@ impl BaseRepository for PostgresBaseRepository<'_> {
     async fn update_sync(&self, id: &Uuid, sync: &Sync) -> Result<()> {
         debug!("updating sync of base {id} with {sync:?}");
         let state: SyncStateSql = sync.state.into();
+        let last_offset: i64 = sync.last_offset.into();
+        let last_total: i64 = sync.last_total.into();
         self.0
             .execute(
                 sql!("base/update-sync"),
@@ -528,6 +531,8 @@ impl BaseRepository for PostgresBaseRepository<'_> {
                     &sync.last_start_date,
                     &sync.last_success_date,
                     &sync.last_err_msg,
+                    &last_offset,
+                    &last_total,
                 ],
             )
             .await

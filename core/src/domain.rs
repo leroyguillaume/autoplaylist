@@ -97,6 +97,7 @@ pub struct Sync {
     pub last_offset: u32,
     pub last_start_date: DateTime<Utc>,
     pub last_success_date: Option<DateTime<Utc>>,
+    pub last_total: u32,
     pub state: SyncState,
 }
 
