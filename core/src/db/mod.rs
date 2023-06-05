@@ -47,9 +47,13 @@ pub trait Transaction: Send + StdSync {
 // Repositories
 
 pub trait Repositories: Send + StdSync {
+    fn artist(&self) -> Box<dyn ArtistRepository + '_>;
+
     fn base(&self) -> Box<dyn BaseRepository + '_>;
 
     fn playlist(&self) -> Box<dyn PlaylistRepository + '_>;
+
+    fn track(&self) -> Box<dyn TrackRepository + '_>;
 
     fn user(&self) -> Box<dyn UserRepository + '_>;
 }
@@ -107,13 +111,22 @@ pub trait UserRepository: Send + StdSync {
     async fn upsert_spotify_auth(&self, auth: &SpotifyAuth) -> Result<()>;
 }
 
+// ArtistRepository
+
+#[async_trait]
+pub trait ArtistRepository: Send + StdSync {
+    async fn get_by_spotify_id(&self, id: &str) -> Result<Option<Artist>>;
+
+    async fn insert(&self, artist: &Artist) -> Result<()>;
+}
+
 // TrackRepository
 
 #[async_trait]
 pub trait TrackRepository: Send + StdSync {
     async fn get_by_spotify_id(&self, id: &str) -> Result<Option<Track>>;
 
-    async fn insert(&self, track: &Track, artists: &[Artist]) -> Result<()>;
+    async fn insert(&self, track: &Track, artist_ids: &[Uuid]) -> Result<()>;
 }
 
 // Pool

@@ -63,11 +63,21 @@ CREATE TABLE playlist_filter (
     def JSONB NOT NULL
 );
 
+CREATE TABLE artist {
+    id UUID NOT NULL PRIMARY KEY,
+    name VARCHAR (255) NOT NULL,
+    spotify_id VARCHAR (50) UNIQUE
+};
+
 CREATE TABLE track (
     id UUID NOT NULL PRIMARY KEY,
     name VARCHAR (255) NOT NULL,
-    artist VARCHAR (255) NOT NULL,
-    album VARCHAR (255) NOT NULL,
-    release_date INT NOT NULL,
-    spotify_id VARCHAR (50) NOT NULL UNIQUE
+    release_year INT NOT NULL,
+    spotify_id VARCHAR (50) UNIQUE
+);
+
+CREATE TABLE track_artist (
+    track_id UUID NOT NULL REFERENCES track ON DELETE CASCADE,
+    artist_id UUID NOT NULL REFERENCES artist ON DELETE CASCADE,
+    PRIMARY KEY (track_id, artist_id)
 );

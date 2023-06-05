@@ -170,13 +170,15 @@ pub struct Page<T> {
 pub struct Artist {
     pub id: Uuid,
     pub name: String,
+    pub spotify_id: Option<String>,
 }
 
 // Track
 
 #[derive(Debug)]
 pub struct Track {
-    pub album: String,
     pub id: Uuid,
     pub name: String,
+    pub release_year: u32,
+    pub spotify_id: Option<String>,
 }

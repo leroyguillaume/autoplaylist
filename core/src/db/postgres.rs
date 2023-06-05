@@ -20,13 +20,13 @@ use tracing::{debug, info, trace};
 use uuid::Uuid;
 
 use crate::domain::{
-    Base, BaseKind, Platform, Playlist, PlaylistFilter, Role, SpotifyAuth, SpotifyToken, Sync,
-    SyncState, User,
+    Artist, Base, BaseKind, Platform, Playlist, PlaylistFilter, Role, SpotifyAuth, SpotifyToken,
+    Sync, SyncState, Track, User,
 };
 
 use super::{
-    BaseRepository, Client, Config, Page, PlaylistRepository, Pool, Repositories, Result,
-    Transaction, UserRepository,
+    ArtistRepository, BaseRepository, Client, Config, Page, PlaylistRepository, Pool, Repositories,
+    Result, TrackRepository, Transaction, UserRepository,
 };
 
 // Macros
@@ -345,6 +345,31 @@ impl TryFromRow for User {
     }
 }
 
+// Artist
+
+impl TryFromRow for Artist {
+    fn try_from_row(alias: &str, row: &Row) -> Result<Self> {
+        Ok(Self {
+            id: try_get(alias, "id", row)?,
+            name: try_get(alias, "name", row)?,
+            spotify_id: try_get(alias, "spotify_id", row)?,
+        })
+    }
+}
+
+// Track
+
+impl TryFromRow for Track {
+    fn try_from_row(alias: &str, row: &Row) -> Result<Self> {
+        Ok(Self {
+            id: try_get(alias, "id", row)?,
+            name: try_get(alias, "name", row)?,
+            release_year: try_get_u32(alias, "release_year", row)?,
+            spotify_id: try_get(alias, "spotify_id", row)?,
+        })
+    }
+}
+
 // PostgresClient
 
 pub struct PostgresClient(Object);
@@ -382,12 +407,20 @@ impl<'a> PostgresRepositories<'a> {
 }
 
 impl Repositories for PostgresRepositories<'_> {
+    fn artist(&self) -> Box<dyn ArtistRepository + '_> {
+        Box::new(PostgresArtistRepository(self.0))
+    }
+
     fn base(&self) -> Box<dyn BaseRepository + '_> {
         Box::new(PostgresBaseRepository(self.0))
     }
 
     fn playlist(&self) -> Box<dyn PlaylistRepository + '_> {
         Box::new(PostgresPlaylistRepository(self.0))
+    }
+
+    fn track(&self) -> Box<dyn TrackRepository + '_> {
+        Box::new(PostgresTrackRepository(self.0))
     }
 
     fn user(&self) -> Box<dyn UserRepository + '_> {
@@ -686,6 +719,75 @@ impl UserRepository for PostgresUserRepository<'_> {
             )
             .await
             .map_err(Box::new)?;
+        Ok(())
+    }
+}
+
+// PostgresArtistRepository
+
+pub struct PostgresArtistRepository<'a>(&'a TokioPostgresClient);
+
+#[async_trait]
+impl ArtistRepository for PostgresArtistRepository<'_> {
+    async fn get_by_spotify_id(&self, id: &str) -> Result<Option<Artist>> {
+        debug!("fetching artyist from database with id {id}");
+        let track = query_opt(sql!("artist/get-by-spotify-id"), &[&id], "artist", self.0).await?;
+        debug!("artist fetched: {track:?}");
+        Ok(track)
+    }
+
+    async fn insert(&self, artist: &Artist) -> Result<()> {
+        debug!("inserting {artist:?} into database");
+        self.0
+            .query(
+                sql!("artist/insert"),
+                &[&artist.id, &artist.name, &artist.spotify_id],
+            )
+            .await
+            .map_err(Box::new)?;
+        Ok(())
+    }
+}
+
+// PostgresTrackRepository
+
+pub struct PostgresTrackRepository<'a>(&'a TokioPostgresClient);
+
+#[async_trait]
+impl TrackRepository for PostgresTrackRepository<'_> {
+    async fn get_by_spotify_id(&self, id: &str) -> Result<Option<Track>> {
+        debug!("fetching track from database with id {id}");
+        let track = query_opt(sql!("track/get-by-spotify-id"), &[&id], "track", self.0).await?;
+        debug!("track fetched: {track:?}");
+        Ok(track)
+    }
+
+    async fn insert(&self, track: &Track, artist_ids: &[Uuid]) -> Result<()> {
+        debug!("inserting {track:?} with artists {artist_ids:?} into database");
+        self.0
+            .query(
+                sql!("track/insert"),
+                &[
+                    &track.id,
+                    &track.name,
+                    &track.release_year,
+                    &track.spotify_id,
+                ],
+            )
+            .await
+            .map_err(Box::new)?;
+        let st = self
+            .0
+            .prepare(sql!("playlist/insert-filter"))
+            .await
+            .map_err(Box::new)?;
+        for id in artist_ids {
+            trace!("linking artist {id:?} to track {} into database", track.id);
+            self.0
+                .query(&st, &[&track.id, id])
+                .await
+                .map_err(Box::new)?;
+        }
         Ok(())
     }
 }
