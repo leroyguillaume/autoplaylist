@@ -30,7 +30,7 @@ CREATE TABLE spotify_auth (
     email VARCHAR (255) NOT NULL UNIQUE,
     access_token TEXT NOT NULL,
     expiration_date TIMESTAMP WITH TIME ZONE NOT NULL,
-    refresh_token TEXT
+    refresh_token VARCHAR (500)
 );
 
 CREATE TABLE base (
@@ -69,5 +69,5 @@ CREATE TABLE track (
     artist VARCHAR (255) NOT NULL,
     album VARCHAR (255) NOT NULL,
     release_date INT NOT NULL,
-    spotify_id TEXT NOT NULL UNIQUE
+    spotify_id VARCHAR (50) NOT NULL UNIQUE
 );
