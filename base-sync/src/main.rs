@@ -9,10 +9,11 @@ use autoplaylist_core::{
         ConsumerError, ConsumerHandler,
     },
     db::{postgres::PostgresPool, Client as DatabaseClient, Pool as DatabasePool},
-    domain::{Base, BaseKind, Page, Platform, SpotifyToken, SpotifyTrack, Sync, User},
+    domain::{Base, BaseKind, Page, Platform, SpotifyToken, SpotifyTrack, Sync, SyncState, User},
     init_tracing,
     spotify::{rspotify::RSpotifyClient, Client as SpotifyClient},
 };
+use chrono::Utc;
 use opentelemetry::global::shutdown_tracer_provider;
 use tokio::{
     select,
@@ -42,6 +43,25 @@ struct Handler {
 
 impl Handler {
     #[inline]
+    async fn fail_sync(
+        base_id: &Uuid,
+        err: &ConsumerError,
+        sync: &mut Sync,
+        db_client: &dyn DatabaseClient,
+    ) -> StdResult<(), ConsumerError> {
+        let repos = db_client.repositories();
+        let base_repo = repos.base();
+        sync.state = SyncState::Failed;
+        sync.last_err_msg = Some(err.to_string());
+        base_repo
+            .update_sync(base_id, sync)
+            .await
+            .map_err(ConsumerError::with_requeue)?;
+        error!("sync of base {base_id} failed: {err}");
+        Ok(())
+    }
+
+    #[inline]
     async fn fetch_page(
         &self,
         base_kind: &BaseKind,
@@ -64,12 +84,31 @@ impl Handler {
 
     #[inline]
     async fn handle_page(
-        &self,
-        _page: Page<SpotifyTrack>,
-        _sync: &mut Sync,
-        _db_client: &dyn DatabaseClient,
-    ) -> StdResult<(), ConsumerError> {
-        Ok(())
+        base_id: &Uuid,
+        page: Page<SpotifyTrack>,
+        sync: &mut Sync,
+        db_client: &dyn DatabaseClient,
+    ) -> StdResult<bool, ConsumerError> {
+        let repos = db_client.repositories();
+        let base_repo = repos.base();
+        sync.last_err_msg = None;
+        sync.last_total = page.total;
+        for _ in page.items {
+            sync.last_offset += 1;
+        }
+        let is_over = if page.is_last {
+            sync.state = SyncState::Succeeded;
+            sync.last_success_date = Some(Utc::now());
+            sync.last_offset = 0;
+            true
+        } else {
+            false
+        };
+        base_repo
+            .update_sync(base_id, sync)
+            .await
+            .map_err(ConsumerError::with_requeue)?;
+        Ok(is_over)
     }
 
     #[inline]
@@ -115,7 +154,33 @@ impl Handler {
         loop {
             select! {
                 page = self.fetch_page(&base.kind, sync.last_offset, &auth.token) => {
-                    self.handle_page(page?, &mut sync, db_client.as_ref()).await?
+                    match page {
+                        Ok(page) => {
+                            let is_over = Self::handle_page(
+                                &base.id,
+                                page,
+                                &mut sync,
+                                db_client.as_ref()
+                            ).await;
+                            match is_over {
+                                Ok(true) => break,
+                                Err(err) => {
+                                    Self::fail_sync(
+                                        &base.id,
+                                        &err,
+                                        &mut sync,
+                                        db_client.as_ref()
+                                    ).await?;
+                                    break;
+                                }
+                                _ => (),
+                            }
+                        }
+                        Err(err) => {
+                            Self::fail_sync(&base.id, &err, &mut sync, db_client.as_ref()).await?;
+                            break;
+                        }
+                    }
                 }
                 _ = stop_rx.changed() => {
                     debug!("stop signal received");
