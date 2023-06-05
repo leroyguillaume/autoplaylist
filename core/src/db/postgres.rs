@@ -491,16 +491,20 @@ impl BaseRepository for PostgresBaseRepository<'_> {
         debug!("counting total of bases owned by user {user_id}");
         let total = count(sql!("base/count-by-user"), &[user_id], self.0).await?;
         debug!("listing bases owned by user {user_id} from offset {offset} limiting to {limit} results");
-        let limit: i64 = limit.into();
-        let offset: i64 = offset.into();
+        let limit_i64: i64 = limit.into();
+        let offset_i64: i64 = offset.into();
         let items = query(
             sql!("base/list-by-user"),
-            &[user_id, &limit, &offset],
+            &[user_id, &limit_i64, &offset_i64],
             "base",
             self.0,
         )
         .await?;
-        let page = Page { items, total };
+        let page = Page {
+            is_last: offset + limit >= total,
+            items,
+            total,
+        };
         debug!("page fetched: {page:?}");
         Ok(page)
     }
@@ -606,16 +610,20 @@ impl PlaylistRepository for PostgresPlaylistRepository<'_> {
         debug!("counting total of playlists owned by user {user_id}");
         let total = count(sql!("playlist/count-by-user"), &[user_id], self.0).await?;
         debug!("listing playlists owned by user {user_id} from offset {offset} limiting to {limit} results");
-        let limit: i64 = limit.into();
-        let offset: i64 = offset.into();
+        let limit_i64: i64 = limit.into();
+        let offset_i64: i64 = offset.into();
         let items = query(
             sql!("playlist/list-by-user"),
-            &[user_id, &limit, &offset],
+            &[user_id, &limit_i64, &offset_i64],
             "playlist",
             self.0,
         )
         .await?;
-        let page = Page { items, total };
+        let page = Page {
+            is_last: offset + limit >= total,
+            items,
+            total,
+        };
         debug!("page fetched: {page:?}");
         Ok(page)
     }

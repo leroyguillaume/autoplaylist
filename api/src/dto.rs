@@ -1,11 +1,8 @@
 use std::borrow::Cow;
 
-use autoplaylist_core::{
-    db::Page,
-    domain::{
-        Base, BaseKind, Platform, Playlist, PlaylistFilter as DomainPlaylistFilter,
-        PlaylistFilterOperator as DomainPlaylistFilterOperator, Sync, SyncState,
-    },
+use autoplaylist_core::domain::{
+    Base, BaseKind, Page, Platform, Playlist, PlaylistFilter as DomainPlaylistFilter,
+    PlaylistFilterOperator as DomainPlaylistFilterOperator, Sync, SyncState,
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

@@ -153,3 +153,12 @@ pub struct SpotifyTrack {
     pub artists: Vec<SpotifyArtist>,
     pub id: Option<String>,
 }
+
+// Page
+
+#[derive(Debug)]
+pub struct Page<T> {
+    pub is_last: bool,
+    pub items: Vec<T>,
+    pub total: u32,
+}

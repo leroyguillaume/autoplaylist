@@ -13,21 +13,13 @@ use tracing::{error, trace};
 use uuid::Uuid;
 
 use crate::{
-    domain::{Base, BaseKind, Platform, Playlist, PlaylistFilter, SpotifyAuth, Sync, User},
+    domain::{Base, BaseKind, Page, Platform, Playlist, PlaylistFilter, SpotifyAuth, Sync, User},
     env_var, env_var_opt, env_var_or_default, ConfigError,
 };
 
 // Result
 
 pub type Result<T> = StdResult<T, Box<dyn StdError + Send + StdSync>>;
-
-// Page
-
-#[derive(Debug)]
-pub struct Page<T> {
-    pub items: Vec<T>,
-    pub total: u32,
-}
 
 // Client
 

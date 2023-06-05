@@ -8,15 +8,18 @@ use std::{
 use async_trait::async_trait;
 use chrono::Utc;
 use rspotify::{
-    model::{SavedTrack, SimplifiedAlbum, SimplifiedArtist},
-    prelude::OAuthClient,
+    model::{
+        FullTrack, IdError, PlayableItem, PlaylistId, PlaylistItem, SavedTrack, SimplifiedAlbum,
+        SimplifiedArtist,
+    },
+    prelude::{BaseClient, OAuthClient},
     AuthCodeSpotify, ClientError, Credentials, OAuth, Token,
 };
 use securefmt::Debug;
-use tracing::{debug, trace};
+use tracing::{debug, trace, warn};
 
 use crate::{
-    domain::{SpotifyAlbum, SpotifyArtist, SpotifyToken, SpotifyTrack},
+    domain::{Page, SpotifyAlbum, SpotifyArtist, SpotifyToken, SpotifyTrack},
     env_var, ConfigError,
 };
 
@@ -46,7 +49,10 @@ const SCOPES: [&str; 14] = [
 #[derive(Debug)]
 pub enum Error {
     Client(ClientError),
+    Id(IdError),
     NoEmail,
+    NotATrack(String),
+    MissingField(&'static str),
     NoToken,
     TokenLock,
 }
@@ -54,6 +60,10 @@ pub enum Error {
 impl Error {
     fn client_boxed(err: ClientError) -> Box<dyn StdError + Send + Sync> {
         Box::new(Self::Client(err))
+    }
+
+    fn id_boxed(err: IdError) -> Box<dyn StdError + Send + Sync> {
+        Box::new(Self::Id(err))
     }
 
     fn no_email_boxed() -> Box<dyn StdError + Send + Sync> {
@@ -73,8 +83,13 @@ impl Display for Error {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         match self {
             Self::Client(err) => write!(f, "Spotify client failed: {err}"),
+            Self::Id(err) => write!(f, "invalid Spotify ID: {err}"),
+            Self::MissingField(field) => {
+                write!(f, "playlist item doesn't contain required fied `{field}`")
+            }
             Self::NoEmail => write!(f, "Spotify user doesn't have email"),
             Self::NoToken => write!(f, "no Spotify token"),
+            Self::NotATrack(id) => write!(f, "Spotify resource {id} is not a track"),
             Self::TokenLock => write!(f, "locking mutex of Spotify token failed"),
         }
     }
@@ -84,8 +99,11 @@ impl StdError for Error {
     fn cause(&self) -> Option<&dyn StdError> {
         match self {
             Self::Client(err) => Some(err),
+            Self::Id(err) => Some(err),
+            Self::MissingField(_) => None,
             Self::NoEmail => None,
             Self::NoToken => None,
+            Self::NotATrack(_) => None,
             Self::TokenLock => None,
         }
     }
@@ -167,18 +185,31 @@ impl From<SimplifiedAlbum> for SpotifyAlbum {
 
 // SpotifyTrack
 
+impl TryFrom<PlaylistItem> for SpotifyTrack {
+    type Error = Error;
+
+    fn try_from(item: PlaylistItem) -> StdResult<Self, Error> {
+        match item.track {
+            Some(PlayableItem::Episode(episode)) => Err(Error::NotATrack(episode.id.to_string())),
+            Some(PlayableItem::Track(track)) => Ok(track.into()),
+            None => Err(Error::MissingField("track")),
+        }
+    }
+}
+
+impl From<FullTrack> for SpotifyTrack {
+    fn from(track: FullTrack) -> Self {
+        Self {
+            album: track.album.into(),
+            artists: track.artists.into_iter().map(SpotifyArtist::from).collect(),
+            id: track.id.map(|id| id.to_string()),
+        }
+    }
+}
+
 impl From<SavedTrack> for SpotifyTrack {
     fn from(track: SavedTrack) -> Self {
-        Self {
-            album: track.track.album.into(),
-            artists: track
-                .track
-                .artists
-                .into_iter()
-                .map(SpotifyArtist::from)
-                .collect(),
-            id: track.track.id.map(|id| id.to_string()),
-        }
+        track.track.into()
     }
 }
 
@@ -227,6 +258,41 @@ impl Client for RSpotifyClient {
         client.get_authorize_url(false).map_err(Error::client_boxed)
     }
 
+    async fn playlist_tacks(
+        &self,
+        id: &str,
+        limit: u32,
+        offset: u32,
+        token: &SpotifyToken,
+    ) -> Result<Page<SpotifyTrack>> {
+        let client = self.oauth_client(Some(token)).await?;
+        debug!(
+            "fetching Spotify playlist {id} tracks from offset {offset} limiting to {limit} results"
+        );
+        let playlist_id = PlaylistId::from_id(id).map_err(Error::id_boxed)?;
+        let page = client
+            .playlist_items_manual(playlist_id, None, None, Some(limit), Some(offset))
+            .await
+            .map_err(Error::client_boxed)?;
+        debug!("page fetched: {page:?}");
+        let items = page
+            .items
+            .into_iter()
+            .filter_map(|item| match item.try_into() {
+                Ok(track) => Some(track),
+                Err(err) => {
+                    warn!("one of playlist {id} item will be ignored: {err}");
+                    None
+                }
+            })
+            .collect();
+        Ok(Page {
+            is_last: page.next.is_none(),
+            items,
+            total: page.total,
+        })
+    }
+
     async fn request_token(&self, code: &str) -> Result<SpotifyToken> {
         let client = self.oauth_client(None).await?;
         debug!("requesting Spotify token from code {code}");
@@ -257,7 +323,7 @@ impl Client for RSpotifyClient {
         limit: u32,
         offset: u32,
         token: &SpotifyToken,
-    ) -> Result<Vec<SpotifyTrack>> {
+    ) -> Result<Page<SpotifyTrack>> {
         let client = self.oauth_client(Some(token)).await?;
         debug!(
             "fetching Spotify user liked tracks from offset {offset} limiting to {limit} results"
@@ -267,6 +333,11 @@ impl Client for RSpotifyClient {
             .await
             .map_err(Error::client_boxed)?;
         debug!("page fetched: {page:?}");
-        Ok(page.items.into_iter().map(SpotifyTrack::from).collect())
+        let items = page.items.into_iter().map(SpotifyTrack::from).collect();
+        Ok(Page {
+            is_last: page.next.is_none(),
+            items,
+            total: page.total,
+        })
     }
 }

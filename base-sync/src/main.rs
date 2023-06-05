@@ -1,4 +1,6 @@
-use std::{error::Error as StdError, result::Result as StdResult, sync::Arc, time::Duration};
+use std::{
+    error::Error as StdError, marker::Sync as StdSync, result::Result as StdResult, sync::Arc,
+};
 
 use async_trait::async_trait;
 use autoplaylist_core::{
@@ -7,7 +9,7 @@ use autoplaylist_core::{
         ConsumerError, ConsumerHandler,
     },
     db::{postgres::PostgresPool, Client as DatabaseClient, Pool as DatabasePool},
-    domain::{Base, Platform, User},
+    domain::{Base, BaseKind, Page, Platform, SpotifyToken, SpotifyTrack, Sync, User},
     init_tracing,
     spotify::{rspotify::RSpotifyClient, Client as SpotifyClient},
 };
@@ -16,26 +18,60 @@ use tokio::{
     select,
     signal::unix::{signal, Signal, SignalKind},
     sync::watch::{channel as watch_channel, Receiver, Sender},
-    time::sleep,
 };
 use tracing::{debug, error, info, trace, warn};
 use uuid::Uuid;
 
 use self::cfg::Config;
 
+// Consts
+
+const PAGE_LIMIT: u32 = 50;
+
 // Result
 
-type Result<T> = StdResult<T, Box<dyn StdError + Send + Sync>>;
+type Result<T> = StdResult<T, Box<dyn StdError + Send + StdSync>>;
 
 // Handler
 
 struct Handler {
     db_pool: Arc<Box<dyn DatabasePool>>,
-    _spotify_client: Arc<Box<dyn SpotifyClient>>,
+    spotify_client: Arc<Box<dyn SpotifyClient>>,
     stop_rx: Receiver<()>,
 }
 
 impl Handler {
+    #[inline]
+    async fn fetch_page(
+        &self,
+        base_kind: &BaseKind,
+        offset: u32,
+        token: &SpotifyToken,
+    ) -> StdResult<Page<SpotifyTrack>, ConsumerError> {
+        match base_kind {
+            BaseKind::Likes => self
+                .spotify_client
+                .user_liked_tacks(PAGE_LIMIT, offset, token)
+                .await
+                .map_err(ConsumerError::with_requeue),
+            BaseKind::Playlist(id) => self
+                .spotify_client
+                .playlist_tacks(id, PAGE_LIMIT, offset, token)
+                .await
+                .map_err(ConsumerError::with_requeue),
+        }
+    }
+
+    #[inline]
+    async fn handle_page(
+        &self,
+        _page: Page<SpotifyTrack>,
+        _sync: &mut Sync,
+        _db_client: &dyn DatabaseClient,
+    ) -> StdResult<(), ConsumerError> {
+        Ok(())
+    }
+
     #[inline]
     async fn start_spotify_sync(
         &self,
@@ -50,7 +86,7 @@ impl Handler {
             .get_spotify_auth_by_id(&user.id)
             .await
             .map_err(ConsumerError::with_requeue)?;
-        let _auth = match auth {
+        let auth = match auth {
             Some(auth) => auth,
             None => {
                 warn!(
@@ -64,7 +100,7 @@ impl Handler {
             .lock_sync(&base.id)
             .await
             .map_err(ConsumerError::with_requeue)?;
-        let _sync = match sync {
+        let mut sync = match sync {
             Some(sync) => sync,
             None => {
                 info!(
@@ -78,7 +114,9 @@ impl Handler {
         info!("sync of base {} started", base.id);
         loop {
             select! {
-                _ = sleep(Duration::from_secs(60)) => info!("sleep"),
+                page = self.fetch_page(&base.kind, sync.last_offset, &auth.token) => {
+                    self.handle_page(page?, &mut sync, db_client.as_ref()).await?
+                }
                 _ = stop_rx.changed() => {
                     debug!("stop signal received");
                     break;
@@ -168,7 +206,7 @@ async fn main() -> Result<()> {
 #[inline]
 fn signal_listener(kind: SignalKind) -> Result<Signal> {
     trace!("creating UNIX signal listener on {kind:?}");
-    signal(kind).map_err(|err| Box::new(err) as Box<dyn StdError + Send + Sync>)
+    signal(kind).map_err(|err| Box::new(err) as Box<dyn StdError + Send + StdSync>)
 }
 
 // run
@@ -187,12 +225,12 @@ async fn run() -> Result<()> {
     let base_cmd_handler: Box<dyn ConsumerHandler<BaseCommand>> = Box::new(Handler {
         db_pool: db_pool.clone(),
         stop_rx: stop_rx.clone(),
-        _spotify_client: spotify_client.clone(),
+        spotify_client: spotify_client.clone(),
     });
     let base_event_handler: Box<dyn ConsumerHandler<BaseEvent>> = Box::new(Handler {
         db_pool: db_pool.clone(),
         stop_rx: stop_rx.clone(),
-        _spotify_client: spotify_client,
+        spotify_client,
     });
     let base_cmd_csm = broker
         .start_base_command_consumer(cfg.queues.base_cmd, stop_rx.clone(), base_cmd_handler)
