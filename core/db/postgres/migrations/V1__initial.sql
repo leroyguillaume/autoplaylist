@@ -62,3 +62,12 @@ CREATE TABLE playlist_filter (
     playlist_id UUID NOT NULL REFERENCES playlist ON DELETE CASCADE,
     def JSONB NOT NULL
 );
+
+CREATE TABLE track (
+    id UUID NOT NULL PRIMARY KEY,
+    name VARCHAR (255) NOT NULL,
+    artist VARCHAR (255) NOT NULL,
+    album VARCHAR (255) NOT NULL,
+    release_date INT NOT NULL,
+    spotify_id TEXT NOT NULL UNIQUE
+);

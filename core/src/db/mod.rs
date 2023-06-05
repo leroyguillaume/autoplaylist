@@ -13,7 +13,10 @@ use tracing::{error, trace};
 use uuid::Uuid;
 
 use crate::{
-    domain::{Base, BaseKind, Page, Platform, Playlist, PlaylistFilter, SpotifyAuth, Sync, User},
+    domain::{
+        Artist, Base, BaseKind, Page, Platform, Playlist, PlaylistFilter, SpotifyAuth, Sync, Track,
+        User,
+    },
     env_var, env_var_opt, env_var_or_default, ConfigError,
 };
 
@@ -102,6 +105,15 @@ pub trait UserRepository: Send + StdSync {
     async fn insert(&self, user: &User) -> Result<()>;
 
     async fn upsert_spotify_auth(&self, auth: &SpotifyAuth) -> Result<()>;
+}
+
+// TrackRepository
+
+#[async_trait]
+pub trait TrackRepository: Send + StdSync {
+    async fn get_by_spotify_id(&self, id: &str) -> Result<Option<Track>>;
+
+    async fn insert(&self, track: &Track, artists: &[Artist]) -> Result<()>;
 }
 
 // Pool

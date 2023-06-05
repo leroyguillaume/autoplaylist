@@ -163,3 +163,20 @@ pub struct Page<T> {
     pub items: Vec<T>,
     pub total: u32,
 }
+
+// Artist
+
+#[derive(Debug)]
+pub struct Artist {
+    pub id: Uuid,
+    pub name: String,
+}
+
+// Track
+
+#[derive(Debug)]
+pub struct Track {
+    pub album: String,
+    pub id: Uuid,
+    pub name: String,
+}
