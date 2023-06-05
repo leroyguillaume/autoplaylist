@@ -21,6 +21,13 @@ impl ConsumerError {
     pub fn with_requeue(err: Box<dyn StdError + Send + Sync>) -> Self {
         Self { err, requeue: true }
     }
+
+    pub fn without_requeue(err: Box<dyn StdError + Send + Sync>) -> Self {
+        Self {
+            err,
+            requeue: false,
+        }
+    }
 }
 
 impl Display for ConsumerError {

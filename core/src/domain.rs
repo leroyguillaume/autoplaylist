@@ -91,7 +91,7 @@ pub struct Playlist {
 
 // Sync
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Sync {
     pub last_err_msg: Option<String>,
     pub last_offset: u32,

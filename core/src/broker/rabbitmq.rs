@@ -238,10 +238,7 @@ impl<T: Debug + DeserializeOwned + Send + Sync + 'static> RabbitMqConsumer<T> {
                 debug!("handling {val:?}");
                 match handler.handle(val).await {
                     Ok(()) => Self::send_ack(delivery).await,
-                    Err(err) => {
-                        error!("{err}");
-                        Self::send_nack(err.requeue, delivery).await
-                    }
+                    Err(err) => Self::send_nack(err.requeue, delivery).await,
                 }
             }
             Err(err) => {
