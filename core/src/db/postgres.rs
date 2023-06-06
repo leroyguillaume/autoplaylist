@@ -505,7 +505,7 @@ impl BaseRepository for PostgresBaseRepository<'_> {
         let platform: PlatformSql = base.platform.into();
         let (kind, platform_id) = BaseKindSql::from_base_kind(&base.kind);
         self.0
-            .query(
+            .execute(
                 sql!("base/insert"),
                 &[
                     &base.id,
@@ -612,7 +612,7 @@ impl PlaylistRepository for PostgresPlaylistRepository<'_> {
     async fn insert(&self, playlist: &Playlist, filters: &[PlaylistFilter]) -> Result<()> {
         debug!("inserting {playlist:?} with {filters:?} into database");
         self.0
-            .query(
+            .execute(
                 sql!("playlist/insert"),
                 &[
                     &playlist.id,
@@ -632,7 +632,7 @@ impl PlaylistRepository for PostgresPlaylistRepository<'_> {
         for filter in filters {
             trace!("inserting {filter:?} into database");
             self.0
-                .query(&st, &[&playlist.id, &json!(filter)])
+                .execute(&st, &[&playlist.id, &json!(filter)])
                 .await
                 .map_err(Box::new)?;
         }
@@ -698,7 +698,7 @@ impl UserRepository for PostgresUserRepository<'_> {
         debug!("inserting {user:?} into database");
         let role: RoleSql = user.role.into();
         self.0
-            .query(sql!("user/insert"), &[&user.id, &user.creation_date, &role])
+            .execute(sql!("user/insert"), &[&user.id, &user.creation_date, &role])
             .await
             .map_err(Box::new)?;
         Ok(())
@@ -739,7 +739,7 @@ impl ArtistRepository for PostgresArtistRepository<'_> {
     async fn insert(&self, artist: &Artist) -> Result<()> {
         debug!("inserting {artist:?} into database");
         self.0
-            .query(
+            .execute(
                 sql!("artist/insert"),
                 &[&artist.id, &artist.name, &artist.spotify_id],
             )
@@ -765,7 +765,7 @@ impl TrackRepository for PostgresTrackRepository<'_> {
     async fn insert(&self, track: &Track, artist_ids: &[Uuid]) -> Result<()> {
         debug!("inserting {track:?} with artists {artist_ids:?} into database");
         self.0
-            .query(
+            .execute(
                 sql!("track/insert"),
                 &[
                     &track.id,
@@ -784,7 +784,7 @@ impl TrackRepository for PostgresTrackRepository<'_> {
         for id in artist_ids {
             trace!("linking artist {id:?} to track {} into database", track.id);
             self.0
-                .query(&st, &[&track.id, id])
+                .execute(&st, &[&track.id, id])
                 .await
                 .map_err(Box::new)?;
         }

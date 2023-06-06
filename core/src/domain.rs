@@ -138,21 +138,14 @@ pub struct SpotifyArtist {
     pub name: String,
 }
 
-// SpotifyAlbum
-
-#[derive(Debug)]
-pub struct SpotifyAlbum {
-    pub id: Option<String>,
-    pub name: String,
-}
-
 // SpotifyTrack
 
 #[derive(Debug)]
 pub struct SpotifyTrack {
-    pub album: SpotifyAlbum,
     pub artists: Vec<SpotifyArtist>,
     pub id: Option<String>,
+    pub name: String,
+    pub release_date: Option<String>,
 }
 
 // Page

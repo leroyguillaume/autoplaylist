@@ -9,17 +9,16 @@ use async_trait::async_trait;
 use chrono::Utc;
 use rspotify::{
     model::{
-        FullTrack, IdError, PlayableItem, PlaylistId, PlaylistItem, SavedTrack, SimplifiedAlbum,
-        SimplifiedArtist,
+        FullTrack, IdError, PlayableItem, PlaylistId, PlaylistItem, SavedTrack, SimplifiedArtist,
     },
     prelude::{BaseClient, OAuthClient},
     AuthCodeSpotify, ClientError, Credentials, OAuth, Token,
 };
 use securefmt::Debug;
-use tracing::{debug, trace, warn};
+use tracing::{debug, trace};
 
 use crate::{
-    domain::{Page, SpotifyAlbum, SpotifyArtist, SpotifyToken, SpotifyTrack},
+    domain::{Page, SpotifyArtist, SpotifyToken, SpotifyTrack},
     env_var, ConfigError,
 };
 
@@ -66,12 +65,20 @@ impl Error {
         Box::new(Self::Id(err))
     }
 
+    fn missing_field_boxed(field: &'static str) -> Box<dyn StdError + Send + Sync> {
+        Box::new(Self::MissingField(field))
+    }
+
     fn no_email_boxed() -> Box<dyn StdError + Send + Sync> {
         Box::new(Self::NoEmail)
     }
 
     fn no_token_boxed() -> Box<dyn StdError + Send + Sync> {
         Box::new(Self::NoToken)
+    }
+
+    fn not_a_track_boxed(id: String) -> Box<dyn StdError + Send + Sync> {
+        Box::new(Self::NotATrack(id))
     }
 
     fn token_lock_boxed() -> Box<dyn StdError + Send + Sync> {
@@ -172,27 +179,18 @@ impl From<SimplifiedArtist> for SpotifyArtist {
     }
 }
 
-// SpotifyAlbum
-
-impl From<SimplifiedAlbum> for SpotifyAlbum {
-    fn from(album: SimplifiedAlbum) -> Self {
-        Self {
-            id: album.id.map(|id| id.to_string()),
-            name: album.name,
-        }
-    }
-}
-
 // SpotifyTrack
 
 impl TryFrom<PlaylistItem> for SpotifyTrack {
-    type Error = Error;
+    type Error = Box<dyn StdError + Send + Sync>;
 
-    fn try_from(item: PlaylistItem) -> StdResult<Self, Error> {
+    fn try_from(item: PlaylistItem) -> Result<Self> {
         match item.track {
-            Some(PlayableItem::Episode(episode)) => Err(Error::NotATrack(episode.id.to_string())),
+            Some(PlayableItem::Episode(episode)) => {
+                Err(Error::not_a_track_boxed(episode.id.to_string()))
+            }
             Some(PlayableItem::Track(track)) => Ok(track.into()),
-            None => Err(Error::MissingField("track")),
+            None => Err(Error::missing_field_boxed("track")),
         }
     }
 }
@@ -200,9 +198,10 @@ impl TryFrom<PlaylistItem> for SpotifyTrack {
 impl From<FullTrack> for SpotifyTrack {
     fn from(track: FullTrack) -> Self {
         Self {
-            album: track.album.into(),
             artists: track.artists.into_iter().map(SpotifyArtist::from).collect(),
             id: track.id.map(|id| id.to_string()),
+            name: track.name,
+            release_date: track.album.release_date,
         }
     }
 }
@@ -278,14 +277,8 @@ impl Client for RSpotifyClient {
         let items = page
             .items
             .into_iter()
-            .filter_map(|item| match item.try_into() {
-                Ok(track) => Some(track),
-                Err(err) => {
-                    warn!("one of playlist {id} item will be ignored: {err}");
-                    None
-                }
-            })
-            .collect();
+            .map(SpotifyTrack::try_from)
+            .collect::<Result<Vec<SpotifyTrack>>>()?;
         Ok(Page {
             is_last: page.next.is_none(),
             items,

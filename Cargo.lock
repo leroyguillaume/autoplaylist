@@ -488,6 +488,7 @@ dependencies = [
  "autoplaylist-core",
  "chrono",
  "opentelemetry",
+ "regex",
  "tokio",
  "tracing",
  "uuid 0.8.2",
