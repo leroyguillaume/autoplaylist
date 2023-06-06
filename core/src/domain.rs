@@ -173,6 +173,6 @@ pub struct Artist {
 pub struct Track {
     pub id: Uuid,
     pub name: String,
-    pub release_year: i32,
+    pub release_year: u16,
     pub spotify_id: Option<String>,
 }

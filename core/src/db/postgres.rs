@@ -271,10 +271,10 @@ impl Sync {
         Ok(Self {
             last_err_msg: try_get(alias, "last_sync_err_msg", row)?,
             last_id: try_get(alias, "last_sync_id", row)?,
-            last_offset: try_get_u32(alias, "last_sync_offset", row)?,
+            last_offset: try_get_int::<i64, u32>(alias, "last_sync_offset", row)?,
             last_start_date: try_get(alias, "last_sync_start_date", row)?,
             last_success_date: try_get(alias, "last_sync_success_date", row)?,
-            last_total: try_get_u32(alias, "last_sync_total", row)?,
+            last_total: try_get_int::<i64, u32>(alias, "last_sync_total", row)?,
             state: state.into(),
         })
     }
@@ -366,7 +366,7 @@ impl TryFromRow for Track {
         Ok(Self {
             id: try_get(alias, "id", row)?,
             name: try_get(alias, "name", row)?,
-            release_year: try_get(alias, "release_year", row)?,
+            release_year: try_get_int::<i32, u16>(alias, "release_year", row)?,
             spotify_id: try_get(alias, "spotify_id", row)?,
         })
     }
@@ -796,15 +796,11 @@ impl TrackRepository for PostgresTrackRepository<'_> {
 
     async fn insert(&self, track: &Track, artist_ids: &[Uuid]) -> Result<()> {
         debug!("inserting {track:?} with artists {artist_ids:?} into database");
+        let release_year: i32 = track.release_year.into();
         self.0
             .execute(
                 sql!("track/insert"),
-                &[
-                    &track.id,
-                    &track.name,
-                    &track.release_year,
-                    &track.spotify_id,
-                ],
+                &[&track.id, &track.name, &release_year, &track.spotify_id],
             )
             .await
             .map_err(Box::new)?;
@@ -940,11 +936,15 @@ fn try_get<'a, T: FromSql<'a>>(alias: &str, key: &str, row: &'a Row) -> Result<T
         .map_err(Error::client_boxed)
 }
 
-// try_get_u32
+// try_get_int
 
 #[inline]
-fn try_get_u32(alias: &str, key: &str, row: &Row) -> Result<u32> {
-    try_get::<i64>(alias, key, row)
+fn try_get_int<'a, S: FromSql<'a>, T: TryFrom<S, Error = TryFromIntError>>(
+    alias: &str,
+    key: &str,
+    row: &'a Row,
+) -> Result<T> {
+    try_get::<S>(alias, key, row)
         .and_then(|val| val.try_into().map_err(Error::int_conversion_boxed))
 }
 

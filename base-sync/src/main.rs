@@ -300,7 +300,7 @@ impl Handler {
                             let release_date = release_date.clone();
                             move || Error::UnprocessableReleaseDate(release_date)
                         })?;
-                    let release_year: i32 = release_year
+                    let release_year: u16 = release_year
                         .as_str()
                         .parse()
                         .map_err(move |_| Error::UnprocessableReleaseDate(release_date))?;
