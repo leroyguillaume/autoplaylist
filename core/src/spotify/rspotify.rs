@@ -236,7 +236,8 @@ impl RSpotifyClient {
 
     #[inline]
     async fn oauth_client(&self, token: Option<&SpotifyToken>) -> Result<AuthCodeSpotify> {
-        let client = AuthCodeSpotify::new(self.creds.clone(), self.oauth.clone());
+        let mut client = AuthCodeSpotify::new(self.creds.clone(), self.oauth.clone());
+        client.config.token_refreshing = true;
         if let Some(token) = token {
             let mut client_token = client
                 .token
