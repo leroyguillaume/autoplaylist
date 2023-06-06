@@ -63,6 +63,8 @@ pub trait Repositories: Send + StdSync {
 
 #[async_trait]
 pub trait BaseRepository: Send + StdSync {
+    async fn delete_track_by_id_sync_not(&self, id: &Uuid, sync_id: &Uuid) -> Result<()>;
+
     async fn get_by_id(&self, id: &Uuid) -> Result<Option<Base>>;
 
     async fn get_by_user_kind_platform(
@@ -80,6 +82,8 @@ pub trait BaseRepository: Send + StdSync {
         -> Result<Option<Sync>>;
 
     async fn update_sync(&self, id: &Uuid, sync: &Sync) -> Result<()>;
+
+    async fn upsert_track(&self, id: &Uuid, track_id: &Uuid, sync_id: &Uuid) -> Result<()>;
 }
 
 // PlaylistRepository

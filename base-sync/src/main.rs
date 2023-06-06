@@ -200,7 +200,7 @@ impl Handler {
     }
 
     #[inline]
-    async fn sync_page(
+    async fn sync_spotify_page(
         base_id: &Uuid,
         page: Page<SpotifyTrack>,
         mut sync: Sync,
@@ -210,8 +210,16 @@ impl Handler {
         sync.last_total = page.total;
         for track in page.items {
             let res = Self::sync_spotify_track(track, &sync, db_client).await;
-            if let Err(err) = res {
-                match &err {
+            match res {
+                Ok(track) => {
+                    let repos = db_client.repositories();
+                    let base_repo = repos.base();
+                    base_repo
+                        .upsert_track(base_id, &track.id, &sync.last_id)
+                        .await
+                        .map_err(|err| Error::database_client_with_sync(err, sync.clone()))?;
+                }
+                Err(err) => match &err {
                     Error::MissingSpotifyArtistMetadata(_) => {
                         warn!("Spotify track is ignored: {err}");
                     }
@@ -222,7 +230,7 @@ impl Handler {
                         warn!("Spotify track is ignored: {err}");
                     }
                     _ => return Err(err),
-                }
+                },
             }
             sync.last_offset += 1;
         }
@@ -328,7 +336,7 @@ impl Handler {
         spotify_track: SpotifyTrack,
         sync: &Sync,
         db_client: &mut dyn DatabaseClient,
-    ) -> Result<(), Error> {
+    ) -> Result<Track, Error> {
         let repos = db_client.repositories();
         let track_repo = repos.track();
         let spotify_track_id = spotify_track
@@ -341,13 +349,10 @@ impl Handler {
             .map_err(|err| Error::database_client_with_sync(err, sync.clone()))?;
         drop(track_repo);
         drop(repos);
-        let _track = match track {
-            Some(track) => track,
-            None => {
-                Self::insert_track_from_spotify_metadata(spotify_track, sync, db_client).await?
-            }
-        };
-        Ok(())
+        match track {
+            Some(track) => Ok(track),
+            None => Self::insert_track_from_spotify_metadata(spotify_track, sync, db_client).await,
+        }
     }
 
     #[inline]
@@ -378,10 +383,24 @@ impl Handler {
         loop {
             select! {
                 res = self.fetch_page(&base.kind, &sync, &auth.token) => {
-                    sync = Self::sync_page(&base.id, res?, sync, db_client).await?;
+                    sync = Self::sync_spotify_page(&base.id, res?, sync, db_client).await?;
+                    if sync.state == SyncState::Succeeded {
+                        let repos = db_client.repositories();
+                        let base_repo = repos.base();
+                        base_repo.delete_track_by_id_sync_not(&base.id, &sync.last_id)
+                            .await
+                            .map_err(|err| Error::database_client_with_sync(err, sync.clone()))?;
+                        break;
+                    }
                 }
                 _ = stop_rx.changed() => {
                     debug!("stop signal received");
+                    sync.state = SyncState::Aborted;
+                    let repos = db_client.repositories();
+                    let base_repo = repos.base();
+                    base_repo.update_sync(&base.id, &sync)
+                        .await
+                        .map_err(|err| Error::database_client_with_sync(err, sync.clone()))?;
                     break;
                 },
             }

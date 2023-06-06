@@ -475,6 +475,15 @@ pub struct PostgresBaseRepository<'a>(&'a TokioPostgresClient);
 
 #[async_trait]
 impl BaseRepository for PostgresBaseRepository<'_> {
+    async fn delete_track_by_id_sync_not(&self, id: &Uuid, sync_id: &Uuid) -> Result<()> {
+        debug!("deleting tracks from base that their sync ID is not {sync_id}");
+        self.0
+            .execute(sql!("base/delete-tracks-by-id-sync-id-not"), &[id, sync_id])
+            .await
+            .map_err(Box::new)?;
+        Ok(())
+    }
+
     async fn get_by_id(&self, id: &Uuid) -> Result<Option<Base>> {
         debug!("fetching base {id} from database");
         let base = query_opt(sql!("base/get-by-id"), &[id], "base", self.0).await?;
@@ -582,6 +591,15 @@ impl BaseRepository for PostgresBaseRepository<'_> {
                     &last_total,
                 ],
             )
+            .await
+            .map_err(Error::client_boxed)?;
+        Ok(())
+    }
+
+    async fn upsert_track(&self, id: &Uuid, track_id: &Uuid, sync_id: &Uuid) -> Result<()> {
+        debug!("upserting tack {track_id} into base {id}");
+        self.0
+            .execute(sql!("base/upsert-track"), &[&id, &id, &track_id, &sync_id])
             .await
             .map_err(Error::client_boxed)?;
         Ok(())
