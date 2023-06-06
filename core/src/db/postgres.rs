@@ -476,7 +476,7 @@ pub struct PostgresBaseRepository<'a>(&'a TokioPostgresClient);
 #[async_trait]
 impl BaseRepository for PostgresBaseRepository<'_> {
     async fn get_by_id(&self, id: &Uuid) -> Result<Option<Base>> {
-        debug!("fetching base from database with id {id}");
+        debug!("fetching base {id} from database");
         let base = query_opt(sql!("base/get-by-id"), &[id], "base", self.0).await?;
         debug!("base fetched: {base:?}");
         Ok(base)
@@ -604,7 +604,7 @@ impl PlaylistRepository for PostgresPlaylistRepository<'_> {
     }
 
     async fn get_by_id(&self, id: &Uuid) -> Result<Option<Playlist>> {
-        debug!("fetching playlist from database with id {id}");
+        debug!("fetching playlist {id} from database");
         let playlist = query_opt(sql!("playlist/get-by-id"), &[id], "playlist", self.0).await?;
         debug!("playlist fetched: {playlist:?}");
         Ok(playlist)
@@ -688,7 +688,7 @@ pub struct PostgresUserRepository<'a>(&'a TokioPostgresClient);
 #[async_trait]
 impl UserRepository for PostgresUserRepository<'_> {
     async fn get_by_id(&self, id: &Uuid) -> Result<Option<User>> {
-        debug!("fetching user from database with id {id}");
+        debug!("fetching user {id} from database");
         let user = query_opt(sql!("user/get-by-id"), &[id], "user", self.0).await?;
         debug!("user fetched: {user:?}");
         Ok(user)
@@ -744,7 +744,7 @@ pub struct PostgresArtistRepository<'a>(&'a TokioPostgresClient);
 #[async_trait]
 impl ArtistRepository for PostgresArtistRepository<'_> {
     async fn get_by_spotify_id(&self, id: &str) -> Result<Option<Artist>> {
-        debug!("fetching artyist from database with id {id}");
+        debug!("fetching artyist from database with Spotify ID {id}");
         let track = query_opt(sql!("artist/get-by-spotify-id"), &[&id], "artist", self.0).await?;
         debug!("artist fetched: {track:?}");
         Ok(track)
@@ -770,7 +770,7 @@ pub struct PostgresTrackRepository<'a>(&'a TokioPostgresClient);
 #[async_trait]
 impl TrackRepository for PostgresTrackRepository<'_> {
     async fn get_by_spotify_id(&self, id: &str) -> Result<Option<Track>> {
-        debug!("fetching track from database with id {id}");
+        debug!("fetching track from database with Spotify ID {id}");
         let track = query_opt(sql!("track/get-by-spotify-id"), &[&id], "track", self.0).await?;
         debug!("track fetched: {track:?}");
         Ok(track)
