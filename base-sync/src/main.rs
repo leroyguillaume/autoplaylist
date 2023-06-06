@@ -295,12 +295,12 @@ impl Handler {
                         .ok_or_else(|| Error::MissingSpotifyTrackMetadata("release_date"))?;
                     let release_year = release_date_re
                         .captures(&release_date)
-                        .and_then(|caps| caps.get(0))
+                        .and_then(|caps| caps.get(1))
                         .ok_or_else({
                             let release_date = release_date.clone();
                             move || Error::UnprocessableReleaseDate(release_date)
                         })?;
-                    let release_year: u32 = release_year
+                    let release_year: i32 = release_year
                         .as_str()
                         .parse()
                         .map_err(move |_| Error::UnprocessableReleaseDate(release_date))?;

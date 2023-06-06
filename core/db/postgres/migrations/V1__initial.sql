@@ -64,11 +64,11 @@ CREATE TABLE playlist_filter (
     def JSONB NOT NULL
 );
 
-CREATE TABLE artist {
+CREATE TABLE artist (
     id UUID NOT NULL PRIMARY KEY,
     name VARCHAR (255) NOT NULL,
     spotify_id VARCHAR (50) UNIQUE
-};
+);
 
 CREATE TABLE track (
     id UUID NOT NULL PRIMARY KEY,

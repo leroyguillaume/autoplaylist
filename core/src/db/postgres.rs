@@ -366,7 +366,7 @@ impl TryFromRow for Track {
         Ok(Self {
             id: try_get(alias, "id", row)?,
             name: try_get(alias, "name", row)?,
-            release_year: try_get_u32(alias, "release_year", row)?,
+            release_year: try_get(alias, "release_year", row)?,
             spotify_id: try_get(alias, "spotify_id", row)?,
         })
     }
@@ -599,7 +599,7 @@ impl BaseRepository for PostgresBaseRepository<'_> {
     async fn upsert_track(&self, id: &Uuid, track_id: &Uuid, sync_id: &Uuid) -> Result<()> {
         debug!("upserting tack {track_id} into base {id}");
         self.0
-            .execute(sql!("base/upsert-track"), &[&id, &id, &track_id, &sync_id])
+            .execute(sql!("base/upsert-track"), &[id, track_id, sync_id])
             .await
             .map_err(Error::client_boxed)?;
         Ok(())
@@ -810,7 +810,7 @@ impl TrackRepository for PostgresTrackRepository<'_> {
             .map_err(Box::new)?;
         let st = self
             .0
-            .prepare(sql!("playlist/insert-filter"))
+            .prepare(sql!("track/insert-artist"))
             .await
             .map_err(Box::new)?;
         for id in artist_ids {
