@@ -7,6 +7,7 @@ import Home from "./Home";
 import LogIn from "./LogIn";
 import PlaylistForm from "./PlaylistForm";
 import SpotifyAuth from "./SpotifyAuth";
+import SyncSummary from "./SyncSummary";
 import {
   AuthenticatedUser,
   Context,
@@ -36,6 +37,11 @@ export default function App() {
     {
       path: "/",
       element: <LogIn />,
+      errorElement: <ErrorPage />,
+    },
+    {
+      path: "/admin/sync",
+      element: <SyncSummary />,
       errorElement: <ErrorPage />,
     },
     {

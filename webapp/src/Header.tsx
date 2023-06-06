@@ -6,6 +6,7 @@ import { Link, useNavigate } from "react-router-dom";
 import Alert from "./Alert";
 import { JWT_LOCAL_STORAGE_KEY } from "./api";
 import { Context } from "./ctx";
+import { Role } from "./domain";
 import logo from "./logo.webp";
 
 export default function Header() {
@@ -18,6 +19,15 @@ export default function Header() {
     ctx.setAuthUser(null);
     naviage("/");
   };
+
+  let syncLink = <></>;
+  if (ctx.authUser?.role === Role.Admin) {
+    syncLink = (
+      <Nav.Link as={Link} to="/admin/sync">
+        Sync
+      </Nav.Link>
+    );
+  }
 
   return (
     <>
@@ -37,6 +47,7 @@ export default function Header() {
               <Nav.Link as={Link} to="/home">
                 Home
               </Nav.Link>
+              {syncLink}
             </Nav>
             <Nav className="d-flex">
               <Button variant="secondary" onClick={logOut}>
