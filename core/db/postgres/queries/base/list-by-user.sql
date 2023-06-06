@@ -6,6 +6,7 @@ SELECT
     base.kind AS base_kind,
     base.platform_id AS base_platform_id,
     base.sync_state AS base_sync_state,
+    base.last_sync_id AS base_last_sync_id,
     base.last_sync_start_date AS base_last_sync_start_date,
     base.last_sync_success_date AS base_last_sync_success_date,
     base.last_sync_err_msg AS base_last_sync_err_msg,

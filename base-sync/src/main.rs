@@ -332,7 +332,7 @@ impl Handler {
             .map_err(Error::DatabaseClient)?
             .ok_or_else(|| Error::NoSpotifyAuth(user.id))?;
         let mut sync = base_repo
-            .lock_sync(&base.id)
+            .lock_sync(&base.id, Uuid::new_v4(), Utc::now())
             .await
             .map_err(Error::DatabaseClient)?
             .ok_or(Error::SyncAlreadyRunning)?;

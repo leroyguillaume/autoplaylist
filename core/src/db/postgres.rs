@@ -8,6 +8,7 @@ use std::{
 };
 
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use deadpool_postgres::{
     tokio_postgres::{Client as TokioPostgresClient, Error as TokioPosgresError, NoTls, Row},
     Config as DeadpoolConfig, CreatePoolError, Object, Pool as DeadpoolPool, PoolError,
@@ -269,6 +270,7 @@ impl Sync {
     fn try_from_row(state: SyncStateSql, alias: &str, row: &Row) -> Result<Self> {
         Ok(Self {
             last_err_msg: try_get(alias, "last_sync_err_msg", row)?,
+            last_id: try_get(alias, "last_sync_id", row)?,
             last_offset: try_get_u32(alias, "last_sync_offset", row)?,
             last_start_date: try_get(alias, "last_sync_start_date", row)?,
             last_success_date: try_get(alias, "last_sync_success_date", row)?,
@@ -543,9 +545,20 @@ impl BaseRepository for PostgresBaseRepository<'_> {
         Ok(page)
     }
 
-    async fn lock_sync(&self, id: &Uuid) -> Result<Option<Sync>> {
+    async fn lock_sync(
+        &self,
+        id: &Uuid,
+        sync_id: Uuid,
+        now: DateTime<Utc>,
+    ) -> Result<Option<Sync>> {
         debug!("locking sync of base {id}");
-        let sync = query_opt(sql!("base/lock-sync"), &[&id], "base", self.0).await?;
+        let sync = query_opt(
+            sql!("base/lock-sync"),
+            &[id, &sync_id, &now],
+            "base",
+            self.0,
+        )
+        .await?;
         debug!("base sync fetched: {sync:?}");
         Ok(sync)
     }
@@ -561,6 +574,7 @@ impl BaseRepository for PostgresBaseRepository<'_> {
                 &[
                     &id,
                     &state,
+                    &sync.last_id,
                     &sync.last_start_date,
                     &sync.last_success_date,
                     &sync.last_err_msg,

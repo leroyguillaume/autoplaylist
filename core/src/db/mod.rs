@@ -7,6 +7,7 @@ use std::{
 };
 
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use futures::Future;
 use securefmt::Debug as SecureDebug;
 use tracing::{error, trace};
@@ -75,7 +76,8 @@ pub trait BaseRepository: Send + StdSync {
 
     async fn list_by_user(&self, user_id: &Uuid, limit: u32, offset: u32) -> Result<Page<Base>>;
 
-    async fn lock_sync(&self, id: &Uuid) -> Result<Option<Sync>>;
+    async fn lock_sync(&self, id: &Uuid, sync_id: Uuid, now: DateTime<Utc>)
+        -> Result<Option<Sync>>;
 
     async fn update_sync(&self, id: &Uuid, sync: &Sync) -> Result<()>;
 }

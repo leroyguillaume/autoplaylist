@@ -41,6 +41,7 @@ CREATE TABLE base (
     kind BASE_KIND NOT NULL,
     platform_id VARCHAR (255),
     sync_state SYNC_STATE DEFAULT NULL,
+    last_sync_id UUID,
     last_sync_start_date TIMESTAMP WITH TIME ZONE DEFAULT NULL,
     last_sync_success_date TIMESTAMP WITH TIME ZONE DEFAULT NULL,
     last_sync_err_msg TEXT DEFAULT NULL,
@@ -80,4 +81,11 @@ CREATE TABLE track_artist (
     track_id UUID NOT NULL REFERENCES track ON DELETE CASCADE,
     artist_id UUID NOT NULL REFERENCES artist ON DELETE CASCADE,
     PRIMARY KEY (track_id, artist_id)
+);
+
+CREATE TABLE base_track (
+    base_id UUID NOT NULL REFERENCES base ON DELETE CASCADE,
+    track_id UUID NOT NULL REFERENCES track ON DELETE CASCADE,
+    last_sync_id UUID NOT NULL,
+    PRIMARY KEY (base_id, track_id)
 );
