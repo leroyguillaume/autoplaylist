@@ -45,7 +45,10 @@ const PAGE_LIMIT: u32 = 50;
 #[derive(Debug)]
 enum Error {
     BaseNotFound(Uuid),
-    DatabaseClient(Box<dyn StdError + Send + StdSync>),
+    DatabaseClient {
+        err: Box<dyn StdError + Send + StdSync>,
+        sync: Option<Sync>,
+    },
     MissingSpotifyArtistMetadata(&'static str),
     MissingSpotifyTrackMetadata(&'static str),
     NoSpotifyAuth(Uuid),
@@ -58,11 +61,24 @@ enum Error {
     UserNotFound(Uuid),
 }
 
+impl Error {
+    fn database_client(err: Box<dyn StdError + Send + StdSync>) -> Self {
+        Self::DatabaseClient { err, sync: None }
+    }
+
+    fn database_client_with_sync(err: Box<dyn StdError + Send + StdSync>, sync: Sync) -> Self {
+        Self::DatabaseClient {
+            err,
+            sync: Some(sync),
+        }
+    }
+}
+
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         match self {
             Self::BaseNotFound(id) => write!(f, "base {id} doesn't exist"),
-            Self::DatabaseClient(err) => write!(f, "{err}"),
+            Self::DatabaseClient { err, .. } => write!(f, "{err}"),
             Self::MissingSpotifyArtistMetadata(metadata) => write!(
                 f,
                 "Spotify artist is unprocessable because it missing metadata `{metadata}`"
@@ -89,7 +105,7 @@ impl StdError for Error {
     fn cause(&self) -> Option<&dyn StdError> {
         match self {
             Self::BaseNotFound(_) => None,
-            Self::DatabaseClient(err) => Some(err.as_ref()),
+            Self::DatabaseClient { err, .. } => Some(err.as_ref()),
             Self::MissingSpotifyArtistMetadata(_) => None,
             Self::MissingSpotifyTrackMetadata(_) => None,
             Self::NoSpotifyAuth(_) => None,
@@ -111,6 +127,28 @@ struct Handler {
 
 impl Handler {
     #[inline]
+    async fn fail_sync(
+        base_id: &Uuid,
+        sync: Option<Sync>,
+        err: Box<dyn StdError + Send + StdSync>,
+        db_client: &dyn DatabaseClient,
+    ) -> Result<(), ConsumerError> {
+        error!("sync of base {base_id} failed: {err}");
+        if let Some(mut sync) = sync {
+            let repos = db_client.repositories();
+            let base_repo = repos.base();
+            sync.state = SyncState::Failed;
+            sync.last_err_msg = Some(err.to_string());
+            base_repo
+                .update_sync(base_id, &sync)
+                .await
+                .map_err(ConsumerError::with_requeue)
+        } else {
+            Err(ConsumerError::with_requeue(err))
+        }
+    }
+
+    #[inline]
     async fn handle(&self, base_id: Uuid) -> Result<(), ConsumerError> {
         let mut db_client = self
             .db_pool
@@ -120,21 +158,11 @@ impl Handler {
         if let Err(err) = self.sync(base_id, db_client.as_mut()).await {
             let err_str = err.to_string();
             match err {
-                Error::DatabaseClient(err) => {
-                    error!("sync of base {base_id} failed: {err_str}");
-                    Err(ConsumerError::without_requeue(err))
+                Error::DatabaseClient { err, sync } => {
+                    Self::fail_sync(&base_id, sync, err, db_client.as_ref()).await
                 }
-                Error::SpotifyClient { err, mut sync } => {
-                    error!("sync of base {base_id} failed: {err_str}");
-                    let repos = db_client.repositories();
-                    let base_repo = repos.base();
-                    sync.state = SyncState::Failed;
-                    sync.last_err_msg = Some(err.to_string());
-                    base_repo
-                        .update_sync(&base_id, &sync)
-                        .await
-                        .map_err(ConsumerError::without_requeue)?;
-                    Err(ConsumerError::without_requeue(err))
+                Error::SpotifyClient { err, sync } => {
+                    Self::fail_sync(&base_id, Some(sync), err, db_client.as_ref()).await
                 }
                 _ => {
                     info!("ignoring sync of base {base_id}: {err_str}");
@@ -181,7 +209,7 @@ impl Handler {
         sync.last_err_msg = None;
         sync.last_total = page.total;
         for track in page.items {
-            let res = Self::sync_spotify_track(track, db_client).await;
+            let res = Self::sync_spotify_track(track, &sync, db_client).await;
             if let Err(err) = res {
                 match &err {
                     Error::MissingSpotifyArtistMetadata(_) => {
@@ -208,86 +236,89 @@ impl Handler {
         base_repo
             .update_sync(base_id, &sync)
             .await
-            .map_err(Error::DatabaseClient)?;
+            .map_err(|err| Error::database_client_with_sync(err, sync.clone()))?;
         Ok(sync)
     }
 
     #[inline]
     async fn insert_track_from_spotify_metadata(
         spotify_track: SpotifyTrack,
+        sync: &Sync,
         db_client: &mut dyn DatabaseClient,
     ) -> Result<Track, Error> {
-        in_transaction(db_client, move |tx| {
-            Box::pin(async move {
-                let repos = tx.repositories();
-                let artist_repo = repos.artist();
-                let track_repo = repos.track();
-                let mut artists = vec![];
-                for spotify_artist in spotify_track.artists {
-                    let spotify_artist_id = spotify_artist
+        in_transaction(db_client, {
+            let sync = sync.clone();
+            move |tx| {
+                Box::pin(async move {
+                    let repos = tx.repositories();
+                    let artist_repo = repos.artist();
+                    let track_repo = repos.track();
+                    let mut artists = vec![];
+                    for spotify_artist in spotify_track.artists {
+                        let spotify_artist_id = spotify_artist
+                            .id
+                            .ok_or_else(|| Error::MissingSpotifyArtistMetadata("id"))?;
+                        let artist = artist_repo
+                            .get_by_spotify_id(&spotify_artist_id)
+                            .await
+                            .map_err(|err| Error::database_client_with_sync(err, sync.clone()))?;
+                        let artist = match artist {
+                            Some(artist) => artist,
+                            None => {
+                                let artist = Artist {
+                                    id: Uuid::new_v4(),
+                                    name: spotify_artist.name,
+                                    spotify_id: Some(spotify_artist_id),
+                                };
+                                artist_repo.insert(&artist).await.map_err(|err| {
+                                    Error::database_client_with_sync(err, sync.clone())
+                                })?;
+                                artist
+                            }
+                        };
+                        artists.push(artist);
+                    }
+                    let spotify_track_id = spotify_track
                         .id
-                        .ok_or_else(|| Error::MissingSpotifyArtistMetadata("id"))?;
-                    let artist = artist_repo
-                        .get_by_spotify_id(&spotify_artist_id)
-                        .await
-                        .map_err(Error::DatabaseClient)?;
-                    let artist = match artist {
-                        Some(artist) => artist,
-                        None => {
-                            let artist = Artist {
-                                id: Uuid::new_v4(),
-                                name: spotify_artist.name,
-                                spotify_id: Some(spotify_artist_id),
-                            };
-                            artist_repo
-                                .insert(&artist)
-                                .await
-                                .map_err(Error::DatabaseClient)?;
-                            artist
-                        }
+                        .ok_or_else(|| Error::MissingSpotifyTrackMetadata("id"))?;
+                    let release_date_re = Regex::new(RELEASE_DATE_PATTERN).unwrap();
+                    let release_date = spotify_track
+                        .release_date
+                        .ok_or_else(|| Error::MissingSpotifyTrackMetadata("release_date"))?;
+                    let release_year = release_date_re
+                        .captures(&release_date)
+                        .and_then(|caps| caps.get(0))
+                        .ok_or_else({
+                            let release_date = release_date.clone();
+                            move || Error::UnprocessableReleaseDate(release_date)
+                        })?;
+                    let release_year: u32 = release_year
+                        .as_str()
+                        .parse()
+                        .map_err(move |_| Error::UnprocessableReleaseDate(release_date))?;
+                    let track = Track {
+                        id: Uuid::new_v4(),
+                        name: spotify_track.name,
+                        release_year,
+                        spotify_id: Some(spotify_track_id),
                     };
-                    artists.push(artist);
-                }
-                let spotify_track_id = spotify_track
-                    .id
-                    .ok_or_else(|| Error::MissingSpotifyTrackMetadata("id"))?;
-                let release_date_re = Regex::new(RELEASE_DATE_PATTERN).unwrap();
-                let release_date = spotify_track
-                    .release_date
-                    .ok_or_else(|| Error::MissingSpotifyTrackMetadata("release_date"))?;
-                let release_year = release_date_re
-                    .captures(&release_date)
-                    .and_then(|caps| caps.get(0))
-                    .ok_or_else({
-                        let release_date = release_date.clone();
-                        move || Error::UnprocessableReleaseDate(release_date)
-                    })?;
-                let release_year: u32 = release_year
-                    .as_str()
-                    .parse()
-                    .map_err(move |_| Error::UnprocessableReleaseDate(release_date))?;
-                let track = Track {
-                    id: Uuid::new_v4(),
-                    name: spotify_track.name,
-                    release_year,
-                    spotify_id: Some(spotify_track_id),
-                };
-                let artist_ids: Vec<Uuid> = artists.iter().map(|artist| artist.id).collect();
-                track_repo
-                    .insert(&track, &artist_ids)
-                    .await
-                    .map_err(Error::DatabaseClient)?;
-                if enabled!(Level::INFO) {
-                    let artist_names: Vec<String> =
-                        artists.iter().map(|artist| artist.name.clone()).collect();
-                    info!("track `{} - {}` added", track.name, artist_names.join(", "));
-                }
-                Ok(track)
-            })
+                    let artist_ids: Vec<Uuid> = artists.iter().map(|artist| artist.id).collect();
+                    track_repo
+                        .insert(&track, &artist_ids)
+                        .await
+                        .map_err(|err| Error::database_client_with_sync(err, sync.clone()))?;
+                    if enabled!(Level::INFO) {
+                        let artist_names: Vec<String> =
+                            artists.iter().map(|artist| artist.name.clone()).collect();
+                        info!("track `{} - {}` added", track.name, artist_names.join(", "));
+                    }
+                    Ok(track)
+                })
+            }
         })
         .await
         .map_err(|err| match err {
-            InTransactionError::Client(err) => Error::DatabaseClient(err),
+            InTransactionError::Client(err) => Error::database_client_with_sync(err, sync.clone()),
             InTransactionError::Execution(err) => err,
         })
     }
@@ -295,6 +326,7 @@ impl Handler {
     #[inline]
     async fn sync_spotify_track(
         spotify_track: SpotifyTrack,
+        sync: &Sync,
         db_client: &mut dyn DatabaseClient,
     ) -> Result<(), Error> {
         let repos = db_client.repositories();
@@ -306,12 +338,14 @@ impl Handler {
         let track = track_repo
             .get_by_spotify_id(spotify_track_id)
             .await
-            .map_err(Error::DatabaseClient)?;
+            .map_err(|err| Error::database_client_with_sync(err, sync.clone()))?;
         drop(track_repo);
         drop(repos);
         let _track = match track {
             Some(track) => track,
-            None => Self::insert_track_from_spotify_metadata(spotify_track, db_client).await?,
+            None => {
+                Self::insert_track_from_spotify_metadata(spotify_track, sync, db_client).await?
+            }
         };
         Ok(())
     }
@@ -329,12 +363,12 @@ impl Handler {
         let auth = user_repo
             .get_spotify_auth_by_id(&user.id)
             .await
-            .map_err(Error::DatabaseClient)?
+            .map_err(Error::database_client)?
             .ok_or_else(|| Error::NoSpotifyAuth(user.id))?;
         let mut sync = base_repo
             .lock_sync(&base.id, Uuid::new_v4(), Utc::now())
             .await
-            .map_err(Error::DatabaseClient)?
+            .map_err(Error::database_client)?
             .ok_or(Error::SyncAlreadyRunning)?;
         drop(user_repo);
         drop(base_repo);
@@ -363,12 +397,12 @@ impl Handler {
         let base = base_repo
             .get_by_id(&base_id)
             .await
-            .map_err(Error::DatabaseClient)?
+            .map_err(Error::database_client)?
             .ok_or_else(|| Error::BaseNotFound(base_id))?;
         let user = user_repo
             .get_by_id(&base.user_id)
             .await
-            .map_err(Error::DatabaseClient)?
+            .map_err(Error::database_client)?
             .ok_or_else(|| Error::UserNotFound(base.user_id))?;
         drop(user_repo);
         drop(base_repo);
