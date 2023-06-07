@@ -133,7 +133,7 @@ pub struct SpotifyToken {
 
 // SpotifyArtist
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct SpotifyArtist {
     pub id: Option<String>,
     pub name: String,
@@ -141,7 +141,7 @@ pub struct SpotifyArtist {
 
 // SpotifyTrack
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct SpotifyTrack {
     pub artists: Vec<SpotifyArtist>,
     pub id: Option<String>,
