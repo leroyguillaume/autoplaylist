@@ -265,9 +265,10 @@ impl SpotifySynchronizer {
         &self,
         base_id: Uuid,
         page: Page<SpotifyTrack>,
-        sync: &mut Sync,
+        sync: &Sync,
         db_client: &dyn DatabaseClient,
-    ) -> Result<()> {
+    ) -> Result<u32> {
+        let mut offset = sync.last_offset;
         for spotify_track in page.items {
             let res = self
                 .sync_track(base_id, sync.last_id, spotify_track, db_client)
@@ -276,7 +277,11 @@ impl SpotifySynchronizer {
                 let err_str = err.to_string();
                 match err {
                     SpotifyTrackSyncError::DatabaseClient(err) => {
-                        return Err(Error::database_client(err, sync.clone()));
+                        let sync = Sync {
+                            last_offset: offset,
+                            ..sync.clone()
+                        };
+                        return Err(Error::database_client(err, sync));
                     }
                     SpotifyTrackSyncError::MismatchedReleaseDate { .. } => {
                         warn!("{err_str}");
@@ -295,15 +300,9 @@ impl SpotifySynchronizer {
                     }
                 }
             }
-            sync.last_offset += 1;
+            offset += 1;
         }
-        if page.is_last {
-            sync.last_err_msg = None;
-            sync.last_offset = 0;
-            sync.last_success_date = Some(Utc::now());
-            sync.state = SyncState::Succeeded;
-        }
-        Ok(())
+        Ok(offset)
     }
 
     #[inline]
@@ -360,10 +359,22 @@ impl Synchronizer for SpotifySynchronizer {
         info!("sync of base {} started", base.id);
         loop {
             select! {
-                res = self.fetch_page(&base.kind, &sync, &auth.token) => {
-                    _ = self.sync_page(base.id, res?, &mut sync, db_client.as_ref()).await?;
-                    if sync.state == SyncState::Succeeded {
-                        let duration = start_date - Utc::now();
+                page = self.fetch_page(&base.kind, &sync, &auth.token) => {
+                    let page = page?;
+                    let is_last_page = page.is_last;
+                    let total = page.total;
+                    sync.last_offset = self.sync_page(base.id, page, &sync, db_client.as_ref()).await?;
+                    if is_last_page {
+                        let now = Utc::now();
+                        sync = Sync {
+                            last_err_msg: None,
+                            last_offset: 0,
+                            last_success_date: Some(now),
+                            last_total: total,
+                            state: SyncState::Succeeded,
+                            ..sync
+                        };
+                        let duration = start_date - now;
                         info!("sync of base {} finished with success (in {}s)", base.id, duration.num_seconds());
                         break;
                     }
