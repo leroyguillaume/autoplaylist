@@ -9,7 +9,7 @@ import { doDelete, doGet, handleCommonErrors } from "./api";
 import { Context, pageNumberFromPlaylist } from "./ctx";
 import { Page, Playlist } from "./domain";
 
-const PLAYLIST_PAGE_SIZE = 3;
+const PLAYLIST_PAGE_SIZE = 10;
 
 export default function Home() {
   const ctx = useContext(Context);
