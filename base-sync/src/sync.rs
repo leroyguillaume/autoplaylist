@@ -148,7 +148,7 @@ impl StdError for SpotifyTrackSyncError {
 
 #[async_trait]
 pub trait Synchronizer: Send + StdSync {
-    async fn sync(&self, base: &Base, sync: Sync, user_id: &Uuid) -> Result<Sync>;
+    async fn sync(&self, base: &Base, sync: Sync) -> Result<Sync>;
 }
 
 // SpotifySynchronizer
@@ -339,7 +339,7 @@ impl SpotifySynchronizer {
 
 #[async_trait]
 impl Synchronizer for SpotifySynchronizer {
-    async fn sync(&self, base: &Base, mut sync: Sync, user_id: &Uuid) -> Result<Sync> {
+    async fn sync(&self, base: &Base, mut sync: Sync) -> Result<Sync> {
         let db_client = self
             .db_pool
             .client()
@@ -348,10 +348,10 @@ impl Synchronizer for SpotifySynchronizer {
         let repos = db_client.repositories();
         let user_repo = repos.user();
         let auth = user_repo
-            .get_spotify_auth_by_id(user_id)
+            .get_spotify_auth_by_id(&base.user.id)
             .await
             .map_err(|err| Error::database_client(err, sync.clone()))?
-            .ok_or_else(|| Error::no_spotify_auth(*user_id, sync.clone()))?;
+            .ok_or_else(|| Error::no_spotify_auth(base.user.id, sync.clone()))?;
         drop(user_repo);
         drop(repos);
         let mut stop_rx = self.stop_rx.clone();

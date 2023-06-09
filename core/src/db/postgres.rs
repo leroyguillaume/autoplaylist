@@ -123,21 +123,55 @@ impl StdError for InitializationError {
     }
 }
 
-// Traits
+// Extractor
 
-trait TryFromRow {
-    fn try_from_row(alias: &str, row: &Row) -> Result<Self>
-    where
-        Self: Sized;
+trait Extractor<T>: Send + StdSync {
+    fn extract_from_row(&self, row: &Row) -> Result<T>;
 }
 
-// Base
+// ArtistExtractor
 
-impl TryFromRow for Base {
-    fn try_from_row(alias: &str, row: &Row) -> Result<Self> {
-        let platform: PlatformSql = try_get(alias, "platform", row)?;
-        let platform_id: Option<String> = try_get(alias, "platform_id", row)?;
-        let kind: BaseKindSql = try_get(alias, "kind", row)?;
+struct ArtistExtractor(&'static str);
+
+impl Default for ArtistExtractor {
+    fn default() -> Self {
+        Self("artist")
+    }
+}
+
+impl Extractor<Artist> for ArtistExtractor {
+    fn extract_from_row(&self, row: &Row) -> Result<Artist> {
+        Ok(Artist {
+            id: try_get(self.0, "id", row)?,
+            name: try_get(self.0, "name", row)?,
+            spotify_id: try_get(self.0, "spotify_id", row)?,
+        })
+    }
+}
+
+// BaseExtractor
+
+struct BaseExtractor {
+    alias_prefix: &'static str,
+    sync_extractor: SyncExtractor,
+    user_extractor: UserExtractor,
+}
+
+impl Default for BaseExtractor {
+    fn default() -> Self {
+        Self {
+            alias_prefix: "base",
+            sync_extractor: SyncExtractor("base"),
+            user_extractor: UserExtractor("base_user"),
+        }
+    }
+}
+
+impl Extractor<Base> for BaseExtractor {
+    fn extract_from_row(&self, row: &Row) -> Result<Base> {
+        let platform: PlatformSql = try_get(self.alias_prefix, "platform", row)?;
+        let platform_id: Option<String> = try_get(self.alias_prefix, "platform_id", row)?;
+        let kind: BaseKindSql = try_get(self.alias_prefix, "kind", row)?;
         let kind = match kind {
             BaseKindSql::Likes => BaseKind::Likes,
             BaseKindSql::Playlist => {
@@ -145,13 +179,135 @@ impl TryFromRow for Base {
                 BaseKind::Playlist(platform_id)
             }
         };
-        Ok(Self {
-            creation_date: try_get(alias, "creation_date", row)?,
-            id: try_get(alias, "id", row)?,
+        Ok(Base {
+            creation_date: try_get(self.alias_prefix, "creation_date", row)?,
+            id: try_get(self.alias_prefix, "id", row)?,
             kind,
             platform: platform.into(),
-            sync: Sync::try_from_row_opt(alias, row)?,
-            user_id: try_get(alias, "user_id", row)?,
+            sync: self.sync_extractor.extract_from_row_opt(row)?,
+            user: self.user_extractor.extract_from_row(row)?,
+        })
+    }
+}
+
+// PlaylistExtractor
+
+struct PlaylistExtractor(&'static str);
+
+impl Default for PlaylistExtractor {
+    fn default() -> Self {
+        Self("playlist")
+    }
+}
+
+impl Extractor<Playlist> for PlaylistExtractor {
+    fn extract_from_row(&self, row: &Row) -> Result<Playlist> {
+        Ok(Playlist {
+            base_id: try_get(self.0, "base_id", row)?,
+            creation_date: try_get(self.0, "creation_date", row)?,
+            id: try_get(self.0, "id", row)?,
+            name: try_get(self.0, "name", row)?,
+            user_id: try_get(self.0, "user_id", row)?,
+        })
+    }
+}
+
+// SpotifyAuthExtractor
+
+struct SpotifyAuthExtractor(&'static str);
+
+impl Default for SpotifyAuthExtractor {
+    fn default() -> Self {
+        Self("auth")
+    }
+}
+
+impl Extractor<SpotifyAuth> for SpotifyAuthExtractor {
+    fn extract_from_row(&self, row: &Row) -> Result<SpotifyAuth> {
+        Ok(SpotifyAuth {
+            email: try_get(self.0, "email", row)?,
+            token: SpotifyToken {
+                access_token: try_get(self.0, "access_token", row)?,
+                expiration_date: try_get(self.0, "expiration_date", row)?,
+                refresh_token: try_get(self.0, "refresh_token", row)?,
+            },
+            user_id: try_get(self.0, "user_id", row)?,
+        })
+    }
+}
+
+// SyncExtractor
+
+struct SyncExtractor(&'static str);
+
+impl SyncExtractor {
+    #[inline]
+    fn extract_from_row(&self, state: SyncStateSql, row: &Row) -> Result<Sync> {
+        Ok(Sync {
+            last_err_msg: try_get(self.0, "last_sync_err_msg", row)?,
+            last_id: try_get(self.0, "last_sync_id", row)?,
+            last_offset: try_get_int::<i64, u32>(self.0, "last_sync_offset", row)?,
+            last_start_date: try_get(self.0, "last_sync_start_date", row)?,
+            last_success_date: try_get(self.0, "last_sync_success_date", row)?,
+            last_total: try_get_int::<i64, u32>(self.0, "last_sync_total", row)?,
+            state: state.into(),
+        })
+    }
+
+    fn extract_from_row_opt(&self, row: &Row) -> Result<Option<Sync>> {
+        let state: Option<SyncStateSql> = try_get(self.0, "sync_state", row)?;
+        match state {
+            Some(state) => Ok(Some(self.extract_from_row(state, row)?)),
+            None => Ok(None),
+        }
+    }
+}
+
+impl Extractor<Sync> for SyncExtractor {
+    fn extract_from_row(&self, row: &Row) -> Result<Sync> {
+        let state: SyncStateSql = try_get(self.0, "sync_state", row)?;
+        self.extract_from_row(state, row)
+    }
+}
+
+// TrackExtractor
+
+struct TrackExtractor(&'static str);
+
+impl Default for TrackExtractor {
+    fn default() -> Self {
+        Self("track")
+    }
+}
+
+impl Extractor<Track> for TrackExtractor {
+    fn extract_from_row(&self, row: &Row) -> Result<Track> {
+        Ok(Track {
+            id: try_get(self.0, "id", row)?,
+            name: try_get(self.0, "name", row)?,
+            release_year: try_get_int::<i32, u16>(self.0, "release_year", row)?,
+            spotify_id: try_get(self.0, "spotify_id", row)?,
+        })
+    }
+}
+
+// UserExtractor
+
+struct UserExtractor(&'static str);
+
+impl Default for UserExtractor {
+    fn default() -> Self {
+        Self("user")
+    }
+}
+
+impl Extractor<User> for UserExtractor {
+    fn extract_from_row(&self, row: &Row) -> Result<User> {
+        let role: RoleSql = try_get(self.0, "role", row)?;
+        Ok(User {
+            creation_date: try_get(self.0, "creation_date", row)?,
+            id: try_get(self.0, "id", row)?,
+            role: role.into(),
         })
     }
 }
@@ -203,20 +359,6 @@ impl From<Platform> for PlatformSql {
     }
 }
 
-// Playlist
-
-impl TryFromRow for Playlist {
-    fn try_from_row(alias: &str, row: &Row) -> Result<Self> {
-        Ok(Self {
-            base_id: try_get(alias, "base_id", row)?,
-            creation_date: try_get(alias, "creation_date", row)?,
-            id: try_get(alias, "id", row)?,
-            name: try_get(alias, "name", row)?,
-            user_id: try_get(alias, "user_id", row)?,
-        })
-    }
-}
-
 // Role
 
 impl From<RoleSql> for Role {
@@ -245,53 +387,6 @@ impl From<Role> for RoleSql {
             Role::Admin => Self::Admin,
             Role::User => Self::User,
         }
-    }
-}
-
-// SpotifyAuth
-
-impl TryFromRow for SpotifyAuth {
-    fn try_from_row(alias: &str, row: &Row) -> Result<Self> {
-        Ok(Self {
-            email: try_get(alias, "email", row)?,
-            token: SpotifyToken {
-                access_token: try_get(alias, "access_token", row)?,
-                expiration_date: try_get(alias, "expiration_date", row)?,
-                refresh_token: try_get(alias, "refresh_token", row)?,
-            },
-            user_id: try_get(alias, "user_id", row)?,
-        })
-    }
-}
-
-// Sync
-
-impl Sync {
-    fn try_from_row(state: SyncStateSql, alias: &str, row: &Row) -> Result<Self> {
-        Ok(Self {
-            last_err_msg: try_get(alias, "last_sync_err_msg", row)?,
-            last_id: try_get(alias, "last_sync_id", row)?,
-            last_offset: try_get_int::<i64, u32>(alias, "last_sync_offset", row)?,
-            last_start_date: try_get(alias, "last_sync_start_date", row)?,
-            last_success_date: try_get(alias, "last_sync_success_date", row)?,
-            last_total: try_get_int::<i64, u32>(alias, "last_sync_total", row)?,
-            state: state.into(),
-        })
-    }
-
-    fn try_from_row_opt(alias: &str, row: &Row) -> Result<Option<Self>> {
-        let state: Option<SyncStateSql> = try_get(alias, "sync_state", row)?;
-        match state {
-            Some(state) => Ok(Some(Self::try_from_row(state, alias, row)?)),
-            None => Ok(None),
-        }
-    }
-}
-
-impl TryFromRow for Sync {
-    fn try_from_row(alias: &str, row: &Row) -> Result<Self> {
-        let state: SyncStateSql = try_get(alias, "sync_state", row)?;
-        Self::try_from_row(state, alias, row)
     }
 }
 
@@ -331,44 +426,6 @@ impl From<SyncState> for SyncStateSql {
             SyncState::Running => Self::Running,
             SyncState::Succeeded => Self::Succeeded,
         }
-    }
-}
-
-// User
-
-impl TryFromRow for User {
-    fn try_from_row(alias: &str, row: &Row) -> Result<Self> {
-        let role: RoleSql = try_get(alias, "role", row)?;
-        Ok(Self {
-            creation_date: try_get(alias, "creation_date", row)?,
-            id: try_get(alias, "id", row)?,
-            role: role.into(),
-        })
-    }
-}
-
-// Artist
-
-impl TryFromRow for Artist {
-    fn try_from_row(alias: &str, row: &Row) -> Result<Self> {
-        Ok(Self {
-            id: try_get(alias, "id", row)?,
-            name: try_get(alias, "name", row)?,
-            spotify_id: try_get(alias, "spotify_id", row)?,
-        })
-    }
-}
-
-// Track
-
-impl TryFromRow for Track {
-    fn try_from_row(alias: &str, row: &Row) -> Result<Self> {
-        Ok(Self {
-            id: try_get(alias, "id", row)?,
-            name: try_get(alias, "name", row)?,
-            release_year: try_get_int::<i32, u16>(alias, "release_year", row)?,
-            spotify_id: try_get(alias, "spotify_id", row)?,
-        })
     }
 }
 
@@ -486,7 +543,8 @@ impl BaseRepository for PostgresBaseRepository<'_> {
 
     async fn get_by_id(&self, id: &Uuid) -> Result<Option<Base>> {
         debug!("fetching base {id} from database");
-        let base = query_opt(sql!("base/get-by-id"), &[id], "base", self.0).await?;
+        let extractor = BaseExtractor::default();
+        let base = query_opt(sql!("base/get-by-id"), &[id], &extractor, self.0).await?;
         debug!("base fetched: {base:?}");
         Ok(base)
     }
@@ -498,12 +556,13 @@ impl BaseRepository for PostgresBaseRepository<'_> {
         platform: Platform,
     ) -> Result<Option<Base>> {
         debug!("fetching base from database owned by user {user_id} with {kind:?} on {platform}");
+        let extractor = BaseExtractor::default();
         let (kind, platform_id) = BaseKindSql::from_base_kind(kind);
         let platform: PlatformSql = platform.into();
         let base = query_opt(
             sql!("base/get-by-user-kind-platform"),
             &[user_id, &platform, &kind, &platform_id],
-            "base",
+            &extractor,
             self.0,
         )
         .await?;
@@ -521,7 +580,7 @@ impl BaseRepository for PostgresBaseRepository<'_> {
                 &[
                     &base.id,
                     &base.creation_date,
-                    &base.user_id,
+                    &base.user.id,
                     &platform,
                     &kind,
                     &platform_id,
@@ -538,32 +597,11 @@ impl BaseRepository for PostgresBaseRepository<'_> {
         debug!("listing bases from offset {offset} limiting to {limit} results");
         let limit_i64: i64 = limit.into();
         let offset_i64: i64 = offset.into();
+        let extractor = BaseExtractor::default();
         let items = query(
             sql!("base/list"),
             &[&limit_i64, &offset_i64],
-            "base",
-            self.0,
-        )
-        .await?;
-        let page = Page {
-            is_last: offset + limit >= total,
-            items,
-            total,
-        };
-        debug!("page fetched: {page:?}");
-        Ok(page)
-    }
-
-    async fn list_by_user(&self, user_id: &Uuid, limit: u32, offset: u32) -> Result<Page<Base>> {
-        debug!("counting total of bases owned by user {user_id}");
-        let total = count(sql!("base/count-by-user"), &[user_id], self.0).await?;
-        debug!("listing bases owned by user {user_id} from offset {offset} limiting to {limit} results");
-        let limit_i64: i64 = limit.into();
-        let offset_i64: i64 = offset.into();
-        let items = query(
-            sql!("base/list-by-user"),
-            &[user_id, &limit_i64, &offset_i64],
-            "base",
+            &extractor,
             self.0,
         )
         .await?;
@@ -583,10 +621,11 @@ impl BaseRepository for PostgresBaseRepository<'_> {
         now: DateTime<Utc>,
     ) -> Result<Option<Sync>> {
         debug!("locking sync of base {id}");
+        let extractor = SyncExtractor("base");
         let sync = query_opt(
             sql!("base/lock-sync"),
             &[id, &sync_id, &now],
-            "base",
+            &extractor,
             self.0,
         )
         .await?;
@@ -645,17 +684,19 @@ impl PlaylistRepository for PostgresPlaylistRepository<'_> {
 
     async fn get_by_id(&self, id: &Uuid) -> Result<Option<Playlist>> {
         debug!("fetching playlist {id} from database");
-        let playlist = query_opt(sql!("playlist/get-by-id"), &[id], "playlist", self.0).await?;
+        let extractor = PlaylistExtractor::default();
+        let playlist = query_opt(sql!("playlist/get-by-id"), &[id], &extractor, self.0).await?;
         debug!("playlist fetched: {playlist:?}");
         Ok(playlist)
     }
 
     async fn get_by_user_name(&self, user_id: &Uuid, name: &str) -> Result<Option<Playlist>> {
         debug!("fetching playlist from database owned by user {user_id} named `{name}`");
+        let extractor = PlaylistExtractor::default();
         let playlist = query_opt(
             sql!("playlist/get-by-user-name"),
             &[user_id, &name],
-            "playlist",
+            &extractor,
             self.0,
         )
         .await?;
@@ -704,10 +745,11 @@ impl PlaylistRepository for PostgresPlaylistRepository<'_> {
         debug!("listing playlists owned by user {user_id} from offset {offset} limiting to {limit} results");
         let limit_i64: i64 = limit.into();
         let offset_i64: i64 = offset.into();
+        let extractor = PlaylistExtractor::default();
         let items = query(
             sql!("playlist/list-by-user"),
             &[user_id, &limit_i64, &offset_i64],
-            "playlist",
+            &extractor,
             self.0,
         )
         .await?;
@@ -729,21 +771,36 @@ pub struct PostgresUserRepository<'a>(&'a TokioPostgresClient);
 impl UserRepository for PostgresUserRepository<'_> {
     async fn get_by_id(&self, id: &Uuid) -> Result<Option<User>> {
         debug!("fetching user {id} from database");
-        let user = query_opt(sql!("user/get-by-id"), &[id], "user", self.0).await?;
+        let extractor = UserExtractor::default();
+        let user = query_opt(sql!("user/get-by-id"), &[id], &extractor, self.0).await?;
         debug!("user fetched: {user:?}");
         Ok(user)
     }
 
     async fn get_by_spotify_email(&self, email: &str) -> Result<Option<User>> {
         debug!("fetching user from database with Spotify email `{email}`");
-        let user = query_opt(sql!("user/get-by-spotify-email"), &[&email], "user", self.0).await?;
+        let extractor = UserExtractor::default();
+        let user = query_opt(
+            sql!("user/get-by-spotify-email"),
+            &[&email],
+            &extractor,
+            self.0,
+        )
+        .await?;
         debug!("user fetched: {user:?}");
         Ok(user)
     }
 
     async fn get_spotify_auth_by_id(&self, id: &Uuid) -> Result<Option<SpotifyAuth>> {
         debug!("fetching Spotify auth of user {id} from database");
-        let auth = query_opt(sql!("user/get-spotify-auth-by-id"), &[id], "auth", self.0).await?;
+        let extractor = SpotifyAuthExtractor::default();
+        let auth = query_opt(
+            sql!("user/get-spotify-auth-by-id"),
+            &[id],
+            &extractor,
+            self.0,
+        )
+        .await?;
         debug!("Spotify auth fetched: {auth:?}");
         Ok(auth)
     }
@@ -785,7 +842,8 @@ pub struct PostgresArtistRepository<'a>(&'a TokioPostgresClient);
 impl ArtistRepository for PostgresArtistRepository<'_> {
     async fn get_by_spotify_id(&self, id: &str) -> Result<Option<Artist>> {
         debug!("fetching artyist from database with Spotify ID {id}");
-        let track = query_opt(sql!("artist/get-by-spotify-id"), &[&id], "artist", self.0).await?;
+        let extractor = ArtistExtractor::default();
+        let track = query_opt(sql!("artist/get-by-spotify-id"), &[&id], &extractor, self.0).await?;
         debug!("artist fetched: {track:?}");
         Ok(track)
     }
@@ -811,7 +869,8 @@ pub struct PostgresTrackRepository<'a>(&'a TokioPostgresClient);
 impl TrackRepository for PostgresTrackRepository<'_> {
     async fn get_by_spotify_id(&self, id: &str) -> Result<Option<Track>> {
         debug!("fetching track from database with Spotify ID {id}");
-        let track = query_opt(sql!("track/get-by-spotify-id"), &[&id], "track", self.0).await?;
+        let extractor = TrackExtractor::default();
+        let track = query_opt(sql!("track/get-by-spotify-id"), &[&id], &extractor, self.0).await?;
         debug!("track fetched: {track:?}");
         Ok(track)
     }
@@ -917,10 +976,10 @@ async fn count(
 // query
 
 #[inline]
-async fn query<T: TryFromRow>(
+async fn query<T>(
     sql: &str,
     params: &[&(dyn ToSql + StdSync)],
-    alias: &str,
+    extractor: &dyn Extractor<T>,
     client: &TokioPostgresClient,
 ) -> Result<Vec<T>> {
     trace!("executing `{sql}`");
@@ -929,16 +988,18 @@ async fn query<T: TryFromRow>(
         .await
         .map_err(Error::client_boxed)?;
     trace!("rows fetched: {rows:?}");
-    rows.iter().map(|row| T::try_from_row(alias, row)).collect()
+    rows.iter()
+        .map(|row| extractor.extract_from_row(row))
+        .collect()
 }
 
 // query_opt
 
 #[inline]
-async fn query_opt<T: TryFromRow>(
+async fn query_opt<T>(
     sql: &str,
     params: &[&(dyn ToSql + StdSync)],
-    alias: &str,
+    extractor: &dyn Extractor<T>,
     client: &TokioPostgresClient,
 ) -> Result<Option<T>> {
     trace!("executing `{sql}`");
@@ -947,14 +1008,14 @@ async fn query_opt<T: TryFromRow>(
         .await
         .map_err(Error::client_boxed)?;
     trace!("row fetched: {row:?}");
-    row.map(|row| T::try_from_row(alias, &row)).transpose()
+    row.map(|row| extractor.extract_from_row(&row)).transpose()
 }
 
 // try_get
 
 #[inline]
-fn try_get<'a, T: FromSql<'a>>(alias: &str, key: &str, row: &'a Row) -> Result<T> {
-    row.try_get(format!("{alias}_{key}").as_str())
+fn try_get<'a, T: FromSql<'a>>(alias_prefix: &str, key: &str, row: &'a Row) -> Result<T> {
+    row.try_get(format!("{alias_prefix}_{key}").as_str())
         .map_err(Error::client_boxed)
 }
 
@@ -962,11 +1023,11 @@ fn try_get<'a, T: FromSql<'a>>(alias: &str, key: &str, row: &'a Row) -> Result<T
 
 #[inline]
 fn try_get_int<'a, S: FromSql<'a>, T: TryFrom<S, Error = TryFromIntError>>(
-    alias: &str,
+    alias_prefix: &str,
     key: &str,
     row: &'a Row,
 ) -> Result<T> {
-    try_get::<S>(alias, key, row)
+    try_get::<S>(alias_prefix, key, row)
         .and_then(|val| val.try_into().map_err(Error::int_conversion_boxed))
 }
 

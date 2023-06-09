@@ -75,7 +75,7 @@ pub struct Base {
     pub kind: BaseKind,
     pub platform: Platform,
     pub sync: Option<Sync>,
-    pub user_id: Uuid,
+    pub user: User,
 }
 
 // Playlist

@@ -38,6 +38,7 @@ async fn create(
         db_client.repositories().user().as_ref(),
     )
     .await?;
+    let auth_user_id = auth_user.id;
     trace!("validating {payload:?}");
     payload.validate().map_err(Error::RequestValidation)?;
     let now = Utc::now();
@@ -69,7 +70,7 @@ async fn create(
                         kind: payload.base.kind.clone(),
                         platform: payload.base.platform,
                         sync: None,
-                        user_id: auth_user.id,
+                        user: auth_user,
                     };
                     base_repo
                         .insert(&base)
@@ -83,7 +84,7 @@ async fn create(
                 creation_date: now,
                 id: Uuid::new_v4(),
                 name: payload.name.clone(),
-                user_id: auth_user.id,
+                user_id: auth_user_id,
             };
             let filters: Vec<PlaylistFilter> = payload
                 .filters

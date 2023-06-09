@@ -39,7 +39,6 @@ enum Error {
     DatabaseClient(Box<dyn StdError + Send + StdSync>),
     Sync(SyncError),
     SyncAlreadyRunning,
-    UserNotFound(Uuid),
 }
 
 impl Display for Error {
@@ -49,7 +48,6 @@ impl Display for Error {
             Self::DatabaseClient(err) => write!(f, "{err}"),
             Self::Sync(err) => write!(f, "{err}"),
             Self::SyncAlreadyRunning => write!(f, "sync is already running"),
-            Self::UserNotFound(id) => write!(f, "user {id} doesn't exist"),
         }
     }
 }
@@ -61,7 +59,6 @@ impl StdError for Error {
             Self::DatabaseClient(err) => Some(err.as_ref()),
             Self::Sync(err) => Some(err),
             Self::SyncAlreadyRunning => None,
-            Self::UserNotFound(_) => None,
         }
     }
 }
@@ -110,10 +107,6 @@ impl Handler {
                     warn!("sync of base {base_id} is ignored: {err}");
                     Ok(())
                 }
-                Error::UserNotFound(_) => {
-                    warn!("sync of base {base_id} is ignored: {err}");
-                    Ok(())
-                }
             },
         }
     }
@@ -122,17 +115,11 @@ impl Handler {
     async fn sync(&self, base_id: &Uuid, db_client: &dyn DatabaseClient) -> Result<Sync, Error> {
         let repos = db_client.repositories();
         let base_repo = repos.base();
-        let user_repo = repos.user();
         let base = base_repo
             .get_by_id(base_id)
             .await
             .map_err(Error::DatabaseClient)?
             .ok_or(Error::BaseNotFound)?;
-        let user = user_repo
-            .get_by_id(&base.user_id)
-            .await
-            .map_err(Error::DatabaseClient)?
-            .ok_or_else(|| Error::UserNotFound(base.user_id))?;
         let sync = base_repo
             .lock_sync(base_id, Uuid::new_v4(), Utc::now())
             .await
@@ -141,7 +128,7 @@ impl Handler {
         match base.platform {
             Platform::Spotify => self
                 .spotify_synchronizer
-                .sync(&base, sync, &user.id)
+                .sync(&base, sync)
                 .await
                 .map_err(Error::Sync),
         }
