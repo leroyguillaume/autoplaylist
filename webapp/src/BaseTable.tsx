@@ -25,7 +25,7 @@ export default function BaseTable(props: Props) {
         (lastSuccessDate.getTime() - lastStartDate.getTime()) / 1000
       );
       if (lastDuration >= 60) {
-        lastDuration /= 60;
+        lastDuration = Math.round(lastDuration / 60);
         lastDurationUnit = "min.";
       } else {
         lastDurationUnit = "sec.";
