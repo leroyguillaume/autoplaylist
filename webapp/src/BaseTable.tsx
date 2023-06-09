@@ -2,7 +2,7 @@ import { faRotate, faSpinner } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { Button, Table } from "react-bootstrap";
 import Pagination from "./Pagination";
-import { Base, Page } from "./domain";
+import { Base, Page, SyncState } from "./domain";
 
 interface Props {
   fetching: boolean;
@@ -30,6 +30,7 @@ export default function BaseTable(props: Props) {
             className="btn-sm"
             variant="secondary"
             onClick={() => props.handleSync(base.id)}
+            disabled={base.sync?.state === SyncState.Running}
           >
             <FontAwesomeIcon icon={faRotate} className="inline" />
             Synchronize
