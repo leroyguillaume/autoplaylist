@@ -6,14 +6,14 @@ import { Base, Page } from "./domain";
 
 interface Props {
   fetching: boolean;
+  handleSync: (id: string) => void;
   page: Page<Base> | null;
   pageChanged: (nb: number) => void;
   pageNb: number | null;
   pageSize: number;
-  sync_requested: (id: string) => void;
 }
 
-export default function PlaylistTable(props: Props) {
+export default function BaseTable(props: Props) {
   const trs = props.page?.content.map((base) => {
     let lastSuccessDate = null;
     if (base.sync?.lastSuccessDate) {
@@ -29,7 +29,7 @@ export default function PlaylistTable(props: Props) {
           <Button
             className="btn-sm"
             variant="secondary"
-            onClick={() => props.sync_requested(base.id)}
+            onClick={() => props.handleSync(base.id)}
           >
             <FontAwesomeIcon icon={faRotate} className="inline" />
             Synchronize

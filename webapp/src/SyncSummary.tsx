@@ -50,7 +50,7 @@ export default function SyncSummary() {
       });
   };
 
-  const sync = async (id: string) => {
+  const syncBase = async (id: string) => {
     setFetchingBasePage(true);
     await doPut(`base/${id}`, null, ctx)
       .then(() => fetchBasePage(basePageNb))
@@ -88,7 +88,7 @@ export default function SyncSummary() {
               pageChanged={fetchBasePage}
               pageNb={basePageNb}
               pageSize={BASE_PAGE_SIZE}
-              sync_requested={sync}
+              handleSync={syncBase}
             />
           </Row>
         </Row>
