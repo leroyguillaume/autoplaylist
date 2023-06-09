@@ -16,14 +16,29 @@ interface Props {
 export default function BaseTable(props: Props) {
   const trs = props.page?.content.map((base) => {
     let lastSuccessDate = null;
+    let lastDuration = null;
+    let lastDurationUnit = null;
     if (base.sync?.lastSuccessDate) {
-      lastSuccessDate = new Date(base.sync?.lastSuccessDate!!).toLocaleString();
+      lastSuccessDate = new Date(base.sync?.lastSuccessDate!!);
+      const lastStartDate = new Date(base.sync?.lastStartDate!!);
+      lastDuration = Math.round(
+        (lastSuccessDate.getTime() - lastStartDate.getTime()) / 1000
+      );
+      if (lastDuration >= 60) {
+        lastDuration /= 60;
+        lastDurationUnit = "min.";
+      } else {
+        lastDurationUnit = "sec.";
+      }
     }
     return (
       <tr key={base.id}>
         <td>{base.kind}</td>
         <td>{base.sync?.state}</td>
-        <td>{lastSuccessDate}</td>
+        <td>{lastSuccessDate?.toLocaleString()}</td>
+        <td>
+          {lastDuration} {lastDurationUnit}
+        </td>
         <td>{base.sync?.lastErrMsg}</td>
         <td>
           <Button
@@ -51,6 +66,7 @@ export default function BaseTable(props: Props) {
               <th>Name</th>
               <th>Status</th>
               <th>Last success</th>
+              <th>Last duration</th>
               <th>Last error message</th>
               <th>Action</th>
             </tr>
