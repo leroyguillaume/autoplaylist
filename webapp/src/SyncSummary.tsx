@@ -23,7 +23,7 @@ export default function SyncSummary() {
   const fetchBasePage = async (nb: number) => {
     setFetchingBasePage(true);
     await doGet<Page<Base>>(
-      "base",
+      "sync/base",
       {
         limit: BASE_PAGE_SIZE,
         offset: (nb - 1) * BASE_PAGE_SIZE,
@@ -52,7 +52,7 @@ export default function SyncSummary() {
 
   const syncBase = async (id: string) => {
     setFetchingBasePage(true);
-    await doPut(`base/${id}`, null, ctx)
+    await doPut(`sync/base/${id}`, null, ctx)
       .then(() => fetchBasePage(basePageNb))
       .catch((err) => {
         handleCommonErrors(err, ctx, navigate);

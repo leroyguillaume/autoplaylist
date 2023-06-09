@@ -4,20 +4,19 @@ use actix_web::{
     web::{Data, Path, Query},
     HttpRequest, HttpResponse, Responder,
 };
-use autoplaylist_core::{
-    broker::{BaseCommand, BaseCommandKind},
-    domain::Role,
-};
+use autoplaylist_core::broker::{BaseCommand, BaseCommandKind};
 use tracing::info;
 use uuid::Uuid;
 
 use crate::{
     dto::{BaseResponse, PageQuery, PageResponse, DEFAULT_PAGE_LIMIT, DEFAULT_PAGE_OFFSET},
-    handlers::{current_user, Error, Result},
+    handlers::{authenticated_admin, Error, Result},
     Components,
 };
 
-#[get("/base")]
+// list_bases
+
+#[get("/sync/base")]
 async fn list_bases(
     req: HttpRequest,
     page: Query<PageQuery>,
@@ -25,34 +24,31 @@ async fn list_bases(
 ) -> Result<impl Responder> {
     let db_client = cmpts.db_pool.client().await.map_err(Error::DatabasePool)?;
     let repos = db_client.repositories();
-    let auth_user = current_user(&req, &cmpts.jwt_cfg, repos.user().as_ref()).await?;
+    authenticated_admin(&req, &cmpts.jwt_cfg, repos.user().as_ref()).await?;
     let limit = page.limit.unwrap_or(DEFAULT_PAGE_LIMIT);
     let offset = page.offset.unwrap_or(DEFAULT_PAGE_OFFSET);
     let page = repos
         .base()
-        .list_by_user(&auth_user.id, limit, offset)
+        .list(limit, offset)
         .await
         .map_err(Error::DatabaseClient)?;
     let resp: PageResponse<BaseResponse> = page.into();
     Ok(HttpResponse::Ok().json(resp))
 }
 
-#[put("/base/{id}")]
-async fn start_base_sync(
+#[put("/sync/base/{id}")]
+async fn base_sync(
     req: HttpRequest,
     path: Path<Uuid>,
     cmpts: Data<Components>,
 ) -> Result<impl Responder> {
     let db_client = cmpts.db_pool.client().await.map_err(Error::DatabasePool)?;
-    let auth_user = current_user(
+    authenticated_admin(
         &req,
         &cmpts.jwt_cfg,
         db_client.repositories().user().as_ref(),
     )
     .await?;
-    if auth_user.role != Role::Admin {
-        return Err(Error::AuthenticatedUserIsNotAdmin(auth_user.id));
-    }
     let cmd = BaseCommand {
         id: *path,
         kind: BaseCommandKind::Sync,

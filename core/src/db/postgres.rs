@@ -532,6 +532,28 @@ impl BaseRepository for PostgresBaseRepository<'_> {
         Ok(())
     }
 
+    async fn list(&self, limit: u32, offset: u32) -> Result<Page<Base>> {
+        debug!("counting total of bases");
+        let total = count(sql!("base/count"), &[], self.0).await?;
+        debug!("listing bases from offset {offset} limiting to {limit} results");
+        let limit_i64: i64 = limit.into();
+        let offset_i64: i64 = offset.into();
+        let items = query(
+            sql!("base/list"),
+            &[&limit_i64, &offset_i64],
+            "base",
+            self.0,
+        )
+        .await?;
+        let page = Page {
+            is_last: offset + limit >= total,
+            items,
+            total,
+        };
+        debug!("page fetched: {page:?}");
+        Ok(page)
+    }
+
     async fn list_by_user(&self, user_id: &Uuid, limit: u32, offset: u32) -> Result<Page<Base>> {
         debug!("counting total of bases owned by user {user_id}");
         let total = count(sql!("base/count-by-user"), &[user_id], self.0).await?;

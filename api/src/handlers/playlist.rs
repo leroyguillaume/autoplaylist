@@ -19,20 +19,20 @@ use crate::{
         CreatePlaylistRequest, PageQuery, PageResponse, PlaylistResponse, DEFAULT_PAGE_LIMIT,
         DEFAULT_PAGE_OFFSET,
     },
-    handlers::{current_user, Error, Result},
+    handlers::{authenticated_user, Error, Result},
     Components,
 };
 
 // Functions - Handlers
 
 #[post("/playlist")]
-async fn create_playlist(
+async fn create(
     req: HttpRequest,
     payload: Json<CreatePlaylistRequest>,
     cmpts: Data<Components>,
 ) -> Result<impl Responder> {
     let mut db_client = cmpts.db_pool.client().await.map_err(Error::DatabasePool)?;
-    let auth_user = current_user(
+    let auth_user = authenticated_user(
         &req,
         &cmpts.jwt_cfg,
         db_client.repositories().user().as_ref(),
@@ -117,13 +117,13 @@ async fn create_playlist(
 }
 
 #[delete("/playlist/{id}")]
-async fn delete_playlist(
+async fn delete(
     req: HttpRequest,
     path: Path<Uuid>,
     cmpts: Data<Components>,
 ) -> Result<impl Responder> {
     let db_client = cmpts.db_pool.client().await.map_err(Error::DatabasePool)?;
-    let auth_user = current_user(
+    let auth_user = authenticated_user(
         &req,
         &cmpts.jwt_cfg,
         db_client.repositories().user().as_ref(),
@@ -154,13 +154,13 @@ async fn delete_playlist(
 }
 
 #[get("/playlist")]
-async fn list_playlists(
+async fn list(
     req: HttpRequest,
     page: Query<PageQuery>,
     cmpts: Data<Components>,
 ) -> Result<impl Responder> {
     let db_client = cmpts.db_pool.client().await.map_err(Error::DatabasePool)?;
-    let auth_user = current_user(
+    let auth_user = authenticated_user(
         &req,
         &cmpts.jwt_cfg,
         db_client.repositories().user().as_ref(),

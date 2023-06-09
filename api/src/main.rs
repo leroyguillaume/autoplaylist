@@ -13,15 +13,9 @@ use opentelemetry::global::shutdown_tracer_provider;
 use tracing::{debug, error, info};
 use tracing_actix_web::TracingLogger;
 
-use crate::handlers::base::start_base_sync;
-
 use self::{
     cfg::Config,
-    handlers::{
-        auth::{auth_with_spotify, spotify_redirect},
-        base::list_bases,
-        playlist::{create_playlist, delete_playlist, list_playlists},
-    },
+    handlers::{auth, playlist, sync},
 };
 
 // Types
@@ -84,14 +78,13 @@ async fn run() -> Result<()> {
             .app_data(Data::new(cmpts.clone()))
             .wrap(TracingLogger::default())
             .wrap(cors)
-            .service(auth_with_spotify)
-            .service(create_playlist)
-            .service(delete_playlist)
+            .service(auth::auth_with_spotify)
+            .service(playlist::create)
+            .service(playlist::list)
+            .service(playlist::delete)
             .service(health)
-            .service(list_bases)
-            .service(list_playlists)
-            .service(spotify_redirect)
-            .service(start_base_sync)
+            .service(sync::base_sync)
+            .service(sync::list_bases)
     })
     .bind(cfg.server.addr)
     .map_err(Box::new)?;

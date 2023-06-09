@@ -12,7 +12,7 @@ use actix_web::{
 };
 use autoplaylist_core::{
     db::{InTransactionError, UserRepository},
-    domain::User,
+    domain::{Role, User},
 };
 use chrono::Utc;
 use hmac::{digest::InvalidLength as HmacInvalidLength, Hmac, Mac};
@@ -167,10 +167,25 @@ impl StdError for Error {
     }
 }
 
-// current_user
+// authenticated_admin
 
 #[inline]
-async fn current_user(
+async fn authenticated_admin(
+    req: &HttpRequest,
+    cfg: &JwtConfig,
+    user_repo: &dyn UserRepository,
+) -> Result<User> {
+    let user = authenticated_user(req, cfg, user_repo).await?;
+    match user.role {
+        Role::Admin => Ok(user),
+        _ => Err(Error::AuthenticatedUserIsNotAdmin(user.id)),
+    }
+}
+
+// authenticated_user
+
+#[inline]
+async fn authenticated_user(
     req: &HttpRequest,
     cfg: &JwtConfig,
     user_repo: &dyn UserRepository,
@@ -231,5 +246,5 @@ fn generate_jwt_key(cfg: &JwtConfig) -> Result<Hmac<Sha512>> {
 // Mods
 
 pub mod auth;
-pub mod base;
 pub mod playlist;
+pub mod sync;
