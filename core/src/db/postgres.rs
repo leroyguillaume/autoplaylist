@@ -693,6 +693,18 @@ impl PlaylistRepository for PostgresPlaylistRepository<'_> {
         Ok(())
     }
 
+    async fn delete_track_by_id_sync_not(&self, id: &Uuid, sync_id: &Uuid) -> Result<()> {
+        debug!("deleting tracks from playlist that their sync ID is not {sync_id}");
+        self.0
+            .execute(
+                sql!("playlist/delete-tracks-by-id-sync-id-not"),
+                &[id, sync_id],
+            )
+            .await
+            .map_err(Box::new)?;
+        Ok(())
+    }
+
     async fn get_by_id(&self, id: &Uuid) -> Result<Option<Playlist>> {
         debug!("fetching playlist {id} from database");
         let extractor = PlaylistExtractor::default();
@@ -771,6 +783,59 @@ impl PlaylistRepository for PostgresPlaylistRepository<'_> {
         };
         debug!("page fetched: {page:?}");
         Ok(page)
+    }
+
+    async fn lock_sync(
+        &self,
+        id: &Uuid,
+        sync_id: Uuid,
+        now: DateTime<Utc>,
+    ) -> Result<Option<Sync>> {
+        debug!("locking sync of playlist {id}");
+        let extractor = SyncExtractor("playlist");
+        let sync = query_opt(
+            sql!("playlist/lock-sync"),
+            &[id, &sync_id, &now],
+            &extractor,
+            self.0,
+        )
+        .await?;
+        debug!("playlist sync fetched: {sync:?}");
+        Ok(sync)
+    }
+
+    async fn update_sync(&self, id: &Uuid, sync: &Sync) -> Result<()> {
+        debug!("updating sync of playlist {id} with {sync:?}");
+        let state: SyncStateSql = sync.state.into();
+        let last_offset: i64 = sync.last_offset.into();
+        let last_total: i64 = sync.last_total.into();
+        self.0
+            .execute(
+                sql!("playlist/update-sync"),
+                &[
+                    &id,
+                    &state,
+                    &sync.last_id,
+                    &sync.last_start_date,
+                    &sync.last_success_date,
+                    &sync.last_duration.map(|duration| duration.num_seconds()),
+                    &sync.last_err_msg,
+                    &last_offset,
+                    &last_total,
+                ],
+            )
+            .await
+            .map_err(Error::client_boxed)?;
+        Ok(())
+    }
+
+    async fn upsert_track(&self, id: &Uuid, track_id: &Uuid, sync_id: &Uuid) -> Result<()> {
+        debug!("upserting tack {track_id} into playlist {id}");
+        self.0
+            .execute(sql!("playlist/upsert-track"), &[id, track_id, sync_id])
+            .await
+            .map_err(Error::client_boxed)?;
+        Ok(())
     }
 }
 

@@ -92,6 +92,8 @@ pub trait BaseRepository: Send + StdSync {
 pub trait PlaylistRepository: Send + StdSync {
     async fn delete(&self, id: &Uuid) -> Result<()>;
 
+    async fn delete_track_by_id_sync_not(&self, id: &Uuid, sync_id: &Uuid) -> Result<()>;
+
     async fn get_by_id(&self, id: &Uuid) -> Result<Option<Playlist>>;
 
     async fn get_by_user_name(&self, user_id: &Uuid, name: &str) -> Result<Option<Playlist>>;
@@ -100,6 +102,13 @@ pub trait PlaylistRepository: Send + StdSync {
 
     async fn list_by_user(&self, user_id: &Uuid, limit: u32, offset: u32)
         -> Result<Page<Playlist>>;
+
+    async fn lock_sync(&self, id: &Uuid, sync_id: Uuid, now: DateTime<Utc>)
+        -> Result<Option<Sync>>;
+
+    async fn update_sync(&self, id: &Uuid, sync: &Sync) -> Result<()>;
+
+    async fn upsert_track(&self, id: &Uuid, track_id: &Uuid, sync_id: &Uuid) -> Result<()>;
 }
 
 // UserRepository
