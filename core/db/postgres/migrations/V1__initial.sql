@@ -74,6 +74,7 @@ CREATE TABLE track (
     id UUID NOT NULL PRIMARY KEY,
     name VARCHAR (255) NOT NULL,
     release_year INT NOT NULL,
+    from_compilation BOOLEAN NOT NULL,
     spotify_id VARCHAR (50) UNIQUE
 );
 

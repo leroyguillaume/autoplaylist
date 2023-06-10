@@ -242,6 +242,7 @@ impl SpotifySynchronizer {
                     year: year.as_str().into(),
                 })?;
         let track = Track {
+            from_compilation: spotify_track.from_compilation,
             id: Uuid::new_v4(),
             name: spotify_track.name,
             release_year,

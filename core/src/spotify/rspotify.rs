@@ -199,6 +199,11 @@ impl From<FullTrack> for SpotifyTrack {
     fn from(track: FullTrack) -> Self {
         Self {
             artists: track.artists.into_iter().map(SpotifyArtist::from).collect(),
+            from_compilation: track
+                .album
+                .album_type
+                .map(|kind| kind == "compilation")
+                .unwrap_or_default(),
             id: track.id.map(|id| id.to_string()),
             name: track.name,
             release_date: track.album.release_date,

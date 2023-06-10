@@ -144,6 +144,7 @@ pub struct SpotifyArtist {
 #[derive(Clone, Debug)]
 pub struct SpotifyTrack {
     pub artists: Vec<SpotifyArtist>,
+    pub from_compilation: bool,
     pub id: Option<String>,
     pub name: String,
     pub release_date: Option<String>,
@@ -171,6 +172,7 @@ pub struct Artist {
 
 #[derive(Debug)]
 pub struct Track {
+    pub from_compilation: bool,
     pub id: Uuid,
     pub name: String,
     pub release_year: u16,

@@ -283,6 +283,7 @@ impl Default for TrackExtractor {
 impl Extractor<Track> for TrackExtractor {
     fn extract_from_row(&self, row: &Row) -> Result<Track> {
         Ok(Track {
+            from_compilation: try_get(self.0, "from_compilation", row)?,
             id: try_get(self.0, "id", row)?,
             name: try_get(self.0, "name", row)?,
             release_year: try_get_int::<i32, u16>(self.0, "release_year", row)?,
@@ -881,7 +882,13 @@ impl TrackRepository for PostgresTrackRepository<'_> {
         self.0
             .execute(
                 sql!("track/insert"),
-                &[&track.id, &track.name, &release_year, &track.spotify_id],
+                &[
+                    &track.id,
+                    &track.name,
+                    &release_year,
+                    &track.from_compilation,
+                    &track.spotify_id,
+                ],
             )
             .await
             .map_err(Box::new)?;
