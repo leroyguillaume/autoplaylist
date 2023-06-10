@@ -2,7 +2,7 @@ import { faSpinner, faTrash } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { Button, Table } from "react-bootstrap";
 import Pagination from "./Pagination";
-import { Page, Playlist } from "./domain";
+import { Page, Playlist, SyncState } from "./domain";
 
 interface Props {
   fetching: boolean;
@@ -16,10 +16,22 @@ interface Props {
 export default function PlaylistTable(props: Props) {
   const trs = props.page?.content.map((playlist) => {
     const creationDate = new Date(playlist.creationDate);
+    let syncState;
+    if (playlist.sync) {
+      if (playlist.sync.state === SyncState.Running) {
+        syncState = "synchronization in progress...";
+      } else if (playlist.sync.lastSuccessDate) {
+        const lastSuccessDate = new Date(playlist.sync.lastSuccessDate);
+        syncState = `synchronized at ${lastSuccessDate.toLocaleString()}`;
+      }
+    } else {
+      syncState = "synchornization will start in few minutes!";
+    }
     return (
       <tr key={playlist.id}>
         <td>{playlist.name}</td>
         <td>{creationDate.toLocaleString()}</td>
+        <td>{syncState}</td>
         <td>
           <Button
             className="btn-sm"
@@ -45,6 +57,7 @@ export default function PlaylistTable(props: Props) {
             <tr>
               <th>Name</th>
               <th>Creation date</th>
+              <th>Status</th>
               <th>Action</th>
             </tr>
           </thead>

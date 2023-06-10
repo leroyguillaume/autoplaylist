@@ -28,6 +28,7 @@ export interface Playlist {
   creationDate: string;
   id: string;
   name: string;
+  sync: Sync | null;
 }
 
 export interface PlaylistFilter {
