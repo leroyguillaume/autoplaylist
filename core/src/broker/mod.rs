@@ -100,6 +100,38 @@ pub struct BaseEvent {
     pub kind: BaseEventKind,
 }
 
+// PlaylistCommand
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct PlaylistCommand {
+    pub id: Uuid,
+    pub kind: PlaylistCommandKind,
+}
+
+// PlaylistCommandKind
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlaylistCommandKind {
+    Sync,
+}
+
+// TrackEventKind
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TrackEventKind {
+    Created,
+}
+
+// TrackEvent
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct TrackEvent {
+    pub id: Uuid,
+    pub kind: TrackEventKind,
+}
+
 // ConsumerHandler
 
 #[async_trait]
@@ -142,6 +174,20 @@ pub trait Broker: Send + Sync {
         stop_rx: Receiver<()>,
         handler: Box<dyn ConsumerHandler<BaseEvent>>,
     ) -> Result<Box<dyn Consumer<BaseEvent>>, Box<dyn StdError + Send + Sync>>;
+
+    async fn start_playlist_command_consumer(
+        &self,
+        queue: String,
+        stop_rx: Receiver<()>,
+        handler: Box<dyn ConsumerHandler<PlaylistCommand>>,
+    ) -> Result<Box<dyn Consumer<PlaylistCommand>>, Box<dyn StdError + Send + Sync>>;
+
+    async fn start_track_event_consumer(
+        &self,
+        queue: String,
+        stop_rx: Receiver<()>,
+        handler: Box<dyn ConsumerHandler<TrackEvent>>,
+    ) -> Result<Box<dyn Consumer<TrackEvent>>, Box<dyn StdError + Send + Sync>>;
 }
 
 // Mods

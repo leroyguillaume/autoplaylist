@@ -29,7 +29,10 @@ use tracing::{debug, error, trace};
 
 use crate::{env_var, env_var_or_default, ConfigError};
 
-use super::{BaseCommand, BaseEvent, Broker, Consumer, ConsumerHandler, Producer, ProducerError};
+use super::{
+    BaseCommand, BaseEvent, Broker, Consumer, ConsumerHandler, PlaylistCommand, Producer,
+    ProducerError, TrackEvent,
+};
 
 // InitializationErrorKind
 
@@ -330,6 +333,8 @@ impl<T: Debug + Serialize + Send + Sync + 'static> Producer<T> for RabbitMqProdu
 pub struct Config {
     pub base_cmd_exchange: String,
     pub base_event_exchange: String,
+    pub playlist_cmd_exchange: String,
+    pub track_event_exchange: String,
     #[sensitive]
     pub url: String,
 }
@@ -342,6 +347,12 @@ impl Config {
                 "base-command".into()
             })?,
             base_event_exchange: env_var_or_default("BASE_EVENT_EXCHANGE", || "base-event".into())?,
+            playlist_cmd_exchange: env_var_or_default("PLAYLIST_COMMAND_EXCHANGE", || {
+                "playlist-command".into()
+            })?,
+            track_event_exchange: env_var_or_default("TRACK_EVENT_EXCHANGE", || {
+                "track-event".into()
+            })?,
             url: env_var("BROKER_URL")?,
         };
         trace!("RabbitMQ configuration loaded: {cfg:?}");
@@ -369,6 +380,8 @@ impl RabbitMqBroker {
             .map_err(BrokerInitializationError::channel_creation)?;
         Self::declare_exchange(&channel, &cfg.base_cmd_exchange).await?;
         Self::declare_exchange(&channel, &cfg.base_event_exchange).await?;
+        Self::declare_exchange(&channel, &cfg.playlist_cmd_exchange).await?;
+        Self::declare_exchange(&channel, &cfg.track_event_exchange).await?;
         Ok(Self { cfg, channel })
     }
 
@@ -485,6 +498,38 @@ impl Broker for RabbitMqBroker {
         Self::start_consumer(
             queue,
             &self.cfg.base_event_exchange,
+            &self.channel,
+            stop_rx,
+            handler,
+        )
+        .await
+    }
+
+    async fn start_playlist_command_consumer(
+        &self,
+        queue: String,
+        stop_rx: Receiver<()>,
+        handler: Box<dyn ConsumerHandler<PlaylistCommand>>,
+    ) -> Result<Box<dyn Consumer<PlaylistCommand>>, Box<dyn StdError + Send + Sync>> {
+        Self::start_consumer(
+            queue,
+            &self.cfg.playlist_cmd_exchange,
+            &self.channel,
+            stop_rx,
+            handler,
+        )
+        .await
+    }
+
+    async fn start_track_event_consumer(
+        &self,
+        queue: String,
+        stop_rx: Receiver<()>,
+        handler: Box<dyn ConsumerHandler<TrackEvent>>,
+    ) -> Result<Box<dyn Consumer<TrackEvent>>, Box<dyn StdError + Send + Sync>> {
+        Self::start_consumer(
+            queue,
+            &self.cfg.track_event_exchange,
             &self.channel,
             stop_rx,
             handler,
