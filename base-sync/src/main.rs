@@ -13,16 +13,12 @@ use autoplaylist_core::{
     },
     db::{postgres::PostgresPool, Client as DatabaseClient, Pool as DatabasePool},
     domain::{Platform, Sync, SyncState},
-    init_tracing,
+    init_tracing, shutdown_signal,
     spotify::{rspotify::RSpotifyClient, Client as SpotifyClient},
 };
 use chrono::Utc;
 use opentelemetry::global::shutdown_tracer_provider;
-use tokio::{
-    select,
-    signal::unix::{signal, Signal, SignalKind},
-    sync::watch::{channel as watch_channel, Sender},
-};
+use tokio::sync::watch::channel as watch_channel;
 use tracing::{debug, error, info, trace, warn};
 use uuid::Uuid;
 
@@ -182,20 +178,10 @@ async fn main() -> Result<(), Box<dyn StdError + Send + StdSync>> {
     res
 }
 
-// signal_listener
-
-#[inline]
-fn signal_listener(kind: SignalKind) -> Result<Signal, Box<dyn StdError + Send + StdSync>> {
-    trace!("creating UNIX signal listener on {kind:?}");
-    signal(kind).map_err(|err| Box::new(err) as Box<dyn StdError + Send + StdSync>)
-}
-
 // run
 
 #[inline]
 async fn run() -> Result<(), Box<dyn StdError + Send + StdSync>> {
-    let mut sig_int = signal_listener(SignalKind::interrupt())?;
-    let mut sig_term = signal_listener(SignalKind::terminate())?;
     let cfg = Config::from_env().map_err(Box::new)?;
     let db_pool = PostgresPool::init(cfg.db).await.map_err(Box::new)?;
     let db_pool: Arc<Box<dyn DatabasePool>> = Arc::new(Box::new(db_pool));
@@ -224,26 +210,16 @@ async fn run() -> Result<(), Box<dyn StdError + Send + StdSync>> {
         .start_base_event_consumer(cfg.queues.base_event, stop_rx, base_event_handler)
         .await?;
     info!("synchronizer is started");
-    select! {
-        _ = sig_int.recv() => send_stop_signal(SignalKind::interrupt(), stop_tx).await,
-        _ = sig_term.recv() => send_stop_signal(SignalKind::terminate(), stop_tx).await,
-    }
+    shutdown_signal().await.map_err(Box::new)?;
     debug!("waiting for consumers shutdown");
+    trace!("sending stop signal");
+    if let Err(err) = stop_tx.send(()) {
+        error!("sending stop signal to all consumers failed: {err}");
+    }
     base_cmd_csm.wait_for_shutdown().await;
     base_event_csm.wait_for_shutdown().await;
     info!("synchronizer stopped");
     Ok(())
-}
-
-// send_stop_signal
-
-#[inline]
-async fn send_stop_signal(sig_kind: SignalKind, stop_sig_tx: Sender<()>) {
-    debug!("{sig_kind:?} received, synchronizer will shutdown");
-    trace!("sending stop signal");
-    if let Err(err) = stop_sig_tx.send(()) {
-        error!("sending stop signal to all consumers failed: {err}");
-    }
 }
 
 // Mods

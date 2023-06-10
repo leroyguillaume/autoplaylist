@@ -2,7 +2,7 @@ use std::{
     env::{var, VarError},
     error::Error as StdError,
     fmt::{Display, Formatter, Result as FmtResult},
-    io::stdout,
+    io::{stdout, Result as IoResult},
     str::FromStr,
 };
 
@@ -11,7 +11,11 @@ use opentelemetry::{
     sdk::propagation::TraceContextPropagator,
 };
 use opentelemetry_jaeger::new_agent_pipeline;
-use tracing::{error, metadata::LevelFilter, subscriber::set_global_default, warn};
+use tokio::{
+    select,
+    signal::unix::{signal, Signal, SignalKind},
+};
+use tracing::{error, metadata::LevelFilter, subscriber::set_global_default, trace, warn};
 use tracing_bunyan_formatter::{BunyanFormattingLayer, JsonStorageLayer};
 use tracing_opentelemetry::layer;
 use tracing_subscriber::{prelude::__tracing_subscriber_SubscriberExt, EnvFilter, Registry};
@@ -124,6 +128,31 @@ pub fn env_var_or_default<
         Ok(None) => Ok(default()),
         Err(err) => Err(err),
     }
+}
+
+// shutdown_signal
+
+pub async fn shutdown_signal() -> IoResult<()> {
+    let mut int = signal_listener(SignalKind::interrupt())?;
+    let mut term = signal_listener(SignalKind::terminate())?;
+    select! {
+        _ = int.recv() => {
+            trace!("SIGINT received");
+            Ok(())
+        },
+        _ = term.recv() => {
+            trace!("SIGTERM received");
+            Ok(())
+        },
+    }
+}
+
+// signal_listener
+
+#[inline]
+fn signal_listener(kind: SignalKind) -> IoResult<Signal> {
+    trace!("creating UNIX signal listener on {kind:?}");
+    signal(kind)
 }
 
 // Mods
