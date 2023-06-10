@@ -79,6 +79,7 @@ async fn run() -> Result<()> {
             .wrap(TracingLogger::default())
             .wrap(cors)
             .service(auth::auth_with_spotify)
+            .service(auth::spotify_redirect)
             .service(playlist::create)
             .service(playlist::list)
             .service(playlist::delete)
