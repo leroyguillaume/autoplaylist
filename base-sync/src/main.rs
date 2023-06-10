@@ -101,6 +101,7 @@ impl Handler {
                     let err_str = err.to_string();
                     let mut sync = err.sync;
                     sync.last_err_msg = Some(err_str);
+                    sync.state = SyncState::Failed;
                     self.update_sync(base_id, &sync, db_client.as_ref()).await
                 }
                 Error::SyncAlreadyRunning => {

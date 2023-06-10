@@ -2,7 +2,8 @@ UPDATE base
 SET
     sync_state = 'running',
     last_sync_id = $2,
-    last_sync_start_date = $3
+    last_sync_start_date = $3,
+    last_sync_err_msg = NULL
 WHERE
     id = $1 AND
     sync_state IS DISTINCT FROM 'running'
