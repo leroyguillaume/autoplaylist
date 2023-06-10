@@ -84,6 +84,7 @@ async fn create(
                 creation_date: now,
                 id: Uuid::new_v4(),
                 name: payload.name.clone(),
+                sync: None,
                 user_id: auth_user_id,
             };
             let filters: Vec<PlaylistFilter> = payload

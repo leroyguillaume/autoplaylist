@@ -98,6 +98,7 @@ pub struct Playlist {
     pub creation_date: DateTime<Utc>,
     pub id: Uuid,
     pub name: String,
+    pub sync: Option<Sync>,
     pub user_id: Uuid,
 }
 

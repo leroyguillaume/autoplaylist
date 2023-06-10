@@ -192,22 +192,29 @@ impl Extractor<Base> for BaseExtractor {
 
 // PlaylistExtractor
 
-struct PlaylistExtractor(&'static str);
+struct PlaylistExtractor {
+    alias_prefix: &'static str,
+    sync_extractor: SyncExtractor,
+}
 
 impl Default for PlaylistExtractor {
     fn default() -> Self {
-        Self("playlist")
+        Self {
+            alias_prefix: "playlist",
+            sync_extractor: SyncExtractor("playlist"),
+        }
     }
 }
 
 impl Extractor<Playlist> for PlaylistExtractor {
     fn extract_from_row(&self, row: &Row) -> Result<Playlist> {
         Ok(Playlist {
-            base_id: try_get(self.0, "base_id", row)?,
-            creation_date: try_get(self.0, "creation_date", row)?,
-            id: try_get(self.0, "id", row)?,
-            name: try_get(self.0, "name", row)?,
-            user_id: try_get(self.0, "user_id", row)?,
+            base_id: try_get(self.alias_prefix, "base_id", row)?,
+            creation_date: try_get(self.alias_prefix, "creation_date", row)?,
+            id: try_get(self.alias_prefix, "id", row)?,
+            name: try_get(self.alias_prefix, "name", row)?,
+            sync: self.sync_extractor.extract_from_row_opt(row)?,
+            user_id: try_get(self.alias_prefix, "user_id", row)?,
         })
     }
 }

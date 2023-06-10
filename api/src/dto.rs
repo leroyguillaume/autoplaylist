@@ -109,6 +109,7 @@ pub struct PlaylistResponse {
     pub creation_date: DateTime<Utc>,
     pub id: Uuid,
     pub name: String,
+    pub sync: Option<SyncResponse>,
 }
 
 #[derive(Serialize)]
@@ -214,6 +215,7 @@ impl From<Playlist> for PlaylistResponse {
             creation_date: playlist.creation_date,
             id: playlist.id,
             name: playlist.name,
+            sync: playlist.sync.map(|sync| sync.into()),
         }
     }
 }
