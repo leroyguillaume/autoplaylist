@@ -4,3 +4,11 @@ edition.workspace = true
 version.workspace = true
 
 [dependencies]
+async-trait = "0.1"
+autoplaylist-core = { path = "../core" }
+chrono = "0.4"
+opentelemetry = { version = "0.18" }
+regex = "1.8"
+tokio = { version = "1.28", features = ["full"] }
+tracing = "0.1"
+uuid = { version = "0.8", features = ["v4"] }

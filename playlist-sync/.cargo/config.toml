@@ -1,0 +1,5 @@
+[env]
+BROKER_URL = "amqp://localhost:5672"
+DB_HOST = "localhost"
+DB_PASSWORD = "autoplaylist"
+LOG_FILTER = "info,autoplaylist_core=trace,autoplaylist_playlist_sync=trace"

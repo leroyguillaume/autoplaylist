@@ -522,6 +522,16 @@ dependencies = [
 [[package]]
 name = "autoplaylist-playlist-sync"
 version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "autoplaylist-core",
+ "chrono",
+ "opentelemetry",
+ "regex",
+ "tokio",
+ "tracing",
+ "uuid 0.8.2",
+]
 
 [[package]]
 name = "base64"
