@@ -38,6 +38,18 @@ pub enum PlaylistFilter {
     Artist(PlaylistFilterOperator),
 }
 
+impl PlaylistFilter {
+    pub fn apply(&self, _track: &Track, artists: &[Artist]) -> bool {
+        match self {
+            Self::Artist(op) => match op {
+                PlaylistFilterOperator::Is(name) => artists
+                    .iter()
+                    .any(|artist| artist.name.eq_ignore_ascii_case(name)),
+            },
+        }
+    }
+}
+
 // PlaylistFilterOperator
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
