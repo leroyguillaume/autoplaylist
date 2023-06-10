@@ -1,0 +1,6 @@
+[package]
+name = "autoplaylist-playlist-sync"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
