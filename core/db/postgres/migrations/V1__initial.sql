@@ -104,5 +104,5 @@ CREATE TABLE playlist_track (
     playlist_id UUID NOT NULL REFERENCES playlist ON DELETE CASCADE,
     track_id UUID NOT NULL REFERENCES track ON DELETE CASCADE,
     last_sync_id UUID NOT NULL,
-    PRIMARY KEY (platform_id, track_id)
+    PRIMARY KEY (playlist_id, track_id)
 );
