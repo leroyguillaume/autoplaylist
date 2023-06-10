@@ -356,7 +356,11 @@ impl Synchronizer for SpotifySynchronizer {
         drop(user_repo);
         drop(repos);
         let mut stop_rx = self.stop_rx.clone();
-        let start_date = Utc::now();
+        let start_date = if sync.state == SyncState::Succeeded {
+            Utc::now()
+        } else {
+            sync.last_start_date
+        };
         info!("sync of base {} started", base.id);
         loop {
             select! {
@@ -367,7 +371,9 @@ impl Synchronizer for SpotifySynchronizer {
                     sync.last_offset = self.sync_page(base.id, page, &sync, db_client.as_ref()).await?;
                     if is_last_page {
                         let now = Utc::now();
+                        let duration = start_date - now;
                         sync = Sync {
+                            last_duration: Some(duration),
                             last_err_msg: None,
                             last_offset: 0,
                             last_success_date: Some(now),
@@ -375,14 +381,17 @@ impl Synchronizer for SpotifySynchronizer {
                             state: SyncState::Succeeded,
                             ..sync
                         };
-                        let duration = start_date - now;
-                        info!("sync of base {} finished with success (in {}s)", base.id, duration.num_seconds());
+                        info!("sync of base {} finished with success (in {} sec.)", base.id, duration.num_seconds());
                         break;
                     }
                 },
                 _ = stop_rx.changed() => {
                     warn!("sync of base {} aborted", base.id);
-                    sync.state = SyncState::Aborted;
+                    sync = Sync {
+                        last_start_date: start_date,
+                        state: SyncState::Aborted,
+                        ..sync
+                    };
                     break;
                 }
             }

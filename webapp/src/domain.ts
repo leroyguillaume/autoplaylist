@@ -56,6 +56,7 @@ export enum Role {
 }
 
 export interface Sync {
+  lastDuration: number | null;
   lastErrMsg: string | null;
   lastStartDate: string;
   lastSuccessDate: string | null;

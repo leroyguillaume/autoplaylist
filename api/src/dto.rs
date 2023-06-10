@@ -117,6 +117,7 @@ pub struct SyncResponse {
     pub last_err_msg: Option<String>,
     pub last_start_date: DateTime<Utc>,
     pub last_success_date: Option<DateTime<Utc>>,
+    pub last_duration: Option<i64>,
     pub state: SyncState,
 }
 
@@ -225,6 +226,7 @@ impl From<Sync> for SyncResponse {
             last_err_msg: sync.last_err_msg,
             last_start_date: sync.last_start_date,
             last_success_date: sync.last_success_date,
+            last_duration: sync.last_duration.map(|duration| duration.num_seconds()),
             state: sync.state,
         }
     }

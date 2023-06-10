@@ -44,6 +44,7 @@ CREATE TABLE base (
     last_sync_id UUID,
     last_sync_start_date TIMESTAMP WITH TIME ZONE DEFAULT NULL,
     last_sync_success_date TIMESTAMP WITH TIME ZONE DEFAULT NULL,
+    last_sync_duration BIGINT DEFAULT NULL,
     last_sync_err_msg TEXT DEFAULT NULL,
     last_sync_offset BIGINT NOT NULL DEFAULT 0,
     last_sync_total BIGINT NOT NULL DEFAULT 0,

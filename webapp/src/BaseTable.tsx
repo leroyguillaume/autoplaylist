@@ -18,17 +18,18 @@ export default function BaseTable(props: Props) {
     let lastSuccessDate = null;
     let lastDuration = null;
     let lastDurationUnit = null;
-    if (base.sync?.lastSuccessDate) {
-      lastSuccessDate = new Date(base.sync?.lastSuccessDate!!);
-      const lastStartDate = new Date(base.sync?.lastStartDate!!);
-      lastDuration = Math.round(
-        (lastSuccessDate.getTime() - lastStartDate.getTime()) / 1000
-      );
-      if (lastDuration >= 60) {
-        lastDuration = Math.round(lastDuration / 60);
-        lastDurationUnit = "min.";
-      } else {
-        lastDurationUnit = "sec.";
+    if (base.sync) {
+      if (base.sync.lastSuccessDate) {
+        lastSuccessDate = new Date(base.sync.lastSuccessDate);
+      }
+      if (base.sync.lastDuration) {
+        lastDuration = base.sync.lastDuration;
+        if (lastDuration >= 60) {
+          lastDuration = Math.round(lastDuration / 60);
+          lastDurationUnit = "min.";
+        } else {
+          lastDurationUnit = "sec.";
+        }
       }
     }
     return (

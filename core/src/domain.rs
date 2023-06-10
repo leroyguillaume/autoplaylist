@@ -1,6 +1,6 @@
 use std::fmt::{Display, Formatter, Result as FmtResult};
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use securefmt::Debug as SecureDebug;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -105,6 +105,7 @@ pub struct Playlist {
 
 #[derive(Clone, Debug)]
 pub struct Sync {
+    pub last_duration: Option<Duration>,
     pub last_err_msg: Option<String>,
     pub last_id: Uuid,
     pub last_offset: u32,

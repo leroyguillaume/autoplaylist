@@ -8,7 +8,7 @@ use std::{
 };
 
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use deadpool_postgres::{
     tokio_postgres::{Client as TokioPostgresClient, Error as TokioPosgresError, NoTls, Row},
     Config as DeadpoolConfig, CreatePoolError, Object, Pool as DeadpoolPool, PoolError,
@@ -243,12 +243,14 @@ struct SyncExtractor(&'static str);
 impl SyncExtractor {
     #[inline]
     fn extract_from_row(&self, state: SyncStateSql, row: &Row) -> Result<Sync> {
+        let last_duration_secs: Option<i64> = try_get(self.0, "last_sync_duration", row)?;
         Ok(Sync {
             last_err_msg: try_get(self.0, "last_sync_err_msg", row)?,
             last_id: try_get(self.0, "last_sync_id", row)?,
             last_offset: try_get_int::<i64, u32>(self.0, "last_sync_offset", row)?,
             last_start_date: try_get(self.0, "last_sync_start_date", row)?,
             last_success_date: try_get(self.0, "last_sync_success_date", row)?,
+            last_duration: last_duration_secs.map(Duration::seconds),
             last_total: try_get_int::<i64, u32>(self.0, "last_sync_total", row)?,
             state: state.into(),
         })
@@ -648,6 +650,7 @@ impl BaseRepository for PostgresBaseRepository<'_> {
                     &sync.last_id,
                     &sync.last_start_date,
                     &sync.last_success_date,
+                    &sync.last_duration.map(|duration| duration.num_seconds()),
                     &sync.last_err_msg,
                     &last_offset,
                     &last_total,
