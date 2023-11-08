@@ -8,6 +8,7 @@ on:
   pull_request:
     paths:
     - .github/workflows/quality.yml
+    - docker-compose/wiremock/mappings/**/*.json
     - .pre-commit-config.yaml
     - '**/*.lock'
     - '**/*.rs'
@@ -76,6 +77,10 @@ jobs:
           POSTGRES_USER: autoplaylist
         ports:
         - 5432:5432
+      wiremock:
+        image: wiremock/wiremock
+        ports:
+        - 8081:8080
     steps:
     - name: Checkout
       uses: actions/checkout@v3
@@ -109,6 +114,9 @@ jobs:
       with:
         args: --all-features
         command: build
+
+    - name: Configure WireMock
+      run: find docker-compose/wiremock -name '*.json' -exec curl -fd @{} http://localhost:8081/__admin/mappings \;
 
     - name: Test
       uses: actions-rs/cargo@v1

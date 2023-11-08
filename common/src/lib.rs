@@ -112,3 +112,5 @@ pub mod db;
 pub mod model;
 #[cfg(feature = "sigs")]
 pub mod sigs;
+#[cfg(feature = "spotify")]
+pub mod spotify;
