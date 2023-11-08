@@ -1,0 +1,3 @@
+INSERT INTO playlist_track
+VALUES ($1, $2)
+ON CONFLICT DO NOTHING;

@@ -1,0 +1,11 @@
+version: '3'
+
+services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: autoplaylist
+      POSTGRES_PASSWORD: autoplaylist
+      POSTGRES_USER: autoplaylist
+    ports:
+    - 5432:5432
