@@ -1,0 +1,18 @@
+{
+  "request": {
+    "formParameters": {
+      "refresh_token": {
+        "equalTo": "refresh"
+      }
+    },
+    "method": "POST",
+    "url": "/spotify/auth/api/token"
+  },
+  "response": {
+    "jsonBody": {
+      "access_token": "access_2",
+      "expires_in": 3600
+    },
+    "status": 200
+  }
+}

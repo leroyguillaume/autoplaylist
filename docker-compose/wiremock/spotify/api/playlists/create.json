@@ -1,0 +1,60 @@
+{
+  "request": {
+    "bodyPatterns": [
+      {
+        "equalToJson": {
+          "name": "New Playlist"
+        }
+      }
+    ],
+    "headers": {
+      "Authorization": {
+        "equalTo": "Bearer access_2"
+      }
+    },
+    "method": "POST",
+    "urlPath": "/spotify/api/users/216m62jtruqgd6iaqx224jiqi/playlists"
+  },
+  "response": {
+    "jsonBody": {
+      "collaborative": false,
+      "description": "New playlist description",
+      "external_urls": {
+        "spotify": "https://open.spotify.com/playlist/2jxT1I5apKDVKwz6sYuI3A"
+      },
+      "followers": {
+        "href": null,
+        "total": 0
+      },
+      "href": "https://api.spotify.com/v1/playlists/2jxT1I5apKDVKwz6sYuI3A",
+      "id": "2jxT1I5apKDVKwz6sYuI3A",
+      "images": [],
+      "name": "New Playlist",
+      "owner": {
+        "display_name": "Francis",
+        "external_urls": {
+          "spotify": "https://open.spotify.com/user/216m62jtruqgd6iaqx224jiqi"
+        },
+        "href": "https://api.spotify.com/v1/users/216m62jtruqgd6iaqx224jiqi",
+        "id": "216m62jtruqgd6iaqx224jiqi",
+        "type": "user",
+        "uri": "spotify:user:216m62jtruqgd6iaqx224jiqi"
+      },
+      "primary_color": null,
+      "public": false,
+      "snapshot_id": "MSxiZmIzNzRjZmEwZWE1ZTVlZDJmYTk1OTNiZmY2Y2FhNzRhZjE2OTJk",
+      "tracks": {
+        "href": "https://api.spotify.com/v1/playlists/2jxT1I5apKDVKwz6sYuI3A/tracks",
+        "items": [],
+        "limit": 100,
+        "next": null,
+        "offset": 0,
+        "previous": null,
+        "total": 0
+      },
+      "type": "playlist",
+      "uri": "spotify:playlist:2jxT1I5apKDVKwz6sYuI3A"
+    },
+    "status": 201
+  }
+}

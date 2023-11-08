@@ -1,0 +1,27 @@
+{
+  "request": {
+    "bodyPatterns": [
+      {
+        "equalToJson": {
+          "uris": [
+            "spotify:track:5OKWAL4qNRUz28CBWEU411",
+            "spotify:track:09ik0oFw7qwq88qY0AvsOy"
+          ]
+        }
+      }
+    ],
+    "headers": {
+      "Authorization": {
+        "equalTo": "Bearer access_2"
+      }
+    },
+    "method": "POST",
+    "urlPath": "/spotify/api/playlists/7sTVJNSq4b3FmlTl79fAae/tracks"
+  },
+  "response": {
+    "jsonBody": {
+      "snapshot_id": "OCxiODk2NzE3NDk4NzBmOWU5OGU4ZDEyYjNjMGIyNWIwZGY4MjEwMWI0"
+    },
+    "status": 201
+  }
+}
