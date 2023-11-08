@@ -443,6 +443,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "autoplaylist-sync"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "autoplaylist-common",
+ "chrono",
+ "mockable",
+ "mockall",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "axum"
 version = "0.6.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
