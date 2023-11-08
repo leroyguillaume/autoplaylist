@@ -106,5 +106,7 @@ pub fn test_env_var(key: &str, default: &'static str) -> String {
 
 // Mods
 
+#[cfg(feature = "model")]
+pub mod model;
 #[cfg(feature = "sigs")]
 pub mod sigs;

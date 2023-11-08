@@ -1,11 +1,19 @@
 [dependencies]
-mockable = "2.2"
+chrono = {version = "0.4", features = ["serde"], optional = true}
+enum-display = {version = "0.1", optional = true}
+mockable = "2.3"
+serde = {version = "1.0", features = ["derive"], optional = true}
 tokio = {version = "1.33", features = ["full"], optional = true}
 tracing = "0.1"
 tracing-bunyan-formatter = "0.3"
 tracing-subscriber = {version = "0.3", features = ["env-filter", "fmt"]}
+uuid = {version = "1.4", features = ["serde"], optional = true}
+
+[dev-dependencies]
+uuid = {version = "1.4", features = ["serde", "v4"]}
 
 [features]
+model = ["dep:chrono", "dep:enum-display", "dep:serde", "dep:uuid"]
 sigs = ["dep:tokio"]
 test = []
 
