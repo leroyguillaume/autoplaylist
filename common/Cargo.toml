@@ -1,0 +1,4 @@
+[package]
+name = "autoplaylist-common"
+edition.workspace = true
+version.workspace = true

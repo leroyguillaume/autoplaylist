@@ -1,0 +1,42 @@
+name: Cache
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}
+  cancel-in-progress: true
+
+on:
+  pull_request:
+    paths:
+    - .github/workflows/cache.yml
+  push:
+    branches: [main]
+
+jobs:
+  cache:
+    name: Cache
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+
+    - name: Set up Rust
+      id: rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+
+    - name: Restore cache
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/git/db/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          target/
+        key: build-${{ runner.os }}-${{ steps.rust.outputs.rustc_hash }}-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Build
+      uses: actions-rs/cargo@v1
+      with:
+        command: build
