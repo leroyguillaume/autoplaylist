@@ -15,6 +15,15 @@ jobs:
   cache:
     name: Cache
     runs-on: ubuntu-latest
+    services:
+      db:
+        image: postgres:15
+        env:
+          POSTGRES_DB: autoplaylist
+          POSTGRES_PASSWORD: autoplaylist
+          POSTGRES_USER: autoplaylist
+        ports:
+        - 5432:5432
     steps:
     - name: Checkout
       uses: actions/checkout@v3
@@ -36,7 +45,15 @@ jobs:
           target/
         key: build-${{ runner.os }}-${{ steps.rust.outputs.rustc_hash }}-${{ hashFiles('**/Cargo.lock') }}
 
+    - name: Install crates
+      continue-on-error: true
+      run: cargo install sqlx-cli
+
+    - name: Run migrations
+      run: sqlx migrate run -D postgres://autoplaylist:autoplaylist@localhost:5432/autoplaylist --source common/resources/main/db/pg/migrations
+
     - name: Build
       uses: actions-rs/cargo@v1
       with:
+        args: --all-features
         command: build
