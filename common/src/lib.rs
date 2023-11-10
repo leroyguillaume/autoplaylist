@@ -106,6 +106,8 @@ pub fn test_env_var(key: &str, default: &'static str) -> String {
 
 // Mods
 
+#[cfg(feature = "broker")]
+pub mod broker;
 #[cfg(feature = "db")]
 pub mod db;
 #[cfg(feature = "model")]
