@@ -1,6 +1,11 @@
 version: '3'
 
 services:
+  broker:
+    image: rabbitmq:3
+    ports:
+    - 5672:5672
+
   db:
     image: postgres:15
     environment:
