@@ -2,5 +2,6 @@
 DATABASE_PASSWORD = "autoplaylist"
 DATABASE_SECRET = "changeit"
 DATABASE_URL = "postgres://autoplaylist:autoplaylist@localhost:5432/autoplaylist"
-LOG_FILTER = "autoplaylist_common=trace,info"
+JWT_SECRET = "changeit"
+LOG_FILTER = "autoplaylist_api=trace,autoplaylist_common=trace,info"
 LOG_JSON = "false"
