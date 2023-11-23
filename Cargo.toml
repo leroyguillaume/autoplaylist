@@ -1,5 +1,5 @@
 [workspace]
-members = ["common"]
+members = ["api", "common"]
 resolver = "2"
 package.edition = "2021"
 package.version = "0.1.0"

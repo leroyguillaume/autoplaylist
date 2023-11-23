@@ -1,0 +1,10 @@
+{
+  "name": "Test",
+  "platform": "spotify",
+  "predicate": {
+    "yearEquals": 1993
+  },
+  "src": {
+    "spotify": "savedTracks"
+  }
+}
