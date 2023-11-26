@@ -81,3 +81,8 @@ impl<'a, W: Write, F: Fn() -> W + Send + Sync + 'static> TracingConfig<'a, W, F>
         }
     }
 }
+
+// Mods
+
+#[cfg(feature = "sigs")]
+pub mod sigs;
