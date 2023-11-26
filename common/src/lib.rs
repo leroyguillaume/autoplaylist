@@ -82,6 +82,28 @@ impl<'a, W: Write, F: Fn() -> W + Send + Sync + 'static> TracingConfig<'a, W, F>
     }
 }
 
+// parse_test_env_var
+
+#[cfg(any(test, feature = "test"))]
+pub fn parse_test_env_var<T: std::str::FromStr<Err = E>, E: std::error::Error, D: Fn() -> T>(
+    key: &str,
+    default: D,
+) -> T {
+    let key = format!("TEST_{key}");
+    std::env::var(key)
+        .ok()
+        .map(|val| T::from_str(&val).expect("failed to parse environment variable"))
+        .unwrap_or_else(default)
+}
+
+// test_env_var
+
+#[cfg(any(test, feature = "test"))]
+pub fn test_env_var(key: &str, default: &'static str) -> String {
+    let key = format!("TEST_{key}");
+    std::env::var(key).ok().unwrap_or_else(|| default.into())
+}
+
 // Mods
 
 #[cfg(feature = "sigs")]
