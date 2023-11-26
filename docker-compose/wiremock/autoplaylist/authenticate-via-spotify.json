@@ -1,0 +1,28 @@
+{
+  "request": {
+    "method": "GET",
+    "queryParameters": {
+      "code": {
+        "hasExactly": [
+          {
+            "equalTo": "code"
+          }
+        ]
+      },
+      "redirect_uri": {
+        "hasExactly": [
+          {
+            "equalTo": "http://localhost:8080/"
+          }
+        ]
+      }
+    },
+    "urlPath": "/autoplaylist/auth/spotify/token"
+  },
+  "response": {
+    "jsonBody": {
+      "jwt": "jwt"
+    },
+    "status": 200
+  }
+}

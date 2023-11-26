@@ -1,0 +1,21 @@
+{
+  "request": {
+    "method": "GET",
+    "queryParameters": {
+      "redirect_uri": {
+        "hasExactly": [
+          {
+            "equalTo": "http://localhost:8080/"
+          }
+        ]
+      }
+    },
+    "urlPath": "/autoplaylist/auth/spotify"
+  },
+  "response": {
+    "headers": {
+      "Location": "http://localhost:8081/spotify/auth"
+    },
+    "status": 301
+  }
+}
