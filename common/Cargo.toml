@@ -1,3 +1,9 @@
+[dependencies]
+mockable = "2.2"
+tracing = "0.1"
+tracing-bunyan-formatter = "0.3"
+tracing-subscriber = {version = "0.3", features = ["env-filter", "fmt"]}
+
 [package]
 name = "autoplaylist-common"
 edition.workspace = true
