@@ -1,0 +1,49 @@
+{
+  "request": {
+    "bodyPatterns": [
+      {
+        "equalToJson": {
+          "name": "name",
+          "platform": "spotify",
+          "predicate": {
+            "yearEquals": 1993
+          },
+          "src": {
+            "spotify": "savedTracks"
+          }
+        }
+      }
+    ],
+    "headers": {
+      "Authorization": {
+        "equalTo": "Bearer jwt"
+      }
+    },
+    "method": "POST",
+    "urlPath": "/autoplaylist/playlist"
+  },
+  "response": {
+    "jsonBody": {
+      "creation": "2023-01-02T00:00:10Z",
+      "id": "f28c11c3-bfeb-4583-ba16-46797f662b9a",
+      "name": "name",
+      "predicate": {
+        "yearEquals": 1993
+      },
+      "src": {
+        "creation": "2023-01-02T00:00:00Z",
+        "id": "2f3f1315-3bb7-4b31-89c5-8bdffdb5e8de",
+        "kind": {
+          "spotify": "savedTracks"
+        },
+        "owner": "730ea215-8aa4-4463-a137-9c4c71d50ed6",
+        "sync": "pending"
+      },
+      "sync": "pending",
+      "tgt": {
+        "spotify": "id"
+      }
+    },
+    "status": 201
+  }
+}
