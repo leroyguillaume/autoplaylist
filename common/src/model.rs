@@ -96,6 +96,18 @@ pub struct Page<ITEM> {
     pub total: u32,
 }
 
+impl<ITEM> Page<ITEM> {
+    pub fn map<T, F: Fn(ITEM) -> T>(self, f: F) -> Page<T> {
+        Page {
+            first: self.first,
+            items: self.items.into_iter().map(f).collect(),
+            last: self.last,
+            req: self.req,
+            total: self.total,
+        }
+    }
+}
+
 // PageRequest
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -108,6 +120,16 @@ pub struct PageRequest {
 impl PageRequest {
     pub fn new(limit: u32, offset: u32) -> Self {
         Self { limit, offset }
+    }
+}
+
+#[cfg(feature = "api")]
+impl<const LIMIT: u32> From<crate::api::PageRequestQueryParams<LIMIT>> for PageRequest {
+    fn from(params: crate::api::PageRequestQueryParams<LIMIT>) -> Self {
+        Self {
+            limit: params.limit.unwrap_or(LIMIT),
+            offset: params.offset.unwrap_or(0),
+        }
     }
 }
 
@@ -464,6 +486,70 @@ mod test {
     }
 
     // Mods
+
+    mod page {
+        use super::*;
+
+        // Mods
+
+        mod map {
+            use super::*;
+
+            // Tests
+
+            #[test]
+            fn page() {
+                let page = Page {
+                    first: false,
+                    items: vec![1, 2, 3],
+                    last: false,
+                    req: PageRequest::new(1, 0),
+                    total: 3,
+                };
+                let expected = Page {
+                    first: false,
+                    items: vec!["1".into(), "2".into(), "3".into()],
+                    last: false,
+                    req: PageRequest::new(1, 0),
+                    total: 3,
+                };
+                let page = page.map(|i| i.to_string());
+                assert_eq!(page, expected);
+            }
+        }
+    }
+
+    mod page_request {
+        use super::*;
+
+        #[cfg(feature = "api")]
+        mod from_page_request_query_params {
+            use crate::api::PageRequestQueryParams;
+
+            use super::*;
+
+            // Tests
+
+            #[test]
+            fn default() {
+                let params = PageRequestQueryParams::<1>::default();
+                let expected = PageRequest::new(1, 0);
+                let req = PageRequest::from(params);
+                assert_eq!(req, expected);
+            }
+
+            #[test]
+            fn not_default() {
+                let params = PageRequestQueryParams::<1> {
+                    limit: Some(3),
+                    offset: Some(4),
+                };
+                let expected = PageRequest::new(3, 4);
+                let req = PageRequest::from(params);
+                assert_eq!(req, expected);
+            }
+        }
+    }
 
     mod playlist {
         use super::*;

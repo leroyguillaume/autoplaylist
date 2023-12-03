@@ -133,7 +133,7 @@ BEGIN
             '2023-04-05T00:00:10Z',
             'playlist_4',
             '{"yearEquals":1999}',
-            src_2,
+            src_4,
             '{"spotify":"playlist_4"}'
         );
 

@@ -233,6 +233,15 @@ macro_rules! client_impl {
                 Ok(user)
             }
 
+            async fn user_playlists(
+                &mut self,
+                id: Uuid,
+                req: PageRequest,
+            ) -> DatabaseResult<Page<Playlist>> {
+                let page = user_playlists(id, req, &self.key, &mut self.conn).await?;
+                Ok(page)
+            }
+
             async fn users(&mut self, req: PageRequest) -> DatabaseResult<Page<User>> {
                 let page = users(req, &self.key, &mut self.conn).await?;
                 Ok(page)
@@ -1698,6 +1707,59 @@ async fn user_by_id<'a, A: Acquire<'a, Database = Postgres, Connection = &'a mut
     .await
 }
 
+// user_playlists
+
+#[inline]
+async fn user_playlists<
+    'a,
+    A: Acquire<'a, Database = Postgres, Connection = &'a mut PgConnection>,
+>(
+    id: Uuid,
+    req: PageRequest,
+    key: &MagicCrypt256,
+    conn: A,
+) -> PostgresResult<Page<Playlist>> {
+    let span = debug_span!(
+        "user_playlists",
+        db.page.limit = req.limit,
+        db.page.offset = req.offset,
+        db.usr.id = %id,
+    );
+    async {
+        let limit: i64 = req.limit.into();
+        let offset: i64 = req.offset.into();
+        trace!("acquiring database connection");
+        let conn = conn.acquire().await?;
+        debug!("counting user playlists");
+        let record = query_file!("resources/main/db/pg/queries/count-user-playlists.sql", id,)
+            .fetch_one(&mut *conn)
+            .await?;
+        let total = record.count.unwrap_or(0).try_into()?;
+        debug!("fetching user playlists");
+        let records = query_file_as!(
+            PlaylistRecord,
+            "resources/main/db/pg/queries/user-playlists.sql",
+            id,
+            limit,
+            offset,
+        )
+        .fetch_all(&mut *conn)
+        .await?;
+        Ok(Page {
+            first: req.offset == 0,
+            items: records
+                .into_iter()
+                .map(|record| record.into_entity(key))
+                .collect::<PostgresResult<Vec<_>>>()?,
+            last: (req.offset + req.limit) >= total,
+            req,
+            total,
+        })
+    }
+    .instrument(span)
+    .await
+}
+
 // users
 
 #[inline]
@@ -1933,7 +1995,7 @@ mod test {
                         id: Uuid::from_u128(0x36f24355f5064b40955ef42a1c49c138),
                         name: "playlist_4".into(),
                         predicate: Predicate::YearEquals(1999),
-                        src: src_2.clone(),
+                        src: src_4.clone(),
                         sync: Synchronization::Pending,
                         tgt: Target::Spotify("playlist_4".into()),
                     },
@@ -3101,6 +3163,54 @@ mod test {
                 let data = Data::new();
                 let usr = &data.usrs[0];
                 run(usr.id, Some(usr), db).await;
+            }
+        }
+
+        mod user_playlists {
+            use super::*;
+
+            // run
+
+            async fn run(id: Uuid, expected: Page<Playlist>, db: PgPool) {
+                let db = init(db).await;
+                let mut conn = db.acquire().await.expect("failed to acquire connection");
+                let page = conn
+                    .user_playlists(id, expected.req)
+                    .await
+                    .expect("failed to fetch playlists");
+                assert_eq!(page, expected);
+            }
+
+            // Tests
+
+            #[sqlx::test]
+            async fn first_and_last(db: PgPool) {
+                let data = Data::new();
+                let expected = Page {
+                    first: true,
+                    items: vec![
+                        data.playlists[0].clone(),
+                        data.playlists[1].clone(),
+                        data.playlists[2].clone(),
+                    ],
+                    last: true,
+                    req: PageRequest::new(100, 0),
+                    total: 3,
+                };
+                run(data.usrs[0].id, expected, db).await;
+            }
+
+            #[sqlx::test]
+            async fn middle(db: PgPool) {
+                let data = Data::new();
+                let expected = Page {
+                    first: false,
+                    items: vec![data.playlists[1].clone()],
+                    last: false,
+                    req: PageRequest::new(1, 1),
+                    total: 3,
+                };
+                run(data.usrs[0].id, expected, db).await;
             }
         }
 

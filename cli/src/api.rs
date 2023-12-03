@@ -1,8 +1,11 @@
 use async_trait::async_trait;
-use autoplaylist_common::api::{
-    AuthenticateViaSpotifyQueryParams, CreatePlaylistRequest, JwtResponse, PlaylistResponse,
-    RedirectUriQueryParam, PATH_AUTH_SPOTIFY, PATH_AUTH_SPOTIFY_TOKEN, PATH_PLAYLIST, PATH_SRC,
-    PATH_SYNC,
+use autoplaylist_common::{
+    api::{
+        AuthenticateViaSpotifyQueryParams, CreatePlaylistRequest, JwtResponse,
+        PageRequestQueryParams, PlaylistResponse, RedirectUriQueryParam, PATH_ADMIN,
+        PATH_AUTH_SPOTIFY, PATH_AUTH_SPOTIFY_TOKEN, PATH_PLAYLIST, PATH_SRC, PATH_SYNC,
+    },
+    model::Page,
 };
 use reqwest::{
     header::{self, HeaderName, ToStrError},
@@ -49,11 +52,23 @@ pub trait ApiClient: Send + Sync {
         params: &AuthenticateViaSpotifyQueryParams,
     ) -> ApiResult<JwtResponse>;
 
+    async fn authenticated_user_playlists(
+        &self,
+        params: PageRequestQueryParams<25>,
+        token: &str,
+    ) -> ApiResult<Page<PlaylistResponse>>;
+
     async fn create_playlist(
         &self,
         req: &CreatePlaylistRequest,
         token: &str,
     ) -> ApiResult<PlaylistResponse>;
+
+    async fn playlists(
+        &self,
+        params: PageRequestQueryParams<25>,
+        token: &str,
+    ) -> ApiResult<Page<PlaylistResponse>>;
 
     async fn spotify_authorize_url(&self, param: &RedirectUriQueryParam) -> ApiResult<String>;
 
@@ -97,6 +112,33 @@ impl ApiClient for DefaultApiClient {
         .await
     }
 
+    async fn authenticated_user_playlists(
+        &self,
+        params: PageRequestQueryParams<25>,
+        token: &str,
+    ) -> ApiResult<Page<PlaylistResponse>> {
+        let span = debug_span!("authenticated_user_playlists", params.limit, params.offset);
+        async {
+            let url = format!("{}{PATH_PLAYLIST}", self.base_url);
+            debug!("doing GET on {url}");
+            let resp = Client::new()
+                .get(&url)
+                .bearer_auth(token)
+                .query(&params)
+                .send()
+                .await?;
+            let status = resp.status();
+            if status.is_success() {
+                let resp: Page<PlaylistResponse> = resp.json().await?;
+                Ok(resp)
+            } else {
+                Err(ApiError::Api(status))
+            }
+        }
+        .instrument(span)
+        .await
+    }
+
     async fn create_playlist(
         &self,
         req: &CreatePlaylistRequest,
@@ -115,6 +157,33 @@ impl ApiClient for DefaultApiClient {
             let status = resp.status();
             if status.is_success() {
                 let resp: PlaylistResponse = resp.json().await?;
+                Ok(resp)
+            } else {
+                Err(ApiError::Api(status))
+            }
+        }
+        .instrument(span)
+        .await
+    }
+
+    async fn playlists(
+        &self,
+        params: PageRequestQueryParams<25>,
+        token: &str,
+    ) -> ApiResult<Page<PlaylistResponse>> {
+        let span = debug_span!("playlists", params.limit, params.offset);
+        async {
+            let url = format!("{}{PATH_ADMIN}{PATH_PLAYLIST}", self.base_url);
+            debug!("doing GET on {url}");
+            let resp = Client::new()
+                .get(&url)
+                .bearer_auth(token)
+                .query(&params)
+                .send()
+                .await?;
+            let status = resp.status();
+            if status.is_success() {
+                let resp: Page<PlaylistResponse> = resp.json().await?;
                 Ok(resp)
             } else {
                 Err(ApiError::Api(status))
@@ -191,7 +260,7 @@ mod test {
     use autoplaylist_common::{
         api::Platform,
         api::SourceResponse,
-        model::{Predicate, SourceKind, SpotifyResourceKind, Synchronization, Target},
+        model::{PageRequest, Predicate, SourceKind, SpotifyResourceKind, Synchronization, Target},
         test_env_var, TracingConfig,
     };
     use chrono::DateTime;
@@ -238,6 +307,30 @@ mod test {
             }
         }
 
+        mod authenticated_user_playlists {
+            use super::*;
+
+            // Tests
+
+            #[tokio::test]
+            async fn page() {
+                let expected = Page {
+                    first: true,
+                    items: vec![],
+                    last: true,
+                    req: PageRequest::new(10, 0),
+                    total: 0,
+                };
+                let params = PageRequestQueryParams::from(expected.req);
+                let client = init();
+                let resp = client
+                    .authenticated_user_playlists(params, "jwt")
+                    .await
+                    .expect("failed to get playlists");
+                assert_eq!(resp, expected);
+            }
+        }
+
         mod create_playlist {
             use super::*;
 
@@ -275,6 +368,30 @@ mod test {
                     .create_playlist(&req, "jwt")
                     .await
                     .expect("failed to create playlist");
+                assert_eq!(resp, expected);
+            }
+        }
+
+        mod playlists {
+            use super::*;
+
+            // Tests
+
+            #[tokio::test]
+            async fn page() {
+                let expected = Page {
+                    first: true,
+                    items: vec![],
+                    last: true,
+                    req: PageRequest::new(10, 0),
+                    total: 0,
+                };
+                let params = PageRequestQueryParams::from(expected.req);
+                let client = init();
+                let resp = client
+                    .playlists(params, "jwt")
+                    .await
+                    .expect("failed to get playlists");
                 assert_eq!(resp, expected);
             }
         }
