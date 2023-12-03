@@ -242,6 +242,15 @@ macro_rules! client_impl {
                 Ok(page)
             }
 
+            async fn user_sources(
+                &mut self,
+                id: Uuid,
+                req: PageRequest,
+            ) -> DatabaseResult<Page<Source>> {
+                let page = user_sources(id, req, &self.key, &mut self.conn).await?;
+                Ok(page)
+            }
+
             async fn users(&mut self, req: PageRequest) -> DatabaseResult<Page<User>> {
                 let page = users(req, &self.key, &mut self.conn).await?;
                 Ok(page)
@@ -1760,6 +1769,59 @@ async fn user_playlists<
     .await
 }
 
+// user_sources
+
+#[inline]
+async fn user_sources<
+    'a,
+    A: Acquire<'a, Database = Postgres, Connection = &'a mut PgConnection>,
+>(
+    id: Uuid,
+    req: PageRequest,
+    key: &MagicCrypt256,
+    conn: A,
+) -> PostgresResult<Page<Source>> {
+    let span = debug_span!(
+        "user_sources",
+        params.limit = req.limit,
+        params.offset = req.offset,
+        usr.id = %id,
+    );
+    async {
+        let limit: i64 = req.limit.into();
+        let offset: i64 = req.offset.into();
+        trace!("acquiring database connection");
+        let conn = conn.acquire().await?;
+        debug!("counting user playlists");
+        let record = query_file!("resources/main/db/pg/queries/count-user-sources.sql", id,)
+            .fetch_one(&mut *conn)
+            .await?;
+        let total = record.count.unwrap_or(0).try_into()?;
+        debug!("fetching user sources");
+        let records = query_file_as!(
+            SourceRecord,
+            "resources/main/db/pg/queries/user-sources.sql",
+            id,
+            limit,
+            offset,
+        )
+        .fetch_all(&mut *conn)
+        .await?;
+        Ok(Page {
+            first: req.offset == 0,
+            items: records
+                .into_iter()
+                .map(|record| record.into_entity(key))
+                .collect::<PostgresResult<Vec<_>>>()?,
+            last: (req.offset + req.limit) >= total,
+            req,
+            total,
+        })
+    }
+    .instrument(span)
+    .await
+}
+
 // users
 
 #[inline]
@@ -3206,6 +3268,54 @@ mod test {
                 let expected = Page {
                     first: false,
                     items: vec![data.playlists[1].clone()],
+                    last: false,
+                    req: PageRequest::new(1, 1),
+                    total: 3,
+                };
+                run(data.usrs[0].id, expected, db).await;
+            }
+        }
+
+        mod user_sources {
+            use super::*;
+
+            // run
+
+            async fn run(id: Uuid, expected: Page<Source>, db: PgPool) {
+                let db = init(db).await;
+                let mut conn = db.acquire().await.expect("failed to acquire connection");
+                let page = conn
+                    .user_sources(id, expected.req)
+                    .await
+                    .expect("failed to fetch sources");
+                assert_eq!(page, expected);
+            }
+
+            // Tests
+
+            #[sqlx::test]
+            async fn first_and_last(db: PgPool) {
+                let data = Data::new();
+                let expected = Page {
+                    first: true,
+                    items: vec![
+                        data.srcs[0].clone(),
+                        data.srcs[1].clone(),
+                        data.srcs[2].clone(),
+                    ],
+                    last: true,
+                    req: PageRequest::new(100, 0),
+                    total: 3,
+                };
+                run(data.usrs[0].id, expected, db).await;
+            }
+
+            #[sqlx::test]
+            async fn middle(db: PgPool) {
+                let data = Data::new();
+                let expected = Page {
+                    first: false,
+                    items: vec![data.srcs[1].clone()],
                     last: false,
                     req: PageRequest::new(1, 1),
                     total: 3,

@@ -213,6 +213,14 @@ macro_rules! mock_client_impl {
                 self.$attr.user_playlists(id, req).await
             }
 
+            async fn user_sources(
+                &mut self,
+                id: Uuid,
+                req: PageRequest,
+            ) -> DatabaseResult<Page<Source>> {
+                self.$attr.user_sources(id, req).await
+            }
+
             async fn users(&mut self, req: PageRequest) -> DatabaseResult<Page<User>> {
                 self.$attr.users(req).await
             }
@@ -417,6 +425,8 @@ pub trait DatabaseClient: Send + Sync {
         id: Uuid,
         req: PageRequest,
     ) -> DatabaseResult<Page<Playlist>>;
+
+    async fn user_sources(&mut self, id: Uuid, req: PageRequest) -> DatabaseResult<Page<Source>>;
 
     async fn users(&mut self, req: PageRequest) -> DatabaseResult<Page<User>>;
 }

@@ -2,8 +2,8 @@ use async_trait::async_trait;
 use autoplaylist_common::{
     api::{
         AuthenticateViaSpotifyQueryParams, CreatePlaylistRequest, JwtResponse,
-        PageRequestQueryParams, PlaylistResponse, RedirectUriQueryParam, PATH_ADMIN,
-        PATH_AUTH_SPOTIFY, PATH_AUTH_SPOTIFY_TOKEN, PATH_PLAYLIST, PATH_SRC, PATH_SYNC,
+        PageRequestQueryParams, PlaylistResponse, RedirectUriQueryParam, SourceResponse,
+        PATH_ADMIN, PATH_AUTH_SPOTIFY, PATH_AUTH_SPOTIFY_TOKEN, PATH_PLAYLIST, PATH_SRC, PATH_SYNC,
     },
     model::Page,
 };
@@ -58,6 +58,12 @@ pub trait ApiClient: Send + Sync {
         token: &str,
     ) -> ApiResult<Page<PlaylistResponse>>;
 
+    async fn authenticated_user_sources(
+        &self,
+        params: PageRequestQueryParams<25>,
+        token: &str,
+    ) -> ApiResult<Page<SourceResponse>>;
+
     async fn create_playlist(
         &self,
         req: &CreatePlaylistRequest,
@@ -69,6 +75,12 @@ pub trait ApiClient: Send + Sync {
         params: PageRequestQueryParams<25>,
         token: &str,
     ) -> ApiResult<Page<PlaylistResponse>>;
+
+    async fn sources(
+        &self,
+        params: PageRequestQueryParams<25>,
+        token: &str,
+    ) -> ApiResult<Page<SourceResponse>>;
 
     async fn spotify_authorize_url(&self, param: &RedirectUriQueryParam) -> ApiResult<String>;
 
@@ -139,6 +151,33 @@ impl ApiClient for DefaultApiClient {
         .await
     }
 
+    async fn authenticated_user_sources(
+        &self,
+        params: PageRequestQueryParams<25>,
+        token: &str,
+    ) -> ApiResult<Page<SourceResponse>> {
+        let span = debug_span!("authenticated_user_sources", params.limit, params.offset);
+        async {
+            let url = format!("{}{PATH_PLAYLIST}", self.base_url);
+            debug!(url, "doing GET");
+            let resp = Client::new()
+                .get(&url)
+                .bearer_auth(token)
+                .query(&params)
+                .send()
+                .await?;
+            let status = resp.status();
+            if status.is_success() {
+                let resp: Page<SourceResponse> = resp.json().await?;
+                Ok(resp)
+            } else {
+                Err(ApiError::Api(status))
+            }
+        }
+        .instrument(span)
+        .await
+    }
+
     async fn create_playlist(
         &self,
         req: &CreatePlaylistRequest,
@@ -188,6 +227,33 @@ impl ApiClient for DefaultApiClient {
             let status = resp.status();
             if status.is_success() {
                 let resp: Page<PlaylistResponse> = resp.json().await?;
+                Ok(resp)
+            } else {
+                Err(ApiError::Api(status))
+            }
+        }
+        .instrument(span)
+        .await
+    }
+
+    async fn sources(
+        &self,
+        params: PageRequestQueryParams<25>,
+        token: &str,
+    ) -> ApiResult<Page<SourceResponse>> {
+        let span = debug_span!("sources", params.limit, params.offset);
+        async {
+            let url = format!("{}{PATH_ADMIN}{PATH_SRC}", self.base_url);
+            debug!(url, "doing GET");
+            let resp = Client::new()
+                .get(&url)
+                .bearer_auth(token)
+                .query(&params)
+                .send()
+                .await?;
+            let status = resp.status();
+            if status.is_success() {
+                let resp: Page<SourceResponse> = resp.json().await?;
                 Ok(resp)
             } else {
                 Err(ApiError::Api(status))
@@ -335,6 +401,30 @@ mod test {
             }
         }
 
+        mod authenticated_user_sources {
+            use super::*;
+
+            // Tests
+
+            #[tokio::test]
+            async fn page() {
+                let expected = Page {
+                    first: true,
+                    items: vec![],
+                    last: true,
+                    req: PageRequest::new(10, 0),
+                    total: 0,
+                };
+                let params = PageRequestQueryParams::from(expected.req);
+                let client = init();
+                let resp = client
+                    .authenticated_user_sources(params, "jwt")
+                    .await
+                    .expect("failed to get sources");
+                assert_eq!(resp, expected);
+            }
+        }
+
         mod create_playlist {
             use super::*;
 
@@ -396,6 +486,30 @@ mod test {
                     .playlists(params, "jwt")
                     .await
                     .expect("failed to get playlists");
+                assert_eq!(resp, expected);
+            }
+        }
+
+        mod sources {
+            use super::*;
+
+            // Tests
+
+            #[tokio::test]
+            async fn page() {
+                let expected = Page {
+                    first: true,
+                    items: vec![],
+                    last: true,
+                    req: PageRequest::new(10, 0),
+                    total: 0,
+                };
+                let params = PageRequestQueryParams::from(expected.req);
+                let client = init();
+                let resp = client
+                    .sources(params, "jwt")
+                    .await
+                    .expect("failed to get sources");
                 assert_eq!(resp, expected);
             }
         }
