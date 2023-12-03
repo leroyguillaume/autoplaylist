@@ -98,7 +98,7 @@ impl ApiClient for DefaultApiClient {
         let span = debug_span!("authenticate_via_spotify", params.code, params.redirect_uri);
         async {
             let url = format!("{}{PATH_AUTH_SPOTIFY_TOKEN}", self.base_url);
-            debug!("doing GET on {url}");
+            debug!(url, "doing GET");
             let resp = Client::new().get(&url).query(params).send().await?;
             let status = resp.status();
             if status.is_success() {
@@ -120,7 +120,7 @@ impl ApiClient for DefaultApiClient {
         let span = debug_span!("authenticated_user_playlists", params.limit, params.offset);
         async {
             let url = format!("{}{PATH_PLAYLIST}", self.base_url);
-            debug!("doing GET on {url}");
+            debug!(url, "doing GET");
             let resp = Client::new()
                 .get(&url)
                 .bearer_auth(token)
@@ -144,10 +144,14 @@ impl ApiClient for DefaultApiClient {
         req: &CreatePlaylistRequest,
         token: &str,
     ) -> ApiResult<PlaylistResponse> {
-        let span = debug_span!("create_playlist", req.name, %req.platform);
+        let span = debug_span!(
+            "create_playlist",
+            playlist.name = req.name,
+            playlist.platform = %req.platform
+        );
         async {
             let url = format!("{}{PATH_PLAYLIST}", self.base_url);
-            debug!("doing POST on {url}");
+            debug!(url, "doing POST");
             let resp = Client::new()
                 .post(&url)
                 .bearer_auth(token)
@@ -174,7 +178,7 @@ impl ApiClient for DefaultApiClient {
         let span = debug_span!("playlists", params.limit, params.offset);
         async {
             let url = format!("{}{PATH_ADMIN}{PATH_PLAYLIST}", self.base_url);
-            debug!("doing GET on {url}");
+            debug!(url, "doing GET");
             let resp = Client::new()
                 .get(&url)
                 .bearer_auth(token)
@@ -193,13 +197,13 @@ impl ApiClient for DefaultApiClient {
         .await
     }
 
-    async fn spotify_authorize_url(&self, param: &RedirectUriQueryParam) -> ApiResult<String> {
-        let span = debug_span!("spotify_authorize_url", param.redirect_uri);
+    async fn spotify_authorize_url(&self, params: &RedirectUriQueryParam) -> ApiResult<String> {
+        let span = debug_span!("spotify_authorize_url", params.redirect_uri);
         async {
             let client = ClientBuilder::new().redirect(Policy::none()).build()?;
             let url = format!("{}{PATH_AUTH_SPOTIFY}", self.base_url);
-            debug!("doing GET on {url}");
-            let resp = client.get(&url).query(param).send().await?;
+            debug!(url, "doing GET");
+            let resp = client.get(&url).query(params).send().await?;
             let status = resp.status();
             if status.is_redirection() {
                 let headers = resp.headers();
@@ -220,7 +224,7 @@ impl ApiClient for DefaultApiClient {
         let span = debug_span!("start_playlist_synchronization", playlist.id = %id);
         async {
             let url = format!("{}{PATH_PLAYLIST}/{id}{PATH_SYNC}", self.base_url);
-            debug!("doing PUT on {url}");
+            debug!(url, "doing PUT");
             let resp = Client::new().put(&url).bearer_auth(token).send().await?;
             let status = resp.status();
             if status.is_success() {
@@ -237,7 +241,7 @@ impl ApiClient for DefaultApiClient {
         let span = debug_span!("start_source_synchronization", src.id = %id);
         async {
             let url = format!("{}{PATH_SRC}/{id}{PATH_SYNC}", self.base_url);
-            debug!("doing PUT on {url}");
+            debug!(url, "doing PUT");
             let resp = Client::new().put(&url).bearer_auth(token).send().await?;
             let status = resp.status();
             if status.is_success() {

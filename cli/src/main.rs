@@ -380,7 +380,7 @@ impl<
                     db.name = args.db.name,
                     db.port = args.db.port,
                     db.user = args.db.user,
-                    email = %args.email
+                    usr.email = %args.email
                 );
                 async {
                     let pool = self.svc.create_database_pool(args.db).await?;
@@ -401,7 +401,7 @@ impl<
                 let span = info_span!(
                     "authenticate_via_spotify",
                     api_base_url = %args.api_base_url.value,
-                    port = args.port
+                    server.port = args.port
                 );
                 async {
                     let param = RedirectUriQueryParam {
@@ -411,7 +411,11 @@ impl<
                     let api = self.svc.api(args.api_base_url.value);
                     let authorize_url = api.spotify_authorize_url(&param).await?;
                     if let Err(err) = self.svc.system().open_url(&authorize_url) {
-                        error!(url = authorize_url, details = %err, "failed to open web browser, please open URL");
+                        error!(
+                            details = %err,
+                            url = authorize_url,
+                            "failed to open web browser, please open URL"
+                        );
                     }
                     debug!("waiting for callback");
                     let req = match server.next().await {
@@ -441,7 +445,7 @@ impl<
                 let span = info_span!(
                     "create_playlist",
                     api_base_url = %args.api_base_url.value,
-                    file = %args.file.display()
+                    params.file = %args.file.display()
                 );
                 async {
                     debug!("opening file");
@@ -461,10 +465,10 @@ impl<
             Command::Playlist(PlaylistCommand::List(args)) => {
                 let span = info_span!(
                     "playlists",
-                    all = args.all,
+                    params.all = args.all,
                     api_base_url = %args.api_base_url.value,
-                    limit = args.req.limit,
-                    offset = args.req.offset,
+                    params.limit = args.req.limit,
+                    params.offset = args.req.offset,
                 );
                 async {
                     let api = self.svc.api(args.api_base_url.value);

@@ -397,11 +397,11 @@ impl DefaultPuller {
             } else {
                 let track = db_conn.create_track(&creation).await?;
                 info!(
-                    sync.track.album = track.album.name,
-                    sync.track.artists = ?track.artists,
-                    sync.track.id = %track.id,
-                    sync.track.title = track.title,
-                    sync.track.year = track.year,
+                    track.album = track.album.name,
+                    ?track.artists,
+                    %track.id,
+                    track.title,
+                    track.year,
                     "track created",
                 );
                 track
@@ -624,11 +624,11 @@ impl<PULLER: Puller<PlaylistSynchronizationStep, Playlist>>
                                     Some(id) => Some(id),
                                     None => {
                                         warn!(
-                                            sync.track.album = track.album.name,
-                                            sync.track.artists = ?track.artists,
-                                            sync.track.id = %track.id,
-                                            sync.track.title = track.title,
-                                            sync.track.year = track.year,
+                                            track.album = track.album.name,
+                                            ?track.artists,
+                                            %track.id,
+                                            track.title,
+                                            track.year,
                                             "track doesn't have Spotify ID"
                                         );
                                         None
@@ -683,11 +683,11 @@ impl<PULLER: Puller<PlaylistSynchronizationStep, Playlist>>
                                     Some(id) => Some(id),
                                     None => {
                                         warn!(
-                                            sync.track.album = track.album.name,
-                                            sync.track.artists = ?track.artists,
-                                            sync.track.id = %track.id,
-                                            sync.track.title = track.title,
-                                            sync.track.year = track.year,
+                                            track.album = track.album.name,
+                                            ?track.artists,
+                                            %track.id,
+                                            track.title,
+                                            track.year,
                                             "track doesn't have Spotify ID"
                                         );
                                         None
