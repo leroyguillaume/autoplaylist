@@ -632,8 +632,8 @@ async fn add_track_to_playlist<
 ) -> PostgresResult<()> {
     let span = debug_span!(
         "add_track_to_playlist",
-        db.playlist.id = %playlist_id,
-        db.track.id = %track_id,
+        playlist.id = %playlist_id,
+        track.id = %track_id,
     );
     async {
         trace!("acquiring database connection");
@@ -665,8 +665,8 @@ async fn add_track_to_source<
 ) -> PostgresResult<()> {
     let span = debug_span!(
         "add_track_to_source",
-        db.src.id = %src_id,
-        db.track.id = %track_id,
+        src.id = %src_id,
+        track.id = %track_id,
     );
     async {
         trace!("acquiring database connection");
@@ -698,9 +698,9 @@ async fn create_playlist<
 ) -> PostgresResult<Playlist> {
     let span = debug_span!(
         "create_playlist",
-        db.playlist.name = creation.name,
-        db.playlist.src.owner.email = creation.src.owner.email,
-        db.playlist.src.owner.id = %creation.src.owner.id,
+        playlist.name = creation.name,
+        playlist.src.owner.email = creation.src.owner.email,
+        playlist.src.owner.id = %creation.src.owner.id,
     );
     async {
         trace!("serializing playlist predicate");
@@ -721,7 +721,7 @@ async fn create_playlist<
         .fetch_one(&mut *conn)
         .await?;
         let playlist = record.into_entity(key)?;
-        debug!(db.playlist.id = %playlist.id, "playlist created");
+        debug!(%playlist.id, "playlist created");
         Ok(playlist)
     }
     .instrument(span)
@@ -741,8 +741,8 @@ async fn create_source<
 ) -> PostgresResult<Source> {
     let span = debug_span!(
         "create_source",
-        db.src.owner.email = creation.owner.email,
-        db.src.owner.id = %creation.owner.id,
+        src.owner.email = creation.owner.email,
+        src.owner.id = %creation.owner.id,
     );
     async {
         trace!("serializing source kind");
@@ -759,7 +759,7 @@ async fn create_source<
         .fetch_one(&mut *conn)
         .await?;
         let src = record.into_entity(key)?;
-        debug!(db.src.id = %src.id, "source created");
+        debug!(%src.id, "source created");
         Ok(src)
     }
     .instrument(span)
@@ -785,9 +785,9 @@ async fn create_track<
     let title = creation.title.to_lowercase();
     let span = debug_span!(
         "create_track",
-        db.track.album.name = album,
-        db.track.artists = ?artists,
-        db.track.title = title,
+        track.album.name = album,
+        track.artists = ?artists,
+        track.title = title,
     );
     async {
         trace!("acquiring database connection");
@@ -806,7 +806,7 @@ async fn create_track<
         .fetch_one(&mut *conn)
         .await?;
         let track = record.into_entity()?;
-        debug!(db.track.id = %track.id, "track created");
+        debug!(%track.id, "track created");
         Ok(track)
     }
     .instrument(span)
@@ -821,7 +821,7 @@ async fn create_user<'a, A: Acquire<'a, Database = Postgres, Connection = &'a mu
     key: &MagicCrypt256,
     conn: A,
 ) -> PostgresResult<User> {
-    let span = debug_span!("create_user", db.usr.email = creation.email,);
+    let span = debug_span!("create_user", usr.email = creation.email,);
     async {
         let creds = encrypt_credentials(&creation.creds, key)?;
         trace!("acquiring database connection");
@@ -836,7 +836,7 @@ async fn create_user<'a, A: Acquire<'a, Database = Postgres, Connection = &'a mu
         .fetch_one(&mut *conn)
         .await?;
         let usr = record.into_entity(key)?;
-        debug!(db.usr.id = %usr.id, "user created");
+        debug!(%usr.id, "user created");
         Ok(usr)
     }
     .instrument(span)
@@ -855,7 +855,7 @@ async fn delete_tracks_from_playlist<
 ) -> PostgresResult<()> {
     let span = debug_span!(
         "delete_tracks_from_playlist",
-        db.playlist.id = %id,
+        playlist.id = %id,
     );
     async {
         trace!("acquiring database connection");
@@ -885,7 +885,7 @@ async fn delete_tracks_from_source<
 ) -> PostgresResult<()> {
     let span = debug_span!(
         "delete_tracks_from_source",
-        db.src.id = %id,
+        src.id = %id,
     );
     async {
         trace!("acquiring database connection");
@@ -925,7 +925,7 @@ async fn lock_playlist_synchronization<
 ) -> PostgresResult<Option<PlaylistSynchronization>> {
     let span = debug_span!(
         "lock_playlist_synchronization",
-        db.playlist.id = %id,
+        playlist.id = %id,
     );
     async {
         trace!("acquiring database connection");
@@ -957,7 +957,7 @@ async fn lock_source_synchronization<
 ) -> PostgresResult<Option<SourceSynchronization>> {
     let span = debug_span!(
         "lock_source_synchronization",
-        db.src.id = %id,
+        src.id = %id,
     );
     async {
         trace!("acquiring database connection");
@@ -990,7 +990,7 @@ async fn playlist_by_id<
 ) -> PostgresResult<Option<Playlist>> {
     let span = debug_span!(
         "playlist_by_id",
-        db.playlist.id = %id,
+        playlist.id = %id,
     );
     async {
         trace!("acquiring database connection");
@@ -1023,8 +1023,8 @@ async fn playlist_contains_track<
 ) -> PostgresResult<bool> {
     let span = debug_span!(
         "playlist_contains_track",
-        db.playlist.id = %playlist_id,
-        db.track.id = %track_id,
+        playlist.id = %playlist_id,
+        track.id = %track_id,
     );
     async {
         trace!("acquiring database connection");
@@ -1057,8 +1057,8 @@ async fn playlist_ids_by_source<
 ) -> PostgresResult<Page<Uuid>> {
     let span = debug_span!(
         "playlist_ids_by_source",
-        db.page.limit = req.limit,
-        db.page.offset = req.offset,
+        params.limit = req.limit,
+        params.offset = req.offset,
     );
     async {
         let limit: i64 = req.limit.into();
@@ -1107,9 +1107,9 @@ async fn playlist_tracks<
 ) -> PostgresResult<Page<Track>> {
     let span = debug_span!(
         "playlist_tracks",
-        db.playlist.id = %id,
-        db.page.limit = req.limit,
-        db.page.offset = req.offset,
+        params.limit = req.limit,
+        params.offset = req.offset,
+        playlist.id = %id,
     );
     async {
         let limit: i64 = req.limit.into();
@@ -1156,8 +1156,8 @@ async fn playlists<'a, A: Acquire<'a, Database = Postgres, Connection = &'a mut 
 ) -> PostgresResult<Page<Playlist>> {
     let span = debug_span!(
         "playlists",
-        db.page.limit = req.limit,
-        db.page.offset = req.offset,
+        params.limit = req.limit,
+        params.offset = req.offset,
     );
     async {
         let limit: i64 = req.limit.into();
@@ -1206,7 +1206,7 @@ async fn source_by_id<
 ) -> PostgresResult<Option<Source>> {
     let span = debug_span!(
         "source_by_id",
-        db.src.id = %id,
+        src.id = %id,
     );
     async {
         trace!("acquiring database connection");
@@ -1240,7 +1240,7 @@ async fn source_by_owner_kind<
 ) -> PostgresResult<Option<Source>> {
     let span = debug_span!(
         "source_by_owner_kind",
-        db.src.owner.id = %owner_id,
+        src.owner.id = %owner_id,
     );
     async {
         trace!("serializing source kind");
@@ -1276,8 +1276,8 @@ async fn source_contains_track<
 ) -> PostgresResult<bool> {
     let span = debug_span!(
         "source_contains_track",
-        db.src.id = %src_id,
-        db.track.id = %track_id,
+        src.id = %src_id,
+        track.id = %track_id,
     );
     async {
         trace!("acquiring database connection");
@@ -1310,9 +1310,9 @@ async fn source_tracks<
 ) -> PostgresResult<Page<Track>> {
     let span = debug_span!(
         "source_tracks",
-        db.src.id = %id,
-        db.page.limit = req.limit,
-        db.page.offset = req.offset,
+        params.limit = req.limit,
+        params.offset = req.offset,
+        src.id = %id,
     );
     async {
         let limit: i64 = req.limit.into();
@@ -1359,8 +1359,8 @@ async fn sources<'a, A: Acquire<'a, Database = Postgres, Connection = &'a mut Pg
 ) -> PostgresResult<Page<Source>> {
     let span = debug_span!(
         "sources",
-        db.page.limit = req.limit,
-        db.page.offset = req.offset,
+        params.limit = req.limit,
+        params.offset = req.offset,
     );
     async {
         let limit: i64 = req.limit.into();
@@ -1405,7 +1405,7 @@ async fn track_by_id<'a, A: Acquire<'a, Database = Postgres, Connection = &'a mu
 ) -> PostgresResult<Option<Track>> {
     let span = debug_span!(
         "track_by_id",
-        db.track.id = %id,
+        track.id = %id,
     );
     async {
         trace!("acquiring database connection");
@@ -1446,9 +1446,9 @@ async fn track_by_title_artists_album_year<
     let title = title.to_lowercase();
     let span = debug_span!(
         "track_by_title_artists_album_year",
-        db.track.album.name = album,
-        db.track.artists = ?artists,
-        db.track.title = title,
+        track.album.name = album,
+        track.artists = ?artists,
+        track.title = title,
     );
     async {
         trace!("acquiring database connection");
@@ -1480,8 +1480,8 @@ async fn tracks<'a, A: Acquire<'a, Database = Postgres, Connection = &'a mut PgC
 ) -> PostgresResult<Page<Track>> {
     let span = debug_span!(
         "tracks",
-        db.page.limit = req.limit,
-        db.page.offset = req.offset,
+        params.limit = req.limit,
+        params.offset = req.offset,
     );
     async {
         let limit: i64 = req.limit.into();
@@ -1529,10 +1529,10 @@ async fn update_playlist<
 ) -> PostgresResult<()> {
     let span = debug_span!(
         "update_playlist",
-        db.playlist.id = %playlist.id,
-        db.playlist.name = playlist.name,
-        db.playlist.src.owner.email = playlist.src.owner.email,
-        db.playlist.src.owner.id = %playlist.src.owner.id,
+        %playlist.id,
+        playlist.name,
+        playlist.src.owner.email,
+        %playlist.src.owner.id,
     );
     async {
         trace!("serializing playlist synchronization");
@@ -1565,7 +1565,7 @@ async fn update_source<
 ) -> PostgresResult<()> {
     let span: tracing::Span = debug_span!(
         "update_source",
-        db.src.id = %src.id,
+        %src.id,
     );
     async {
         trace!("serializing source synchronization");
@@ -1596,7 +1596,7 @@ async fn update_track<
 ) -> PostgresResult<()> {
     let span = debug_span!(
         "update_track",
-        db.track.id = %track.id,
+        %track.id,
     );
     async {
         trace!("acquiring database connection");
@@ -1623,9 +1623,9 @@ async fn update_user<'a, A: Acquire<'a, Database = Postgres, Connection = &'a mu
 ) -> PostgresResult<()> {
     let span = debug_span!(
         "update_user",
-        db.usr.id = %usr.id,
-        db.usr.email = %usr.email,
-        db.usr.role = %usr.role,
+        %usr.id,
+        %usr.email,
+        %usr.role,
     );
     async {
         let creds = encrypt_credentials(&usr.creds, key)?;
@@ -1658,7 +1658,7 @@ async fn user_by_email<
     key: &MagicCrypt256,
     conn: A,
 ) -> PostgresResult<Option<User>> {
-    let span = debug_span!("user_by_email", db.usr.email = email,);
+    let span = debug_span!("user_by_email", usr.email = email,);
     async {
         trace!("acquiring database connection");
         let conn = conn.acquire().await?;
@@ -1687,7 +1687,7 @@ async fn user_by_id<'a, A: Acquire<'a, Database = Postgres, Connection = &'a mut
 ) -> PostgresResult<Option<User>> {
     let span = debug_span!(
         "user_by_id",
-        db.usr.id = %id,
+        usr.id = %id,
     );
     async {
         trace!("acquiring database connection");
@@ -1721,9 +1721,9 @@ async fn user_playlists<
 ) -> PostgresResult<Page<Playlist>> {
     let span = debug_span!(
         "user_playlists",
-        db.page.limit = req.limit,
-        db.page.offset = req.offset,
-        db.usr.id = %id,
+        params.limit = req.limit,
+        params.offset = req.offset,
+        usr.id = %id,
     );
     async {
         let limit: i64 = req.limit.into();
@@ -1770,8 +1770,8 @@ async fn users<'a, A: Acquire<'a, Database = Postgres, Connection = &'a mut PgCo
 ) -> PostgresResult<Page<User>> {
     let span = debug_span!(
         "users",
-        db.page.limit = req.limit,
-        db.page.offset = req.offset,
+        params.limit = req.limit,
+        params.offset = req.offset,
     );
     async {
         let limit: i64 = req.limit.into();

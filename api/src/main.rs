@@ -241,14 +241,14 @@ fn create_app<SVC: Services + 'static>(svc: Arc<SVC>) -> Router {
         .route(
             PATH_AUTH_SPOTIFY,
             routing::get(
-                |Query(param): Query<RedirectUriQueryParam>,
+                |Query(params): Query<RedirectUriQueryParam>,
                 State(svc): State<Arc<SVC>>| async move {
                     let span =
-                        info_span!("spotify_authorize_url", param.redirect_uri);
+                        info_span!("spotify_authorize_url", params.redirect_uri);
                     async {
                         let res = svc
                             .auth()
-                            .spotify_authorize_url(&param);
+                            .spotify_authorize_url(&params);
                         match res {
                             Ok(url) => {
                                 ([(header::LOCATION, url)], StatusCode::MOVED_PERMANENTLY).into_response()
@@ -306,7 +306,13 @@ fn create_app<SVC: Services + 'static>(svc: Arc<SVC>) -> Router {
         }))
         .route(PATH_PLAYLIST, routing::post(|headers: HeaderMap, State(svc): State<Arc<SVC>>, Json(req): Json<CreatePlaylistRequest>| async move {
             let usr = authenticated_user!(svc.auth(), &headers);
-            let span = info_span!("create_playlist", body.name = req.name, body.platform = %req.platform, usr.email, %usr.id);
+            let span = info_span!(
+                "create_playlist",
+                playlist.name = req.name,
+                playlist.platform = %req.platform,
+                usr.email,
+                %usr.id
+            );
             async {
                 match svc.playlist().create(req, usr).await {
                     Ok(playlist) => {

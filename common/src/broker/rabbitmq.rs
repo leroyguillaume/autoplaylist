@@ -332,7 +332,7 @@ pub struct RabbitMqPublisher {
 impl RabbitMqPublisher {
     #[inline]
     async fn publish_message<M: Message>(&self, msg: &M, exch: &str) -> RabbitMqResult<()> {
-        let span = debug_span!("publish_message", broker.exch = exch);
+        let span = debug_span!("publish_message", csm.exch = exch);
         async {
             trace!("serializing message");
             let payload = serde_json::to_vec(msg)?;
