@@ -92,9 +92,7 @@ async fn main() -> anyhow::Result<()> {
 macro_rules! authenticated_admin {
     ($auth:expr, $headers:expr) => {{
         let usr = authenticated_user!($auth, $headers);
-        if usr.role != Role::Admin {
-            return handle_error(ServiceError::Forbidden);
-        }
+        ensure_user_is_admin!(usr);
         usr
     }};
 }
@@ -104,6 +102,24 @@ macro_rules! authenticated_user {
         match $auth.authenticated_user($headers).await {
             Ok(usr) => usr,
             Err(err) => return handle_error(err),
+        }
+    };
+}
+
+macro_rules! by_id {
+    ($svc:ident, $f:ident, $id:expr) => {
+        match $svc.$f($id).await {
+            Ok(Some(rsc)) => rsc,
+            Ok(None) => return handle_error(ServiceError::NotFound($id)),
+            Err(err) => return handle_error(err),
+        }
+    };
+}
+
+macro_rules! ensure_user_is_admin {
+    ($usr:expr) => {
+        if $usr.role != Role::Admin {
+            return handle_error(ServiceError::Forbidden);
         }
     };
 }
@@ -144,6 +160,8 @@ pub enum ServiceError {
     ),
     #[error("user {0} doesn't have Sotify credentials")]
     NoSpotifyCredentials(Uuid),
+    #[error("resource {0} doesn't exist")]
+    NotFound(Uuid),
     #[error("regex compilation error: {0}")]
     RegexCompilation(
         #[from]
@@ -231,7 +249,13 @@ fn create_app<SVC: Services + 'static>(svc: Arc<SVC>) -> Router {
     Router::new()
         .route(&format!("{PATH_ADMIN}{PATH_PLAYLIST}"), routing::get(|headers: HeaderMap, State(svc): State<Arc<SVC>>, Query(params): Query<PageRequestQueryParams<25>>| async move {
             let usr = authenticated_admin!(svc.auth(), &headers);
-            let span = info_span!("playlists", params.limit, params.offset, usr.email, %usr.id);
+            let span = info_span!(
+                "playlists",
+                auth.usr.email = usr.email,
+                auth.usr.id = %usr.id,
+                params.limit,
+                params.offset,
+            );
             async {
                 match svc.playlist().playlists(params.into()).await {
                     Ok(page) => {
@@ -246,7 +270,13 @@ fn create_app<SVC: Services + 'static>(svc: Arc<SVC>) -> Router {
         }))
         .route(&format!("{PATH_ADMIN}{PATH_SRC}"), routing::get(|headers: HeaderMap, State(svc): State<Arc<SVC>>, Query(params): Query<PageRequestQueryParams<25>>| async move {
             let usr = authenticated_admin!(svc.auth(), &headers);
-            let span = info_span!("sources", params.limit, params.offset, usr.email, %usr.id);
+            let span = info_span!(
+                "sources",
+                auth.usr.email = usr.email,
+                auth.usr.id = %usr.id,
+                params.limit,
+                params.offset,
+            );
             async {
                 match svc.source().sources(params.into()).await {
                     Ok(page) => {
@@ -312,7 +342,13 @@ fn create_app<SVC: Services + 'static>(svc: Arc<SVC>) -> Router {
         )
         .route(PATH_PLAYLIST, routing::get(|headers: HeaderMap, State(svc): State<Arc<SVC>>, Query(params): Query<PageRequestQueryParams<25>>| async move {
             let usr = authenticated_user!(svc.auth(), &headers);
-            let span = info_span!("authenticated_user_playlists", params.limit, params.offset, usr.email, %usr.id);
+            let span = info_span!(
+                "authenticated_user_playlists",
+                auth.usr.email = usr.email,
+                auth.usr.id = %usr.id,
+                params.limit,
+                params.offset
+            );
             async {
                 match svc.playlist().authenticated_user_playlists(usr.id, params.into()).await {
                     Ok(page) => {
@@ -329,10 +365,10 @@ fn create_app<SVC: Services + 'static>(svc: Arc<SVC>) -> Router {
             let usr = authenticated_user!(svc.auth(), &headers);
             let span = info_span!(
                 "create_playlist",
+                auth.usr.email = usr.email,
+                auth.usr.id = %usr.id,
                 playlist.name = req.name,
                 playlist.platform = %req.platform,
-                usr.email,
-                %usr.id
             );
             async {
                 match svc.playlist().create(req, usr).await {
@@ -346,9 +382,36 @@ fn create_app<SVC: Services + 'static>(svc: Arc<SVC>) -> Router {
             .instrument(span)
             .await
         }))
+        .route(&format!("{PATH_PLAYLIST}/:id"), routing::delete(|Path(id): Path<Uuid>, headers: HeaderMap, State(svc): State<Arc<SVC>>,| async move {
+            let usr = authenticated_user!(svc.auth(), &headers);
+            let playlist_svc = svc.playlist();
+            let playlist = by_id!(playlist_svc, playlist_by_id, id);
+            if playlist.src.owner.id != usr.id && usr.role != Role::Admin {
+                return handle_error(ServiceError::Forbidden);
+            }
+            let span = info_span!(
+                "delete_playlist",
+                auth.usr.email = usr.email,
+                auth.usr.id = %usr.id,
+                playlist.id = %id,
+            );
+            async {
+                match playlist_svc.delete(&playlist).await {
+                    Ok(_) => StatusCode::NO_CONTENT.into_response(),
+                    Err(err) => handle_error(err),
+                }
+            }
+            .instrument(span)
+            .await
+        }))
         .route(&format!("{PATH_PLAYLIST}/:id{PATH_SYNC}"), routing::put(|Path(id): Path<Uuid>, headers: HeaderMap, State(svc): State<Arc<SVC>>,| async move {
             let usr = authenticated_admin!(svc.auth(), &headers);
-            let span = info_span!("start_playlist_synchronization", playlist.id = %id, usr.email, %usr.id);
+            let span = info_span!(
+                "start_playlist_synchronization",
+                auth.usr.email = usr.email,
+                auth.usr.id = %usr.id,
+                playlist.id = %id,
+            );
             async {
                 match svc.playlist().start_synchronization(id).await {
                     Ok(_) => StatusCode::NO_CONTENT.into_response(),
@@ -360,7 +423,13 @@ fn create_app<SVC: Services + 'static>(svc: Arc<SVC>) -> Router {
         }))
         .route(PATH_SRC, routing::get(|headers: HeaderMap, State(svc): State<Arc<SVC>>, Query(params): Query<PageRequestQueryParams<25>>| async move {
             let usr = authenticated_user!(svc.auth(), &headers);
-            let span = info_span!("authenticated_user_sources", params.limit, params.offset, usr.email, %usr.id);
+            let span = info_span!(
+                "authenticated_user_sources",
+                auth.usr.email = usr.email,
+                auth.usr.id = %usr.id,
+                params.limit,
+                params.offset,
+            );
             async {
                 match svc.source().authenticated_user_sources(usr.id, params.into()).await {
                     Ok(page) => {
@@ -375,7 +444,12 @@ fn create_app<SVC: Services + 'static>(svc: Arc<SVC>) -> Router {
         }))
         .route(&format!("{PATH_SRC}/:id{PATH_SYNC}"), routing::put(|Path(id): Path<Uuid>, headers: HeaderMap, State(svc): State<Arc<SVC>>,| async move {
             let usr = authenticated_admin!(svc.auth(), &headers);
-            let span = info_span!("start_source_synchronization", src.id = %id, usr.email, %usr.id);
+            let span = info_span!(
+                "start_source_synchronization",
+                auth.usr.email = usr.email,
+                auth.usr.id = %usr.id,
+                src.id = %id,
+            );
             async {
                 match svc.source().start_synchronization(id).await {
                     Ok(_) => StatusCode::NO_CONTENT.into_response(),
@@ -401,6 +475,10 @@ fn handle_error(err: ServiceError) -> Response {
         ServiceError::NoSpotifyCredentials(_) => {
             debug!(details = %err, "user doesn't have Spotify credentials");
             StatusCode::PRECONDITION_FAILED.into_response()
+        }
+        ServiceError::NotFound(_) => {
+            debug!(details = %err, "resource doesn't exist");
+            StatusCode::NOT_FOUND.into_response()
         }
         ServiceError::Unauthorized => {
             debug!(details = %err, "user is not authenticated");
@@ -776,6 +854,152 @@ mod test {
             let (resp, expected) = run(mocks).await;
             resp.assert_status(StatusCode::CREATED);
             resp.assert_json(&expected);
+        }
+    }
+
+    mod delete_playlist {
+        use super::*;
+
+        // Mocks
+
+        #[derive(Clone, Default)]
+        struct Mocks {
+            authenticated_usr: Mock<ServiceResult<User>, User>,
+            playlist_by_id: Mock<Option<Playlist>, Playlist>,
+            delete_playlist: Mock<()>,
+        }
+
+        // run
+
+        async fn run(mocks: Mocks) -> TestResponse {
+            let playlist = Playlist {
+                creation: Utc::now(),
+                id: Uuid::new_v4(),
+                name: "name".into(),
+                predicate: Predicate::YearEquals(1993),
+                src: Source {
+                    creation: Utc::now(),
+                    id: Uuid::new_v4(),
+                    kind: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                    owner: User {
+                        creation: Utc::now(),
+                        creds: Default::default(),
+                        email: "user@test".into(),
+                        id: Uuid::new_v4(),
+                        role: Role::User,
+                    },
+                    sync: Synchronization::Pending,
+                },
+                sync: Synchronization::Pending,
+                tgt: Target::Spotify("id".into()),
+            };
+            let mut auth_svc = MockAuthService::new();
+            auth_svc.expect_authenticated_user().times(1).returning({
+                let usr = playlist.src.owner.clone();
+                let mock = mocks.authenticated_usr.clone();
+                move |_| mock.call_with_args(usr.clone())
+            });
+            let mut playlist_svc = MockPlaylistService::new();
+            playlist_svc
+                .expect_playlist_by_id()
+                .with(eq(playlist.id))
+                .times(mocks.playlist_by_id.times())
+                .returning({
+                    let playlist = playlist.clone();
+                    let mock = mocks.playlist_by_id.clone();
+                    move |_| Ok(mock.call_with_args(playlist.clone()))
+                });
+            playlist_svc
+                .expect_delete()
+                .with(eq(playlist.clone()))
+                .times(mocks.delete_playlist.times())
+                .returning(|_| Ok(()));
+            let svc = MockServices {
+                auth: auth_svc,
+                playlist: playlist_svc,
+                ..Default::default()
+            };
+            let server = init(svc);
+            server
+                .delete(&format!("{PATH_PLAYLIST}/{}", playlist.id))
+                .await
+        }
+
+        // Tests
+
+        #[tokio::test]
+        async fn unauthorized() {
+            let mocks = Mocks {
+                authenticated_usr: Mock::once_with_args(|_| Err(ServiceError::Unauthorized)),
+                ..Default::default()
+            };
+            let resp = run(mocks).await;
+            resp.assert_status_unauthorized();
+            assert!(resp.as_bytes().is_empty());
+        }
+
+        #[tokio::test]
+        async fn not_found() {
+            let mocks = Mocks {
+                authenticated_usr: Mock::once_with_args(|usr| {
+                    Ok(User {
+                        id: Uuid::new_v4(),
+                        ..usr
+                    })
+                }),
+                playlist_by_id: Mock::once_with_args(|_| None),
+                ..Default::default()
+            };
+            let resp = run(mocks).await;
+            resp.assert_status(StatusCode::NOT_FOUND);
+            assert!(resp.as_bytes().is_empty());
+        }
+
+        #[tokio::test]
+        async fn forbidden_when_playlist_is_not_owned_by_user_and_it_is_not_admin() {
+            let mocks = Mocks {
+                authenticated_usr: Mock::once_with_args(|usr| {
+                    Ok(User {
+                        id: Uuid::new_v4(),
+                        ..usr
+                    })
+                }),
+                playlist_by_id: Mock::once_with_args(Some),
+                ..Default::default()
+            };
+            let resp = run(mocks).await;
+            resp.assert_status(StatusCode::FORBIDDEN);
+            assert!(resp.as_bytes().is_empty());
+        }
+
+        #[tokio::test]
+        async fn no_content_when_user_owns_playlist() {
+            let mocks = Mocks {
+                authenticated_usr: Mock::once_with_args(Ok),
+                delete_playlist: Mock::once(|| ()),
+                playlist_by_id: Mock::once_with_args(Some),
+            };
+            let resp = run(mocks).await;
+            resp.assert_status(StatusCode::NO_CONTENT);
+            assert!(resp.as_bytes().is_empty());
+        }
+
+        #[tokio::test]
+        async fn no_content_when_user_is_admin() {
+            let mocks = Mocks {
+                authenticated_usr: Mock::once_with_args(|usr| {
+                    Ok(User {
+                        id: Uuid::new_v4(),
+                        role: Role::Admin,
+                        ..usr
+                    })
+                }),
+                delete_playlist: Mock::once(|| ()),
+                playlist_by_id: Mock::once_with_args(Some),
+            };
+            let resp = run(mocks).await;
+            resp.assert_status(StatusCode::NO_CONTENT);
+            assert!(resp.as_bytes().is_empty());
         }
     }
 

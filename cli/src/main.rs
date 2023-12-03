@@ -211,6 +211,8 @@ struct PageRequestArgs<const LIMIT: u32> {
 enum PlaylistCommand {
     #[command(about = "Create a playlist")]
     Create(PlaylistCreateCommandArgs),
+    #[command(about = "Delete a playlist", alias = "del")]
+    Delete(PlaylistDeleteCommandArgs),
     #[command(about = "List playlists", alias = "ls")]
     List(PlaylistListCommandArgs),
     #[command(about = "Start playlist synchronization", alias = "sync")]
@@ -227,6 +229,18 @@ struct PlaylistCreateCommandArgs {
     api_token: TokenArg,
     #[arg(help = "Playlist creation JSON file")]
     file: PathBuf,
+}
+
+// PlaylistDeleteCommandArgs
+
+#[derive(clap::Args, Clone, Debug, Eq, PartialEq)]
+struct PlaylistDeleteCommandArgs {
+    #[command(flatten)]
+    api_base_url: ApiBaseUrlArg,
+    #[command(flatten)]
+    api_token: TokenArg,
+    #[arg(help = "Playlist ID")]
+    id: Uuid,
 }
 
 // PlaylistListCommandArgs
@@ -478,6 +492,20 @@ impl<
                     trace!("writing response on output");
                     serde_json::to_writer(&mut out, &resp)?;
                     writeln!(out)?;
+                    Ok(())
+                }
+                .instrument(span)
+                .await
+            }
+            Command::Playlist(PlaylistCommand::Delete(args)) => {
+                let span = info_span!(
+                    "delete_playlist",
+                    api_base_url = %args.api_base_url.value,
+                    playlist.id = %args.id
+                );
+                async {
+                    let api = self.svc.api(args.api_base_url.value);
+                    api.delete_playlist(args.id, &args.api_token.value).await?;
                     Ok(())
                 }
                 .instrument(span)
@@ -738,6 +766,7 @@ mod test {
                 authenticated_usr_playlists: Mock<Page<PlaylistResponse>>,
                 authenticated_usr_srcs: Mock<Page<SourceResponse>>,
                 create_playlist: Mock<PlaylistResponse>,
+                delete_playlist: Mock<()>,
                 open_spotify_authorize_url: Mock<()>,
                 next_http_req: Mock<()>,
                 playlists: Mock<Page<PlaylistResponse>>,
@@ -833,6 +862,10 @@ mod test {
                                 let mock = mocks.srcs.clone();
                                 move |_, _| Ok(mock.call())
                             });
+                        api.expect_delete_playlist()
+                            .with(eq(data.id), eq(data.api_token))
+                            .times(mocks.delete_playlist.times())
+                            .returning(|_, _| Ok(()));
                         api
                     }
                 });
@@ -1176,6 +1209,54 @@ mod test {
                 let expected = format!("{expected}\n");
                 let out = run(data, mocks).await;
                 assert_eq!(out, expected);
+            }
+
+            #[tokio::test]
+            async fn delete_playlist() {
+                let api_base_url = "http://localhost:8000";
+                let api_token = "jwt";
+                let id = Uuid::new_v4();
+                let data = Data {
+                    api_base_url,
+                    api_token,
+                    cmd: Command::Playlist(PlaylistCommand::Delete(PlaylistDeleteCommandArgs {
+                        api_base_url: ApiBaseUrlArg {
+                            value: api_base_url.into(),
+                        },
+                        api_token: TokenArg {
+                            value: api_token.into(),
+                        },
+                        id,
+                    })),
+                    create_playlist_req: CreatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearEquals(1993),
+                        platform: Platform::Spotify,
+                        src: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                    },
+                    db: DatabaseArgs {
+                        host: "host".into(),
+                        name: "name".into(),
+                        password: "password".into(),
+                        port: 5432,
+                        secret: "secret".into(),
+                        user: "user".into(),
+                    },
+                    email: "user@test",
+                    id,
+                    port: 8080,
+                    req: PageRequestArgs::<25> {
+                        limit: 25,
+                        offset: 0,
+                    },
+                    role: Role::Admin,
+                };
+                let mocks = Mocks {
+                    delete_playlist: Mock::once(|| ()),
+                    ..Default::default()
+                };
+                let out = run(data, mocks).await;
+                assert!(out.is_empty());
             }
 
             #[tokio::test]
