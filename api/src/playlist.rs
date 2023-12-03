@@ -12,7 +12,7 @@ use autoplaylist_common::{
         pg::{PostgresConnection, PostgresPool, PostgresTransaction},
         DatabaseConnection, DatabasePool, DatabaseTransaction, PlaylistCreation, SourceCreation,
     },
-    model::{Playlist, Target, User},
+    model::{Page, PageRequest, Playlist, Target, User},
     spotify::{rspotify::RSpotifyClient, SpotifyClient},
     transactional,
 };
@@ -26,7 +26,15 @@ use crate::{ServiceError, ServiceResult};
 #[cfg_attr(test, mockall::automock)]
 #[async_trait]
 pub trait PlaylistService: Send + Sync {
+    async fn authenticated_user_playlists(
+        &self,
+        user_id: Uuid,
+        req: PageRequest,
+    ) -> ServiceResult<Page<Playlist>>;
+
     async fn create(&self, req: CreatePlaylistRequest, owner: User) -> ServiceResult<Playlist>;
+
+    async fn playlists(&self, req: PageRequest) -> ServiceResult<Page<Playlist>>;
 
     async fn start_synchronization(&self, id: Uuid) -> ServiceResult<()>;
 }
@@ -85,6 +93,16 @@ impl<
         SPOTIFY: SpotifyClient,
     > PlaylistService for DefaultPlaylistService<CSM, BROKER, DBCONN, DBTX, DB, SPOTIFY>
 {
+    async fn authenticated_user_playlists(
+        &self,
+        user_id: Uuid,
+        req: PageRequest,
+    ) -> ServiceResult<Page<Playlist>> {
+        let mut db_conn = self.db.acquire().await?;
+        let page = db_conn.user_playlists(user_id, req).await?;
+        Ok(page)
+    }
+
     async fn create(&self, req: CreatePlaylistRequest, mut owner: User) -> ServiceResult<Playlist> {
         let tgt = match req.platform {
             Platform::Spotify => {
@@ -138,6 +156,12 @@ impl<
         Ok(playlist)
     }
 
+    async fn playlists(&self, req: PageRequest) -> ServiceResult<Page<Playlist>> {
+        let mut db_conn = self.db.acquire().await?;
+        let page = db_conn.playlists(req).await?;
+        Ok(page)
+    }
+
     async fn start_synchronization(&self, id: Uuid) -> ServiceResult<()> {
         let msg = PlaylistMessage {
             id,
@@ -157,7 +181,7 @@ impl<
 mod test {
     use autoplaylist_common::{
         broker::{MockBrokerClient, MockPublisher},
-        db::{MockDatabasePool, MockDatabaseTransaction},
+        db::{MockDatabaseConnection, MockDatabasePool, MockDatabaseTransaction},
         model::{
             Credentials, Playlist, Predicate, Role, Source, SourceKind, SpotifyCredentials,
             SpotifyResourceKind, SpotifyToken, Synchronization,
@@ -171,8 +195,62 @@ mod test {
 
     use super::*;
 
+    // Mods
+
     mod default_playlist_message {
         use super::*;
+
+        // Mods
+
+        mod authenticated_user_playlists {
+            use super::*;
+
+            // Tests
+
+            #[tokio::test]
+            async fn page() {
+                let id = Uuid::new_v4();
+                let req = PageRequest::new(10, 0);
+                let expected = Page {
+                    first: true,
+                    items: vec![],
+                    last: true,
+                    req,
+                    total: 0,
+                };
+                let db = MockDatabasePool {
+                    acquire: Mock::once({
+                        let expected = expected.clone();
+                        move || {
+                            let mut conn = MockDatabaseConnection::new();
+                            conn.0
+                                .expect_user_playlists()
+                                .with(eq(id), eq(req))
+                                .times(1)
+                                .returning({
+                                    let expected = expected.clone();
+                                    move |_, _| Ok(expected.clone())
+                                });
+                            conn
+                        }
+                    }),
+                    ..Default::default()
+                };
+                let playlist_svc = DefaultPlaylistService {
+                    broker: Arc::new(MockBrokerClient::default()),
+                    db: Arc::new(db),
+                    spotify: Arc::new(MockSpotifyClient::default()),
+                    _csm: PhantomData,
+                    _dbconn: PhantomData,
+                    _dbtx: PhantomData,
+                };
+                let page = playlist_svc
+                    .authenticated_user_playlists(id, req)
+                    .await
+                    .expect("failed to get playlists");
+                assert_eq!(page, expected);
+            }
+        }
 
         mod create {
             use super::*;
@@ -415,6 +493,51 @@ mod test {
                 let (playlist, expected) =
                     run(data, mocks).await.expect("failed to create playlist");
                 assert_eq!(playlist, expected);
+            }
+        }
+
+        mod playlists {
+            use super::*;
+
+            // Tests
+
+            #[tokio::test]
+            async fn page() {
+                let req = PageRequest::new(10, 0);
+                let expected = Page {
+                    first: true,
+                    items: vec![],
+                    last: true,
+                    req,
+                    total: 0,
+                };
+                let db = MockDatabasePool {
+                    acquire: Mock::once({
+                        let expected = expected.clone();
+                        move || {
+                            let mut conn = MockDatabaseConnection::new();
+                            conn.0.expect_playlists().with(eq(req)).times(1).returning({
+                                let expected = expected.clone();
+                                move |_| Ok(expected.clone())
+                            });
+                            conn
+                        }
+                    }),
+                    ..Default::default()
+                };
+                let playlist_svc = DefaultPlaylistService {
+                    broker: Arc::new(MockBrokerClient::default()),
+                    db: Arc::new(db),
+                    spotify: Arc::new(MockSpotifyClient::default()),
+                    _csm: PhantomData,
+                    _dbconn: PhantomData,
+                    _dbtx: PhantomData,
+                };
+                let page = playlist_svc
+                    .playlists(req)
+                    .await
+                    .expect("failed to get playlists");
+                assert_eq!(page, expected);
             }
         }
 

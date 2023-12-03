@@ -7,9 +7,10 @@ use std::{
 
 use autoplaylist_common::{
     api::{
-        AuthenticateViaSpotifyQueryParams, CreatePlaylistRequest, JwtResponse, PlaylistResponse,
-        RedirectUriQueryParam, PATH_AUTH_SPOTIFY, PATH_AUTH_SPOTIFY_TOKEN, PATH_HEALTH,
-        PATH_PLAYLIST, PATH_SRC, PATH_SYNC,
+        AuthenticateViaSpotifyQueryParams, CreatePlaylistRequest, JwtResponse,
+        PageRequestQueryParams, PlaylistResponse, RedirectUriQueryParam, PATH_ADMIN,
+        PATH_AUTH_SPOTIFY, PATH_AUTH_SPOTIFY_TOKEN, PATH_HEALTH, PATH_PLAYLIST, PATH_SRC,
+        PATH_SYNC,
     },
     broker::{
         rabbitmq::{RabbitMqClient, RabbitMqConfig, RabbitMqConsumer},
@@ -222,6 +223,21 @@ fn create_app<SVC: Services + 'static>(svc: Arc<SVC>) -> Router {
         .on_response(on_resp)
         .on_failure(on_fail);
     Router::new()
+    .route(&format!("{PATH_ADMIN}{PATH_PLAYLIST}"), routing::get(|headers: HeaderMap, State(svc): State<Arc<SVC>>, Query(params): Query<PageRequestQueryParams<25>>| async move {
+        let usr = authenticated_admin!(svc.auth(), &headers);
+        let span = info_span!("playlists", params.limit, params.offset, usr.email, %usr.id);
+        async {
+            match svc.playlist().playlists(params.into()).await {
+                Ok(page) => {
+                    let resp = page.map(PlaylistResponse::from);
+                    (StatusCode::OK, Json(resp)).into_response()
+                },
+                Err(err) => handle_error(err),
+            }
+        }
+        .instrument(span)
+        .await
+    }))
         .route(
             PATH_AUTH_SPOTIFY,
             routing::get(
@@ -273,6 +289,21 @@ fn create_app<SVC: Services + 'static>(svc: Arc<SVC>) -> Router {
             PATH_HEALTH,
             routing::get(|| async { StatusCode::NO_CONTENT }),
         )
+        .route(PATH_PLAYLIST, routing::get(|headers: HeaderMap, State(svc): State<Arc<SVC>>, Query(params): Query<PageRequestQueryParams<25>>| async move {
+            let usr = authenticated_user!(svc.auth(), &headers);
+            let span = info_span!("authenticated_user_playlists", params.limit, params.offset, usr.email, %usr.id);
+            async {
+                match svc.playlist().authenticated_user_playlists(usr.id, params.into()).await {
+                    Ok(page) => {
+                        let resp = page.map(PlaylistResponse::from);
+                        (StatusCode::OK, Json(resp)).into_response()
+                    },
+                    Err(err) => handle_error(err),
+                }
+            }
+            .instrument(span)
+            .await
+        }))
         .route(PATH_PLAYLIST, routing::post(|headers: HeaderMap, State(svc): State<Arc<SVC>>, Json(req): Json<CreatePlaylistRequest>| async move {
             let usr = authenticated_user!(svc.auth(), &headers);
             let span = info_span!("create_playlist", body.name = req.name, body.platform = %req.platform, usr.email, %usr.id);
@@ -355,8 +386,8 @@ mod test {
     use autoplaylist_common::{
         api::Platform,
         model::{
-            Playlist, Predicate, Role, Source, SourceKind, SpotifyResourceKind, Synchronization,
-            Target, User,
+            Page, PageRequest, Playlist, Predicate, Role, Source, SourceKind, SpotifyResourceKind,
+            Synchronization, Target, User,
         },
     };
     use axum_test::{TestResponse, TestServer};
@@ -429,6 +460,89 @@ mod test {
                 .get(PATH_AUTH_SPOTIFY_TOKEN)
                 .add_query_params(&params)
                 .await;
+            resp.assert_status_ok();
+            resp.assert_json(&expected);
+        }
+    }
+
+    mod authenticated_user_playlists {
+        use super::*;
+
+        // Mocks
+
+        #[derive(Clone, Default)]
+        struct Mocks {
+            authenticated_usr: Mock<ServiceResult<User>, User>,
+            authenticated_usr_playlists: Mock<Page<Playlist>, Page<Playlist>>,
+        }
+
+        // Tests
+
+        async fn run(mocks: Mocks) -> (TestResponse, Page<PlaylistResponse>) {
+            let usr = User {
+                creation: Utc::now(),
+                creds: Default::default(),
+                email: "user@test".into(),
+                id: Uuid::new_v4(),
+                role: Role::User,
+            };
+            let page = Page {
+                first: true,
+                items: vec![],
+                last: true,
+                req: PageRequest::new(10, 0),
+                total: 0,
+            };
+            let expected = page.clone().map(PlaylistResponse::from);
+            let mut auth = MockAuthService::new();
+            auth.expect_authenticated_user()
+                .times(mocks.authenticated_usr.times())
+                .returning({
+                    let mock = mocks.authenticated_usr.clone();
+                    let usr = usr.clone();
+                    move |_| mock.call_with_args(usr.clone())
+                });
+            let mut playlist = MockPlaylistService::new();
+            playlist
+                .expect_authenticated_user_playlists()
+                .with(eq(usr.id), eq(page.req))
+                .times(mocks.authenticated_usr_playlists.times())
+                .returning({
+                    let mock = mocks.authenticated_usr_playlists.clone();
+                    let page = page.clone();
+                    move |_, _| Ok(mock.call_with_args(page.clone()))
+                });
+            let svc = MockServices {
+                auth,
+                playlist,
+                ..Default::default()
+            };
+            let server = init(svc);
+            let req = PageRequestQueryParams::<25>::from(page.req);
+            let resp = server.get(PATH_PLAYLIST).add_query_params(req).await;
+            (resp, expected)
+        }
+
+        // Tests
+
+        #[tokio::test]
+        async fn unauthorized() {
+            let mocks = Mocks {
+                authenticated_usr: Mock::once_with_args(|_| Err(ServiceError::Unauthorized)),
+                ..Default::default()
+            };
+            let (resp, _) = run(mocks).await;
+            resp.assert_status_unauthorized();
+            assert!(resp.as_bytes().is_empty());
+        }
+
+        #[tokio::test]
+        async fn ok() {
+            let mocks = Mocks {
+                authenticated_usr: Mock::once_with_args(Ok),
+                authenticated_usr_playlists: Mock::once_with_args(|page| page),
+            };
+            let (resp, expected) = run(mocks).await;
             resp.assert_status_ok();
             resp.assert_json(&expected);
         }
@@ -551,6 +665,111 @@ mod test {
             let resp = server.get(PATH_HEALTH).await;
             resp.assert_status(StatusCode::NO_CONTENT);
             assert!(resp.as_bytes().is_empty());
+        }
+    }
+
+    mod playlists {
+        use super::*;
+
+        // Mocks
+
+        #[derive(Clone, Default)]
+        struct Mocks {
+            authenticated_usr: Mock<ServiceResult<User>>,
+            playlists: Mock<Page<Playlist>, Page<Playlist>>,
+        }
+
+        // Tests
+
+        async fn run(mocks: Mocks) -> (TestResponse, Page<PlaylistResponse>) {
+            let page = Page {
+                first: true,
+                items: vec![],
+                last: true,
+                req: PageRequest::new(10, 0),
+                total: 0,
+            };
+            let expected = page.clone().map(PlaylistResponse::from);
+            let mut auth = MockAuthService::new();
+            auth.expect_authenticated_user()
+                .times(mocks.authenticated_usr.times())
+                .returning({
+                    let mock = mocks.authenticated_usr.clone();
+                    move |_| mock.call()
+                });
+            let mut playlist = MockPlaylistService::new();
+            playlist
+                .expect_playlists()
+                .with(eq(page.req))
+                .times(mocks.playlists.times())
+                .returning({
+                    let mock = mocks.playlists.clone();
+                    let page = page.clone();
+                    move |_| Ok(mock.call_with_args(page.clone()))
+                });
+            let svc = MockServices {
+                auth,
+                playlist,
+                ..Default::default()
+            };
+            let server = init(svc);
+            let req = PageRequestQueryParams::<25>::from(page.req);
+            let resp = server
+                .get(&format!("{PATH_ADMIN}{PATH_PLAYLIST}"))
+                .add_query_params(req)
+                .await;
+            (resp, expected)
+        }
+
+        // Tests
+
+        #[tokio::test]
+        async fn unauthorized() {
+            let mocks = Mocks {
+                authenticated_usr: Mock::once_with_args(|_| Err(ServiceError::Unauthorized)),
+                ..Default::default()
+            };
+            let (resp, _) = run(mocks).await;
+            resp.assert_status_unauthorized();
+            assert!(resp.as_bytes().is_empty());
+        }
+
+        #[tokio::test]
+        async fn forbidden() {
+            let mocks = Mocks {
+                authenticated_usr: Mock::once(|| {
+                    Ok(User {
+                        creation: Utc::now(),
+                        creds: Default::default(),
+                        email: "user@test".into(),
+                        id: Uuid::new_v4(),
+                        role: Role::User,
+                    })
+                }),
+                ..Default::default()
+            };
+            let (resp, _) = run(mocks).await;
+            resp.assert_status(StatusCode::FORBIDDEN);
+            assert!(resp.as_bytes().is_empty());
+        }
+
+        #[tokio::test]
+        async fn ok() {
+            let mocks = Mocks {
+                authenticated_usr: Mock::once(|| {
+                    Ok(User {
+                        creation: Utc::now(),
+                        creds: Default::default(),
+                        email: "user@test".into(),
+                        id: Uuid::new_v4(),
+                        role: Role::Admin,
+                    })
+                }),
+                playlists: Mock::once_with_args(|page| page),
+            };
+            let (resp, expected) = run(mocks).await;
+            resp.assert_status_ok();
+            resp.assert_json(&expected);
         }
     }
 

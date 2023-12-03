@@ -4,11 +4,13 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::model::{
-    Playlist, PlaylistSynchronization, Predicate, Source, SourceKind, SourceSynchronization, Target,
+    PageRequest, Playlist, PlaylistSynchronization, Predicate, Source, SourceKind,
+    SourceSynchronization, Target,
 };
 
 // Consts - Paths
 
+pub const PATH_ADMIN: &str = "/admin";
 pub const PATH_AUTH_SPOTIFY: &str = "/auth/spotify";
 pub const PATH_AUTH_SPOTIFY_TOKEN: &str = "/auth/spotify/token";
 pub const PATH_HEALTH: &str = "/health";
@@ -33,6 +35,24 @@ pub struct CreatePlaylistRequest {
     pub platform: Platform,
     pub predicate: Predicate,
     pub src: SourceKind,
+}
+
+// PageRequest
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PageRequestQueryParams<const LIMIT: u32> {
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
+}
+
+impl<const LIMIT: u32> From<PageRequest> for PageRequestQueryParams<LIMIT> {
+    fn from(req: PageRequest) -> Self {
+        Self {
+            limit: Some(req.limit),
+            offset: Some(req.offset),
+        }
+    }
 }
 
 // Platform
@@ -130,6 +150,27 @@ mod test {
     use crate::model::{Role, SpotifyResourceKind, Target, User};
 
     use super::*;
+
+    mod page_request_query_params {
+        use super::*;
+
+        mod from_page_request {
+            use super::*;
+
+            // Tests
+
+            #[test]
+            fn params() {
+                let req = PageRequest::new(1, 2);
+                let expected = PageRequestQueryParams::<25> {
+                    limit: Some(req.limit),
+                    offset: Some(req.offset),
+                };
+                let params = PageRequestQueryParams::from(req);
+                assert_eq!(params, expected);
+            }
+        }
+    }
 
     mod playlist_response {
         use super::*;
