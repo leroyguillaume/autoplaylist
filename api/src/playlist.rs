@@ -34,6 +34,10 @@ pub trait PlaylistService: Send + Sync {
 
     async fn create(&self, req: CreatePlaylistRequest, owner: User) -> ServiceResult<Playlist>;
 
+    async fn delete(&self, playlist: &Playlist) -> ServiceResult<()>;
+
+    async fn playlist_by_id(&self, id: Uuid) -> ServiceResult<Option<Playlist>>;
+
     async fn playlists(&self, req: PageRequest) -> ServiceResult<Page<Playlist>>;
 
     async fn start_synchronization(&self, id: Uuid) -> ServiceResult<()>;
@@ -153,6 +157,26 @@ impl<
             kind: PlaylistMessageKind::Created,
         };
         publisher.publish_playlist_message(&msg).await?;
+        Ok(playlist)
+    }
+
+    async fn delete(&self, playlist: &Playlist) -> ServiceResult<()> {
+        let mut db_tx = self.db.begin().await?;
+        transactional!(db_tx, async {
+            db_tx.delete_playlist(playlist.id).await?;
+            info!(%playlist.id, "playlist deleted");
+            if db_tx.count_source_playlists(playlist.src.id).await? == 0 {
+                db_tx.delete_source(playlist.src.id).await?;
+                info!(src.id = %playlist.src.id, "source deleted");
+            }
+            Ok::<(), ServiceError>(())
+        })?;
+        Ok(())
+    }
+
+    async fn playlist_by_id(&self, id: Uuid) -> ServiceResult<Option<Playlist>> {
+        let mut db_conn = self.db.acquire().await?;
+        let playlist = db_conn.playlist_by_id(id).await?;
         Ok(playlist)
     }
 
@@ -492,6 +516,181 @@ mod test {
                 };
                 let (playlist, expected) =
                     run(data, mocks).await.expect("failed to create playlist");
+                assert_eq!(playlist, expected);
+            }
+        }
+
+        mod delete {
+            use super::*;
+
+            // Mocks
+
+            #[derive(Clone, Default)]
+            struct Mocks {
+                commit: Mock<()>,
+                count_src_playlists: Mock<u32>,
+                delete_playlist: Mock<()>,
+                delete_src: Mock<()>,
+                rollback: Mock<()>,
+            }
+
+            // run
+
+            async fn run(mocks: Mocks) -> ServiceResult<()> {
+                let playlist = Playlist {
+                    creation: Utc::now(),
+                    id: Uuid::new_v4(),
+                    name: "name".into(),
+                    predicate: Predicate::YearEquals(1993),
+                    src: Source {
+                        creation: Utc::now(),
+                        id: Uuid::new_v4(),
+                        kind: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                        owner: User {
+                            creation: Utc::now(),
+                            creds: Default::default(),
+                            email: "user@test".into(),
+                            id: Uuid::new_v4(),
+                            role: Role::User,
+                        },
+                        sync: Synchronization::Pending,
+                    },
+                    sync: Synchronization::Pending,
+                    tgt: Target::Spotify("id".into()),
+                };
+                let db = MockDatabasePool {
+                    begin: Mock::once({
+                        let mocks = mocks.clone();
+                        let playlist = playlist.clone();
+                        move || {
+                            let mut db_tx = MockDatabaseTransaction {
+                                commit: mocks.commit.clone(),
+                                rollback: mocks.rollback.clone(),
+                                ..Default::default()
+                            };
+                            db_tx
+                                .client
+                                .expect_count_source_playlists()
+                                .with(eq(playlist.src.id))
+                                .times(mocks.count_src_playlists.times())
+                                .returning({
+                                    let mock = mocks.count_src_playlists.clone();
+                                    move |_| Ok(mock.call())
+                                });
+                            db_tx
+                                .client
+                                .expect_delete_playlist()
+                                .with(eq(playlist.id))
+                                .times(mocks.delete_playlist.times())
+                                .returning(move |_| Ok(()));
+                            db_tx
+                                .client
+                                .expect_delete_source()
+                                .with(eq(playlist.src.id))
+                                .times(mocks.delete_src.times())
+                                .returning(move |_| Ok(()));
+                            db_tx
+                        }
+                    }),
+                    ..Default::default()
+                };
+                let playlist_svc = DefaultPlaylistService {
+                    broker: Arc::new(MockBrokerClient::default()),
+                    db: Arc::new(db),
+                    spotify: Arc::new(MockSpotifyClient::default()),
+                    _csm: PhantomData,
+                    _dbconn: PhantomData,
+                    _dbtx: PhantomData,
+                };
+                playlist_svc.delete(&playlist).await
+            }
+
+            // Tests
+
+            #[tokio::test]
+            async fn unit_when_still_playlists_based_on_source() {
+                let mocks = Mocks {
+                    commit: Mock::once(|| ()),
+                    count_src_playlists: Mock::once(|| 1),
+                    delete_playlist: Mock::once(|| ()),
+                    ..Default::default()
+                };
+                run(mocks).await.expect("failed to delete playlist");
+            }
+
+            #[tokio::test]
+            async fn unit_when_no_more_playlist_based_on_source() {
+                let mocks = Mocks {
+                    commit: Mock::once(|| ()),
+                    count_src_playlists: Mock::once(|| 0),
+                    delete_playlist: Mock::once(|| ()),
+                    delete_src: Mock::once(|| ()),
+                    ..Default::default()
+                };
+                run(mocks).await.expect("failed to delete playlist");
+            }
+        }
+
+        mod playlist_by_id {
+            use super::*;
+
+            // Tests
+
+            #[tokio::test]
+            async fn playlist() {
+                let id = Uuid::new_v4();
+                let expected = Playlist {
+                    creation: Utc::now(),
+                    id,
+                    name: "name".into(),
+                    predicate: Predicate::YearEquals(1993),
+                    src: Source {
+                        creation: Utc::now(),
+                        id: Uuid::new_v4(),
+                        kind: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                        owner: User {
+                            creation: Utc::now(),
+                            creds: Default::default(),
+                            email: "user@test".into(),
+                            id: Uuid::new_v4(),
+                            role: Role::User,
+                        },
+                        sync: Synchronization::Pending,
+                    },
+                    sync: Synchronization::Pending,
+                    tgt: Target::Spotify("id".into()),
+                };
+                let db = MockDatabasePool {
+                    acquire: Mock::once({
+                        let expected = expected.clone();
+                        move || {
+                            let mut conn = MockDatabaseConnection::new();
+                            conn.0
+                                .expect_playlist_by_id()
+                                .with(eq(id))
+                                .times(1)
+                                .returning({
+                                    let expected = expected.clone();
+                                    move |_| Ok(Some(expected.clone()))
+                                });
+                            conn
+                        }
+                    }),
+                    ..Default::default()
+                };
+                let playlist_svc = DefaultPlaylistService {
+                    broker: Arc::new(MockBrokerClient::default()),
+                    db: Arc::new(db),
+                    spotify: Arc::new(MockSpotifyClient::default()),
+                    _csm: PhantomData,
+                    _dbconn: PhantomData,
+                    _dbtx: PhantomData,
+                };
+                let playlist = playlist_svc
+                    .playlist_by_id(id)
+                    .await
+                    .expect("failed to get playlist")
+                    .expect("playlist doesn't exist");
                 assert_eq!(playlist, expected);
             }
         }

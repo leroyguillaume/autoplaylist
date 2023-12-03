@@ -56,6 +56,11 @@ macro_rules! client_impl {
                 self
             }
 
+            async fn count_source_playlists(&mut self, id: Uuid) -> DatabaseResult<u32> {
+                let count = count_source_playlists(id, &mut self.conn).await?;
+                Ok(count)
+            }
+
             async fn create_playlist(
                 &mut self,
                 creation: &PlaylistCreation,
@@ -77,6 +82,16 @@ macro_rules! client_impl {
             async fn create_user(&mut self, creation: &UserCreation) -> DatabaseResult<User> {
                 let user = create_user(creation, &self.key, &mut self.conn).await?;
                 Ok(user)
+            }
+
+            async fn delete_playlist(&mut self, id: Uuid) -> DatabaseResult<()> {
+                delete_playlist(id, &mut self.conn).await?;
+                Ok(())
+            }
+
+            async fn delete_source(&mut self, id: Uuid) -> DatabaseResult<()> {
+                delete_source(id, &mut self.conn).await?;
+                Ok(())
             }
 
             async fn delete_tracks_from_playlist(&mut self, id: Uuid) -> DatabaseResult<()> {
@@ -694,6 +709,37 @@ async fn add_track_to_source<
     .await
 }
 
+// count_source_playlists
+
+#[inline]
+async fn count_source_playlists<
+    'a,
+    A: Acquire<'a, Database = Postgres, Connection = &'a mut PgConnection>,
+>(
+    id: Uuid,
+    conn: A,
+) -> PostgresResult<u32> {
+    let span = debug_span!(
+        "count_source_playlists",
+        src.id = %id,
+    );
+    async {
+        trace!("acquiring database connection");
+        let conn = conn.acquire().await?;
+        debug!("counting source playlists");
+        let record = query_file!(
+            "resources/main/db/pg/queries/count-source-playlists.sql",
+            id,
+        )
+        .fetch_one(&mut *conn)
+        .await?;
+        let count = record.count.unwrap_or(0).try_into()?;
+        Ok(count)
+    }
+    .instrument(span)
+    .await
+}
+
 // create_playlist
 
 #[inline]
@@ -847,6 +893,60 @@ async fn create_user<'a, A: Acquire<'a, Database = Postgres, Connection = &'a mu
         let usr = record.into_entity(key)?;
         debug!(%usr.id, "user created");
         Ok(usr)
+    }
+    .instrument(span)
+    .await
+}
+
+// delete_playlist
+
+#[inline]
+async fn delete_playlist<
+    'a,
+    A: Acquire<'a, Database = Postgres, Connection = &'a mut PgConnection>,
+>(
+    id: Uuid,
+    conn: A,
+) -> PostgresResult<()> {
+    let span = debug_span!(
+        "delete_playlist",
+        playlist.id = %id,
+    );
+    async {
+        trace!("acquiring database connection");
+        let conn = conn.acquire().await?;
+        debug!("deleting playlist");
+        query_file!("resources/main/db/pg/queries/delete-playlist.sql", id,)
+            .execute(&mut *conn)
+            .await?;
+        Ok(())
+    }
+    .instrument(span)
+    .await
+}
+
+// delete_source
+
+#[inline]
+async fn delete_source<
+    'a,
+    A: Acquire<'a, Database = Postgres, Connection = &'a mut PgConnection>,
+>(
+    id: Uuid,
+    conn: A,
+) -> PostgresResult<()> {
+    let span = debug_span!(
+        "delete_source",
+        src.id = %id,
+    );
+    async {
+        trace!("acquiring database connection");
+        let conn = conn.acquire().await?;
+        debug!("deleting source");
+        query_file!("resources/main/db/pg/queries/delete-source.sql", id,)
+            .execute(&mut *conn)
+            .await?;
+        Ok(())
     }
     .instrument(span)
     .await
@@ -1076,7 +1176,7 @@ async fn playlist_ids_by_source<
         let conn = conn.acquire().await?;
         debug!("counting playlists");
         let record = query_file!(
-            "resources/main/db/pg/queries/count-playlist-ids-by-source.sql",
+            "resources/main/db/pg/queries/count-source-playlists.sql",
             src_id,
         )
         .fetch_one(&mut *conn)
@@ -2273,6 +2373,25 @@ mod test {
             }
         }
 
+        mod count_source_playlists {
+            use super::*;
+
+            // Tests
+
+            #[sqlx::test]
+            async fn unit(db: PgPool) {
+                let data = Data::new();
+                let src_id = data.srcs[0].id;
+                let db = init(db).await;
+                let mut conn = db.acquire().await.expect("failed to acquire connection");
+                let count = conn
+                    .count_source_playlists(src_id)
+                    .await
+                    .expect("failed to count source playlists");
+                assert_eq!(count, 3);
+            }
+        }
+
         mod create_playlist {
             use super::*;
 
@@ -2403,6 +2522,47 @@ mod test {
                     .expect("failed to fetch user")
                     .expect("user doesn't exist");
                 assert_eq!(usr, usr_fetched);
+            }
+        }
+
+        mod delete_playlist {
+            use super::*;
+
+            // Tests
+
+            #[sqlx::test]
+            async fn unit(db: PgPool) {
+                let data = Data::new();
+                let id = data.playlists[0].id;
+                let db = init(db).await;
+                let mut conn = db.acquire().await.expect("failed to acquire connection");
+                conn.delete_playlist(id)
+                    .await
+                    .expect("failed to delete playlist");
+                let playlist = conn
+                    .playlist_by_id(id)
+                    .await
+                    .expect("failed to fetch playlist");
+                assert!(playlist.is_none());
+            }
+        }
+
+        mod delete_source {
+            use super::*;
+
+            // Tests
+
+            #[sqlx::test]
+            async fn unit(db: PgPool) {
+                let data = Data::new();
+                let id = data.srcs[0].id;
+                let db = init(db).await;
+                let mut conn = db.acquire().await.expect("failed to acquire connection");
+                conn.delete_source(id)
+                    .await
+                    .expect("failed to delete source");
+                let src = conn.source_by_id(id).await.expect("failed to fetch source");
+                assert!(src.is_none());
             }
         }
 

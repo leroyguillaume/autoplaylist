@@ -54,6 +54,10 @@ macro_rules! mock_client_impl {
                 self
             }
 
+            async fn count_source_playlists(&mut self, id: Uuid) -> DatabaseResult<u32> {
+                self.$attr.count_source_playlists(id).await
+            }
+
             async fn create_playlist(
                 &mut self,
                 creation: &PlaylistCreation,
@@ -71,6 +75,14 @@ macro_rules! mock_client_impl {
 
             async fn create_user(&mut self, creation: &UserCreation) -> DatabaseResult<User> {
                 self.$attr.create_user(creation).await
+            }
+
+            async fn delete_playlist(&mut self, id: Uuid) -> DatabaseResult<()> {
+                self.$attr.delete_playlist(id).await
+            }
+
+            async fn delete_source(&mut self, id: Uuid) -> DatabaseResult<()> {
+                self.$attr.delete_source(id).await
             }
 
             async fn delete_tracks_from_playlist(&mut self, id: Uuid) -> DatabaseResult<()> {
@@ -341,6 +353,8 @@ pub trait DatabaseClient: Send + Sync {
 
     fn as_client_mut(&mut self) -> &mut dyn DatabaseClient;
 
+    async fn count_source_playlists(&mut self, id: Uuid) -> DatabaseResult<u32>;
+
     async fn create_playlist(&mut self, creation: &PlaylistCreation) -> DatabaseResult<Playlist>;
 
     async fn create_source(&mut self, creation: &SourceCreation) -> DatabaseResult<Source>;
@@ -348,6 +362,10 @@ pub trait DatabaseClient: Send + Sync {
     async fn create_track(&mut self, creation: &TrackCreation) -> DatabaseResult<Track>;
 
     async fn create_user(&mut self, creation: &UserCreation) -> DatabaseResult<User>;
+
+    async fn delete_playlist(&mut self, id: Uuid) -> DatabaseResult<()>;
+
+    async fn delete_source(&mut self, id: Uuid) -> DatabaseResult<()>;
 
     async fn delete_tracks_from_playlist(&mut self, id: Uuid) -> DatabaseResult<()>;
 
