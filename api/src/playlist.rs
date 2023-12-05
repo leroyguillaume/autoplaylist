@@ -2,7 +2,7 @@ use std::{marker::PhantomData, sync::Arc};
 
 use async_trait::async_trait;
 use autoplaylist_common::{
-    api::{CreatePlaylistRequest, Platform},
+    api::{CreatePlaylistRequest, Platform, QQueryParam},
     broker::{
         rabbitmq::{RabbitMqClient, RabbitMqConsumer},
         BrokerClient, Consumer, PlaylistMessage, PlaylistMessageKind, SourceMessage,
@@ -28,7 +28,7 @@ use crate::{ServiceError, ServiceResult};
 pub trait PlaylistService: Send + Sync {
     async fn authenticated_user_playlists(
         &self,
-        user_id: Uuid,
+        usr_id: Uuid,
         req: PageRequest,
     ) -> ServiceResult<Page<Playlist>>;
 
@@ -39,6 +39,19 @@ pub trait PlaylistService: Send + Sync {
     async fn playlist_by_id(&self, id: Uuid) -> ServiceResult<Option<Playlist>>;
 
     async fn playlists(&self, req: PageRequest) -> ServiceResult<Page<Playlist>>;
+
+    async fn search_authenticated_user_playlists_by_name(
+        &self,
+        usr_id: Uuid,
+        param: &QQueryParam,
+        req: PageRequest,
+    ) -> ServiceResult<Page<Playlist>>;
+
+    async fn search_playlists_by_name(
+        &self,
+        param: &QQueryParam,
+        req: PageRequest,
+    ) -> ServiceResult<Page<Playlist>>;
 
     async fn start_synchronization(&self, id: Uuid) -> ServiceResult<()>;
 }
@@ -99,11 +112,11 @@ impl<
 {
     async fn authenticated_user_playlists(
         &self,
-        user_id: Uuid,
+        usr_id: Uuid,
         req: PageRequest,
     ) -> ServiceResult<Page<Playlist>> {
         let mut db_conn = self.db.acquire().await?;
-        let page = db_conn.user_playlists(user_id, req).await?;
+        let page = db_conn.user_playlists(usr_id, req).await?;
         Ok(page)
     }
 
@@ -183,6 +196,29 @@ impl<
     async fn playlists(&self, req: PageRequest) -> ServiceResult<Page<Playlist>> {
         let mut db_conn = self.db.acquire().await?;
         let page = db_conn.playlists(req).await?;
+        Ok(page)
+    }
+
+    async fn search_authenticated_user_playlists_by_name(
+        &self,
+        usr_id: Uuid,
+        param: &QQueryParam,
+        req: PageRequest,
+    ) -> ServiceResult<Page<Playlist>> {
+        let mut db_conn = self.db.acquire().await?;
+        let page = db_conn
+            .search_user_playlists_by_name(usr_id, &param.q, req)
+            .await?;
+        Ok(page)
+    }
+
+    async fn search_playlists_by_name(
+        &self,
+        param: &QQueryParam,
+        req: PageRequest,
+    ) -> ServiceResult<Page<Playlist>> {
+        let mut db_conn = self.db.acquire().await?;
+        let page = db_conn.search_playlists_by_name(&param.q, req).await?;
         Ok(page)
     }
 
@@ -734,6 +770,109 @@ mod test {
                 };
                 let page = playlist_svc
                     .playlists(req)
+                    .await
+                    .expect("failed to get playlists");
+                assert_eq!(page, expected);
+            }
+        }
+
+        mod search_authenticated_user_playlists_by_name {
+            use super::*;
+
+            // Tests
+
+            #[tokio::test]
+            async fn page() {
+                let id = Uuid::new_v4();
+                let param = QQueryParam { q: "query".into() };
+                let req = PageRequest::new(10, 0);
+                let expected = Page {
+                    first: true,
+                    items: vec![],
+                    last: true,
+                    req,
+                    total: 0,
+                };
+                let db = MockDatabasePool {
+                    acquire: Mock::once({
+                        let expected = expected.clone();
+                        let param = param.clone();
+                        move || {
+                            let mut conn = MockDatabaseConnection::new();
+                            conn.0
+                                .expect_search_user_playlists_by_name()
+                                .with(eq(id), eq(param.q.clone()), eq(req))
+                                .times(1)
+                                .returning({
+                                    let expected = expected.clone();
+                                    move |_, _, _| Ok(expected.clone())
+                                });
+                            conn
+                        }
+                    }),
+                    ..Default::default()
+                };
+                let playlist_svc = DefaultPlaylistService {
+                    broker: Arc::new(MockBrokerClient::default()),
+                    db: Arc::new(db),
+                    spotify: Arc::new(MockSpotifyClient::default()),
+                    _csm: PhantomData,
+                    _dbconn: PhantomData,
+                    _dbtx: PhantomData,
+                };
+                let page = playlist_svc
+                    .search_authenticated_user_playlists_by_name(id, &param, req)
+                    .await
+                    .expect("failed to get playlists");
+                assert_eq!(page, expected);
+            }
+        }
+
+        mod search_playlists {
+            use super::*;
+
+            // Tests
+
+            #[tokio::test]
+            async fn page() {
+                let req = PageRequest::new(10, 0);
+                let param = QQueryParam { q: "query".into() };
+                let expected = Page {
+                    first: true,
+                    items: vec![],
+                    last: true,
+                    req,
+                    total: 0,
+                };
+                let db = MockDatabasePool {
+                    acquire: Mock::once({
+                        let expected = expected.clone();
+                        let param = param.clone();
+                        move || {
+                            let mut conn = MockDatabaseConnection::new();
+                            conn.0
+                                .expect_search_playlists_by_name()
+                                .with(eq(param.q.clone()), eq(req))
+                                .times(1)
+                                .returning({
+                                    let expected = expected.clone();
+                                    move |_, _| Ok(expected.clone())
+                                });
+                            conn
+                        }
+                    }),
+                    ..Default::default()
+                };
+                let playlist_svc = DefaultPlaylistService {
+                    broker: Arc::new(MockBrokerClient::default()),
+                    db: Arc::new(db),
+                    spotify: Arc::new(MockSpotifyClient::default()),
+                    _csm: PhantomData,
+                    _dbconn: PhantomData,
+                    _dbtx: PhantomData,
+                };
+                let page = playlist_svc
+                    .search_playlists_by_name(&param, req)
                     .await
                     .expect("failed to get playlists");
                 assert_eq!(page, expected);

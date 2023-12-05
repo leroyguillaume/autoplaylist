@@ -4,6 +4,8 @@ DECLARE
     playlist_2 UUID := '58fb7bd7-efe2-4346-ac1f-2f21b8c3dd7c';
     playlist_3 UUID := 'a80267ba-89be-4350-ac0d-8ebecb88efa0';
     playlist_4 UUID := '36f24355-f506-4b40-955e-f42a1c49c138';
+    playlist_5 UUID := '738c1907-1630-42ee-89b8-bd28cd3701a5';
+    playlist_6 UUID := '08310fbb-14be-4b00-abf8-5a60e187b164';
     src_1 UUID := '911ca8e7-4874-4bf4-b8e1-1ddd1b6cee41';
     src_2 UUID := 'f1c418db-13c0-47a7-9ecb-9aa4cf4995eb';
     src_3 UUID := '12d423d1-3bc0-4eef-b0c6-6748beb7d52e';
@@ -135,6 +137,22 @@ BEGIN
             '{"yearEquals":1999}',
             src_4,
             '{"spotify":"playlist_4"}'
+        ),
+        (
+            playlist_5,
+            '2023-05-05T00:00:10Z',
+            'test_5',
+            '{"yearEquals":1999}',
+            src_4,
+            '{"spotify":"playlist_5"}'
+        ),
+        (
+            playlist_6,
+            '2023-06-05T00:00:10Z',
+            'test_6',
+            '{"yearEquals":1999}',
+            src_2,
+            '{"spotify":"playlist_6"}'
         );
 
     INSERT INTO playlist_track

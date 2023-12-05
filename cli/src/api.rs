@@ -2,8 +2,9 @@ use async_trait::async_trait;
 use autoplaylist_common::{
     api::{
         AuthenticateViaSpotifyQueryParams, CreatePlaylistRequest, JwtResponse,
-        PageRequestQueryParams, PlaylistResponse, RedirectUriQueryParam, SourceResponse,
-        PATH_ADMIN, PATH_AUTH_SPOTIFY, PATH_AUTH_SPOTIFY_TOKEN, PATH_PLAYLIST, PATH_SRC, PATH_SYNC,
+        PageRequestQueryParams, PlaylistResponse, QQueryParam, RedirectUriQueryParam,
+        SourceResponse, PATH_ADMIN, PATH_AUTH_SPOTIFY, PATH_AUTH_SPOTIFY_TOKEN, PATH_PLAYLIST,
+        PATH_SEARCH, PATH_SRC, PATH_SYNC,
     },
     model::Page,
 };
@@ -74,6 +75,20 @@ pub trait ApiClient: Send + Sync {
 
     async fn playlists(
         &self,
+        params: PageRequestQueryParams<25>,
+        token: &str,
+    ) -> ApiResult<Page<PlaylistResponse>>;
+
+    async fn search_authenticated_user_playlists_by_name(
+        &self,
+        param: &QQueryParam,
+        params: PageRequestQueryParams<25>,
+        token: &str,
+    ) -> ApiResult<Page<PlaylistResponse>>;
+
+    async fn search_playlists_by_name(
+        &self,
+        param: &QQueryParam,
         params: PageRequestQueryParams<25>,
         token: &str,
     ) -> ApiResult<Page<PlaylistResponse>>;
@@ -240,6 +255,74 @@ impl ApiClient for DefaultApiClient {
             let resp = Client::new()
                 .get(&url)
                 .bearer_auth(token)
+                .query(&params)
+                .send()
+                .await?;
+            let status = resp.status();
+            if status.is_success() {
+                let resp: Page<PlaylistResponse> = resp.json().await?;
+                Ok(resp)
+            } else {
+                Err(ApiError::Api(status))
+            }
+        }
+        .instrument(span)
+        .await
+    }
+
+    async fn search_authenticated_user_playlists_by_name(
+        &self,
+        param: &QQueryParam,
+        params: PageRequestQueryParams<25>,
+        token: &str,
+    ) -> ApiResult<Page<PlaylistResponse>> {
+        let span = debug_span!(
+            "search_authenticated_user_playlists_by_name",
+            params.limit,
+            params.offset,
+            params.q = param.q
+        );
+        async {
+            let url = format!("{}{PATH_PLAYLIST}{PATH_SEARCH}", self.base_url);
+            debug!(url, "doing GET");
+            let resp = Client::new()
+                .get(&url)
+                .bearer_auth(token)
+                .query(&param)
+                .query(&params)
+                .send()
+                .await?;
+            let status = resp.status();
+            if status.is_success() {
+                let resp: Page<PlaylistResponse> = resp.json().await?;
+                Ok(resp)
+            } else {
+                Err(ApiError::Api(status))
+            }
+        }
+        .instrument(span)
+        .await
+    }
+
+    async fn search_playlists_by_name(
+        &self,
+        param: &QQueryParam,
+        params: PageRequestQueryParams<25>,
+        token: &str,
+    ) -> ApiResult<Page<PlaylistResponse>> {
+        let span = debug_span!(
+            "search_authenticated_user_playlists_by_name",
+            params.limit,
+            params.offset,
+            params.q = param.q
+        );
+        async {
+            let url = format!("{}{PATH_ADMIN}{PATH_PLAYLIST}{PATH_SEARCH}", self.base_url);
+            debug!(url, "doing GET");
+            let resp = Client::new()
+                .get(&url)
+                .bearer_auth(token)
+                .query(&param)
                 .query(&params)
                 .send()
                 .await?;
@@ -519,6 +602,56 @@ mod test {
                 let client = init();
                 let resp = client
                     .playlists(params, "jwt")
+                    .await
+                    .expect("failed to get playlists");
+                assert_eq!(resp, expected);
+            }
+        }
+
+        mod search_authenticated_user_playlists_by_name {
+            use super::*;
+
+            // Tests
+
+            #[tokio::test]
+            async fn page() {
+                let expected = Page {
+                    first: true,
+                    items: vec![],
+                    last: true,
+                    req: PageRequest::new(10, 0),
+                    total: 0,
+                };
+                let param = QQueryParam { q: "name".into() };
+                let params = PageRequestQueryParams::from(expected.req);
+                let client = init();
+                let resp = client
+                    .search_authenticated_user_playlists_by_name(&param, params, "jwt")
+                    .await
+                    .expect("failed to get playlists");
+                assert_eq!(resp, expected);
+            }
+        }
+
+        mod search_playlists_by_name {
+            use super::*;
+
+            // Tests
+
+            #[tokio::test]
+            async fn page() {
+                let expected = Page {
+                    first: true,
+                    items: vec![],
+                    last: true,
+                    req: PageRequest::new(10, 0),
+                    total: 0,
+                };
+                let param = QQueryParam { q: "name".into() };
+                let params = PageRequestQueryParams::from(expected.req);
+                let client = init();
+                let resp = client
+                    .search_playlists_by_name(&param, params, "jwt")
                     .await
                     .expect("failed to get playlists");
                 assert_eq!(resp, expected);
