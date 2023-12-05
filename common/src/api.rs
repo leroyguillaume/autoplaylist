@@ -15,6 +15,7 @@ pub const PATH_AUTH_SPOTIFY: &str = "/auth/spotify";
 pub const PATH_AUTH_SPOTIFY_TOKEN: &str = "/auth/spotify/token";
 pub const PATH_HEALTH: &str = "/health";
 pub const PATH_PLAYLIST: &str = "/playlist";
+pub const PATH_SEARCH: &str = "/search";
 pub const PATH_SRC: &str = "/source";
 pub const PATH_SYNC: &str = "/sync";
 
@@ -104,6 +105,13 @@ impl From<String> for JwtResponse {
     fn from(jwt: String) -> Self {
         Self { jwt }
     }
+}
+
+// QQueryParam
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct QQueryParam {
+    pub q: String,
 }
 
 // RedirectUriQueryParam
