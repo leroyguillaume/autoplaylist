@@ -85,7 +85,7 @@ pub trait AuthService: Send + Sync {
 
     async fn authenticated_user(&self, headers: &HeaderMap) -> ServiceResult<User>;
 
-    fn spotify_authorize_url(&self, param: &RedirectUriQueryParam) -> ServiceResult<String>;
+    fn spotify_authorize_url(&self, params: &RedirectUriQueryParam) -> ServiceResult<String>;
 }
 
 // JwtProvider
@@ -207,8 +207,8 @@ impl<
         }
     }
 
-    fn spotify_authorize_url(&self, param: &RedirectUriQueryParam) -> ServiceResult<String> {
-        let url = self.spotify.authorize_url(&param.redirect_uri)?;
+    fn spotify_authorize_url(&self, params: &RedirectUriQueryParam) -> ServiceResult<String> {
+        let url = self.spotify.authorize_url(&params.redirect_uri)?;
         Ok(url)
     }
 }
@@ -656,11 +656,11 @@ mod test {
             #[tokio::test]
             async fn url() {
                 let expected = "url";
-                let param = RedirectUriQueryParam::from(String::from("redirect_uri"));
+                let params = RedirectUriQueryParam::from(String::from("redirect_uri"));
                 let mut spotify = MockSpotifyClient::new();
                 spotify
                     .expect_authorize_url()
-                    .with(eq(param.redirect_uri.clone()))
+                    .with(eq(params.redirect_uri.clone()))
                     .times(1)
                     .returning(move |_| Ok(expected.into()));
                 let auth = DefaultAuthService {
@@ -671,7 +671,7 @@ mod test {
                     _dbtx: PhantomData,
                 };
                 let url = auth
-                    .spotify_authorize_url(&param)
+                    .spotify_authorize_url(&params)
                     .expect("failed to get Spotify authorize URL");
                 assert_eq!(url, expected);
             }

@@ -247,17 +247,17 @@ fn create_app<SVC: Services + 'static>(svc: Arc<SVC>) -> Router {
         .on_response(on_resp)
         .on_failure(on_fail);
     Router::new()
-        .route(&format!("{PATH_ADMIN}{PATH_PLAYLIST}"), routing::get(|headers: HeaderMap, State(svc): State<Arc<SVC>>, Query(params): Query<PageRequestQueryParams<25>>| async move {
+        .route(&format!("{PATH_ADMIN}{PATH_PLAYLIST}"), routing::get(|headers: HeaderMap, State(svc): State<Arc<SVC>>, Query(req): Query<PageRequestQueryParams<25>>| async move {
             let usr = authenticated_admin!(svc.auth(), &headers);
             let span = info_span!(
                 "playlists",
                 auth.usr.email = usr.email,
                 auth.usr.id = %usr.id,
-                params.limit,
-                params.offset,
+                params.limit = req.limit,
+                params.offset = req.offset,
             );
             async {
-                match svc.playlist().playlists(params.into()).await {
+                match svc.playlist().playlists(req).await {
                     Ok(page) => {
                         let resp = page.map(PlaylistResponse::from);
                         (StatusCode::OK, Json(resp)).into_response()
@@ -268,18 +268,18 @@ fn create_app<SVC: Services + 'static>(svc: Arc<SVC>) -> Router {
             .instrument(span)
             .await
         }))
-        .route(&format!("{PATH_ADMIN}{PATH_PLAYLIST}{PATH_SEARCH}"), routing::get(|headers: HeaderMap, State(svc): State<Arc<SVC>>, Query(param): Query<QQueryParam>, Query(params): Query<PageRequestQueryParams<25>>| async move {
+        .route(&format!("{PATH_ADMIN}{PATH_PLAYLIST}{PATH_SEARCH}"), routing::get(|headers: HeaderMap, State(svc): State<Arc<SVC>>, Query(params): Query<QQueryParam>, Query(req): Query<PageRequestQueryParams<25>>| async move {
             let usr = authenticated_admin!(svc.auth(), &headers);
             let span = info_span!(
                 "search_playlists_by_name",
                 auth.usr.email = usr.email,
                 auth.usr.id = %usr.id,
-                params.limit,
-                params.offset,
-                params.q = param.q,
+                params.limit = req.limit,
+                params.offset = req.offset,
+                params.q = params.q,
             );
             async {
-                match svc.playlist().search_playlists_by_name(&param, params.into()).await {
+                match svc.playlist().search_playlists_by_name(&params, req).await {
                     Ok(page) => {
                         let resp = page.map(PlaylistResponse::from);
                         (StatusCode::OK, Json(resp)).into_response()
@@ -290,17 +290,17 @@ fn create_app<SVC: Services + 'static>(svc: Arc<SVC>) -> Router {
             .instrument(span)
             .await
         }))
-        .route(&format!("{PATH_ADMIN}{PATH_SRC}"), routing::get(|headers: HeaderMap, State(svc): State<Arc<SVC>>, Query(params): Query<PageRequestQueryParams<25>>| async move {
+        .route(&format!("{PATH_ADMIN}{PATH_SRC}"), routing::get(|headers: HeaderMap, State(svc): State<Arc<SVC>>, Query(req): Query<PageRequestQueryParams<25>>| async move {
             let usr = authenticated_admin!(svc.auth(), &headers);
             let span = info_span!(
                 "sources",
                 auth.usr.email = usr.email,
                 auth.usr.id = %usr.id,
-                params.limit,
-                params.offset,
+                params.limit = req.limit,
+                params.offset = req.offset,
             );
             async {
-                match svc.source().sources(params.into()).await {
+                match svc.source().sources(req).await {
                     Ok(page) => {
                         let resp = page.map(SourceResponse::from);
                         (StatusCode::OK, Json(resp)).into_response()
@@ -362,17 +362,17 @@ fn create_app<SVC: Services + 'static>(svc: Arc<SVC>) -> Router {
             PATH_HEALTH,
             routing::get(|| async { StatusCode::NO_CONTENT }),
         )
-        .route(PATH_PLAYLIST, routing::get(|headers: HeaderMap, State(svc): State<Arc<SVC>>, Query(params): Query<PageRequestQueryParams<25>>| async move {
+        .route(PATH_PLAYLIST, routing::get(|headers: HeaderMap, State(svc): State<Arc<SVC>>, Query(req): Query<PageRequestQueryParams<25>>| async move {
             let usr = authenticated_user!(svc.auth(), &headers);
             let span = info_span!(
                 "authenticated_user_playlists",
                 auth.usr.email = usr.email,
                 auth.usr.id = %usr.id,
-                params.limit,
-                params.offset
+                params.limit = req.limit,
+                params.offset = req.offset,
             );
             async {
-                match svc.playlist().authenticated_user_playlists(usr.id, params.into()).await {
+                match svc.playlist().authenticated_user_playlists(usr.id, req).await {
                     Ok(page) => {
                         let resp = page.map(PlaylistResponse::from);
                         (StatusCode::OK, Json(resp)).into_response()
@@ -443,18 +443,18 @@ fn create_app<SVC: Services + 'static>(svc: Arc<SVC>) -> Router {
             .instrument(span)
             .await
         }))
-        .route(&format!("{PATH_PLAYLIST}{PATH_SEARCH}"), routing::get(|headers: HeaderMap, State(svc): State<Arc<SVC>>, Query(param): Query<QQueryParam>, Query(params): Query<PageRequestQueryParams<25>>| async move {
+        .route(&format!("{PATH_PLAYLIST}{PATH_SEARCH}"), routing::get(|headers: HeaderMap, State(svc): State<Arc<SVC>>, Query(params): Query<QQueryParam>, Query(req): Query<PageRequestQueryParams<25>>| async move {
             let usr = authenticated_user!(svc.auth(), &headers);
             let span = info_span!(
                 "search_authenticated_user_playlists_by_name",
                 auth.usr.email = usr.email,
                 auth.usr.id = %usr.id,
-                params.limit,
-                params.offset,
-                params.q = param.q,
+                params.limit = req.limit,
+                params.offset = req.offset,
+                params.q = params.q,
             );
             async {
-                match svc.playlist().search_authenticated_user_playlists_by_name(usr.id, &param, params.into()).await {
+                match svc.playlist().search_authenticated_user_playlists_by_name(usr.id, &params, req).await {
                     Ok(page) => {
                         let resp = page.map(PlaylistResponse::from);
                         (StatusCode::OK, Json(resp)).into_response()
@@ -465,17 +465,17 @@ fn create_app<SVC: Services + 'static>(svc: Arc<SVC>) -> Router {
             .instrument(span)
             .await
         }))
-        .route(PATH_SRC, routing::get(|headers: HeaderMap, State(svc): State<Arc<SVC>>, Query(params): Query<PageRequestQueryParams<25>>| async move {
+        .route(PATH_SRC, routing::get(|headers: HeaderMap, State(svc): State<Arc<SVC>>, Query(req): Query<PageRequestQueryParams<25>>| async move {
             let usr = authenticated_user!(svc.auth(), &headers);
             let span = info_span!(
                 "authenticated_user_sources",
                 auth.usr.email = usr.email,
                 auth.usr.id = %usr.id,
-                params.limit,
-                params.offset,
+                params.limit = req.limit,
+                params.offset = req.offset,
             );
             async {
-                match svc.source().authenticated_user_sources(usr.id, params.into()).await {
+                match svc.source().authenticated_user_sources(usr.id, req).await {
                     Ok(page) => {
                         let resp = page.map(SourceResponse::from);
                         (StatusCode::OK, Json(resp)).into_response()
@@ -657,6 +657,7 @@ mod test {
                 req: PageRequest::new(10, 0),
                 total: 0,
             };
+            let req = PageRequestQueryParams::<25>::from(page.req);
             let expected = page.clone().map(PlaylistResponse::from);
             let mut auth = MockAuthService::new();
             auth.expect_authenticated_user()
@@ -669,7 +670,7 @@ mod test {
             let mut playlist_svc = MockPlaylistService::new();
             playlist_svc
                 .expect_authenticated_user_playlists()
-                .with(eq(usr.id), eq(page.req))
+                .with(eq(usr.id), eq(req))
                 .times(mocks.authenticated_usr_playlists.times())
                 .returning({
                     let mock = mocks.authenticated_usr_playlists.clone();
@@ -682,7 +683,6 @@ mod test {
                 ..Default::default()
             };
             let server = init(svc);
-            let req = PageRequestQueryParams::<25>::from(page.req);
             let resp = server.get(PATH_PLAYLIST).add_query_params(req).await;
             (resp, expected)
         }
@@ -740,6 +740,7 @@ mod test {
                 req: PageRequest::new(10, 0),
                 total: 0,
             };
+            let req = PageRequestQueryParams::<25>::from(page.req);
             let expected = page.clone().map(SourceResponse::from);
             let mut auth = MockAuthService::new();
             auth.expect_authenticated_user()
@@ -752,7 +753,7 @@ mod test {
             let mut src_svc = MockSourceService::new();
             src_svc
                 .expect_authenticated_user_sources()
-                .with(eq(usr.id), eq(page.req))
+                .with(eq(usr.id), eq(req))
                 .times(mocks.authenticated_usr_srcs.times())
                 .returning({
                     let mock = mocks.authenticated_usr_srcs.clone();
@@ -765,7 +766,6 @@ mod test {
                 ..Default::default()
             };
             let server = init(svc);
-            let req = PageRequestQueryParams::<25>::from(page.req);
             let resp = server.get(PATH_SRC).add_query_params(req).await;
             (resp, expected)
         }
@@ -1082,6 +1082,7 @@ mod test {
                 req: PageRequest::new(10, 0),
                 total: 0,
             };
+            let req = PageRequestQueryParams::<25>::from(page.req);
             let expected = page.clone().map(PlaylistResponse::from);
             let mut auth = MockAuthService::new();
             auth.expect_authenticated_user()
@@ -1093,7 +1094,7 @@ mod test {
             let mut playlist_svc = MockPlaylistService::new();
             playlist_svc
                 .expect_playlists()
-                .with(eq(page.req))
+                .with(eq(req))
                 .times(mocks.playlists.times())
                 .returning({
                     let mock = mocks.playlists.clone();
@@ -1106,7 +1107,6 @@ mod test {
                 ..Default::default()
             };
             let server = init(svc);
-            let req = PageRequestQueryParams::<25>::from(page.req);
             let resp = server
                 .get(&format!("{PATH_ADMIN}{PATH_PLAYLIST}"))
                 .add_query_params(req)
@@ -1194,6 +1194,7 @@ mod test {
                 req: PageRequest::new(10, 0),
                 total: 0,
             };
+            let req = PageRequestQueryParams::<25>::from(page.req);
             let param = QQueryParam { q: "name".into() };
             let expected = page.clone().map(PlaylistResponse::from);
             let mut auth = MockAuthService::new();
@@ -1207,7 +1208,7 @@ mod test {
             let mut playlist_svc = MockPlaylistService::new();
             playlist_svc
                 .expect_search_authenticated_user_playlists_by_name()
-                .with(eq(usr.id), eq(param.clone()), eq(page.req))
+                .with(eq(usr.id), eq(param.clone()), eq(req))
                 .times(mocks.search_playlists.times())
                 .returning({
                     let mock = mocks.search_playlists.clone();
@@ -1220,7 +1221,6 @@ mod test {
                 ..Default::default()
             };
             let server = init(svc);
-            let req = PageRequestQueryParams::<25>::from(page.req);
             let resp = server
                 .get(&format!("{PATH_PLAYLIST}{PATH_SEARCH}"))
                 .add_query_params(&param)
@@ -1276,6 +1276,7 @@ mod test {
                 req: PageRequest::new(10, 0),
                 total: 0,
             };
+            let req = PageRequestQueryParams::<25>::from(page.req);
             let expected = page.clone().map(PlaylistResponse::from);
             let mut auth = MockAuthService::new();
             auth.expect_authenticated_user()
@@ -1287,7 +1288,7 @@ mod test {
             let mut playlist_svc = MockPlaylistService::new();
             playlist_svc
                 .expect_search_playlists_by_name()
-                .with(eq(param.clone()), eq(page.req))
+                .with(eq(param.clone()), eq(req))
                 .times(mocks.search_playlists.times())
                 .returning({
                     let mock = mocks.search_playlists.clone();
@@ -1300,7 +1301,6 @@ mod test {
                 ..Default::default()
             };
             let server = init(svc);
-            let req = PageRequestQueryParams::<25>::from(page.req);
             let resp = server
                 .get(&format!("{PATH_ADMIN}{PATH_PLAYLIST}{PATH_SEARCH}"))
                 .add_query_params(param)
@@ -1383,6 +1383,7 @@ mod test {
                 total: 0,
             };
             let expected = page.clone().map(SourceResponse::from);
+            let req = PageRequestQueryParams::<25>::from(page.req);
             let mut auth = MockAuthService::new();
             auth.expect_authenticated_user()
                 .times(mocks.authenticated_usr.times())
@@ -1393,7 +1394,7 @@ mod test {
             let mut src_svc = MockSourceService::new();
             src_svc
                 .expect_sources()
-                .with(eq(page.req))
+                .with(eq(req))
                 .times(mocks.srcs.times())
                 .returning({
                     let mock = mocks.srcs.clone();
@@ -1406,7 +1407,6 @@ mod test {
                 ..Default::default()
             };
             let server = init(svc);
-            let req = PageRequestQueryParams::<25>::from(page.req);
             let resp = server
                 .get(&format!("{PATH_ADMIN}{PATH_SRC}"))
                 .add_query_params(req)

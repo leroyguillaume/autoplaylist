@@ -2,6 +2,7 @@ use std::{marker::PhantomData, sync::Arc};
 
 use async_trait::async_trait;
 use autoplaylist_common::{
+    api::PageRequestQueryParams,
     broker::{
         rabbitmq::{RabbitMqClient, RabbitMqConsumer},
         BrokerClient, Consumer, SourceMessage, SourceMessageKind,
@@ -10,7 +11,7 @@ use autoplaylist_common::{
         pg::{PostgresConnection, PostgresPool, PostgresTransaction},
         DatabaseConnection, DatabasePool, DatabaseTransaction,
     },
-    model::{Page, PageRequest, Source},
+    model::{Page, Source},
 };
 use uuid::Uuid;
 
@@ -24,10 +25,10 @@ pub trait SourceService: Send + Sync {
     async fn authenticated_user_sources(
         &self,
         user_id: Uuid,
-        req: PageRequest,
+        req: PageRequestQueryParams<25>,
     ) -> ServiceResult<Page<Source>>;
 
-    async fn sources(&self, req: PageRequest) -> ServiceResult<Page<Source>>;
+    async fn sources(&self, req: PageRequestQueryParams<25>) -> ServiceResult<Page<Source>>;
 
     async fn start_synchronization(&self, id: Uuid) -> ServiceResult<()>;
 }
@@ -80,16 +81,16 @@ impl<
     async fn authenticated_user_sources(
         &self,
         user_id: Uuid,
-        req: PageRequest,
+        req: PageRequestQueryParams<25>,
     ) -> ServiceResult<Page<Source>> {
         let mut db_conn = self.db.acquire().await?;
-        let page = db_conn.user_sources(user_id, req).await?;
+        let page = db_conn.user_sources(user_id, req.into()).await?;
         Ok(page)
     }
 
-    async fn sources(&self, req: PageRequest) -> ServiceResult<Page<Source>> {
+    async fn sources(&self, req: PageRequestQueryParams<25>) -> ServiceResult<Page<Source>> {
         let mut db_conn = self.db.acquire().await?;
-        let page = db_conn.sources(req).await?;
+        let page = db_conn.sources(req.into()).await?;
         Ok(page)
     }
 
@@ -128,12 +129,12 @@ mod test {
             #[tokio::test]
             async fn page() {
                 let id = Uuid::new_v4();
-                let req = PageRequest::new(10, 0);
+                let req = PageRequestQueryParams::<25>::default();
                 let expected = Page {
                     first: true,
                     items: vec![],
                     last: true,
-                    req,
+                    req: req.into(),
                     total: 0,
                 };
                 let db = MockDatabasePool {
@@ -143,7 +144,7 @@ mod test {
                             let mut conn = MockDatabaseConnection::new();
                             conn.0
                                 .expect_user_sources()
-                                .with(eq(id), eq(req))
+                                .with(eq(id), eq(expected.req))
                                 .times(1)
                                 .returning({
                                     let expected = expected.clone();
@@ -176,12 +177,12 @@ mod test {
 
             #[tokio::test]
             async fn page() {
-                let req = PageRequest::new(10, 0);
+                let req = PageRequestQueryParams::<25>::default();
                 let expected = Page {
                     first: true,
                     items: vec![],
                     last: true,
-                    req,
+                    req: req.into(),
                     total: 0,
                 };
                 let db = MockDatabasePool {
@@ -189,10 +190,14 @@ mod test {
                         let expected = expected.clone();
                         move || {
                             let mut conn = MockDatabaseConnection::new();
-                            conn.0.expect_sources().with(eq(req)).times(1).returning({
-                                let expected = expected.clone();
-                                move |_| Ok(expected.clone())
-                            });
+                            conn.0
+                                .expect_sources()
+                                .with(eq(expected.req))
+                                .times(1)
+                                .returning({
+                                    let expected = expected.clone();
+                                    move |_| Ok(expected.clone())
+                                });
                             conn
                         }
                     }),
