@@ -13,9 +13,10 @@ DECLARE
     track_1 UUID := 'd16eb9f1-cf4d-4a41-9515-e9a8125d7843';
     track_2 UUID := '9095b250-d4ab-427f-b38f-32aaf45afec5';
     track_3 UUID := 'f747ca3a-0cc7-4d9f-b38a-dc506f99f5df';
-    user_1 UUID := 'ee21186a-990c-42e9-bcd2-69f9090a7736';
-    user_2 UUID := 'ec1ca9f9-3c47-44a2-95c7-a13ff6de852d';
-    user_3 UUID := '8fc899c5-f254-4966-9b5a-e8f1c4f97f7c';
+    usr_1 UUID := 'ee21186a-990c-42e9-bcd2-69f9090a7736';
+    usr_2 UUID := 'ec1ca9f9-3c47-44a2-95c7-a13ff6de852d';
+    usr_3 UUID := '8fc899c5-f254-4966-9b5a-e8f1c4f97f7c';
+    usr_4 UUID := '83e3a7ed-9d6c-4e4f-b732-8a00cab3fcb5';
 BEGIN
     INSERT INTO track (id, creation, title, artists, album, from_compil, year, spotify_id)
     VALUES
@@ -53,23 +54,30 @@ BEGIN
     INSERT INTO "user" (id, creation, email, role, creds)
     VALUES
         (
-            user_1,
+            usr_1,
             '2023-01-01T00:00:00Z',
             'user_1@test',
             'admin',
             'aWgc5xavoR/8BEWvI9ujW8deLtjje1RNSULt49LXXNE6SLGqUNAcO1e4yLlX/46zbVFkoT0hV8jwtKncfbIfegrBB11gZUiPPhJedg4ywQwJB0HBOWTCoqrW4XWglA9FA9eBnyZ6x/dEI+m4zvphfg=='
         ),
         (
-            user_2,
+            usr_2,
             '2023-02-01T00:00:00Z',
             'user_2@test',
             'user',
             'KsuJ6o6TS4XOOztpV10hd07zrgU73tIriUpsMgqsXPM='
         ),
         (
-            user_3,
+            usr_3,
             '2023-03-01T00:00:00Z',
             'user_3@test',
+            'user',
+            'KsuJ6o6TS4XOOztpV10hd07zrgU73tIriUpsMgqsXPM='
+        ),
+        (
+            usr_4,
+            '2023-04-01T00:00:00Z',
+            'test_4@test',
             'user',
             'KsuJ6o6TS4XOOztpV10hd07zrgU73tIriUpsMgqsXPM='
         );
@@ -79,25 +87,25 @@ BEGIN
         (
             src_1,
             '2023-01-05T01:00:00Z',
-            user_1,
+            usr_1,
             '{"spotify":"savedTracks"}'
         ),
         (
             src_2,
             '2023-02-05T02:00:00Z',
-            user_1,
+            usr_1,
             '{"spotify":{"playlist":"src_2"}}'
         ),
         (
             src_3,
             '2023-02-05T03:00:00Z',
-            user_1,
+            usr_1,
             '{"spotify":{"playlist":"src_3"}}'
         ),
         (
             src_4,
             '2023-02-05T04:00:00Z',
-            user_2,
+            usr_2,
             '{"spotify":{"playlist":"src_4"}}'
         );
 
