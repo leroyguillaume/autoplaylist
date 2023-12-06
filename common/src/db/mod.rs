@@ -77,20 +77,24 @@ macro_rules! mock_client_impl {
                 self.$attr.create_user(creation).await
             }
 
-            async fn delete_playlist(&mut self, id: Uuid) -> DatabaseResult<()> {
+            async fn delete_playlist(&mut self, id: Uuid) -> DatabaseResult<bool> {
                 self.$attr.delete_playlist(id).await
             }
 
-            async fn delete_source(&mut self, id: Uuid) -> DatabaseResult<()> {
+            async fn delete_source(&mut self, id: Uuid) -> DatabaseResult<bool> {
                 self.$attr.delete_source(id).await
             }
 
-            async fn delete_tracks_from_playlist(&mut self, id: Uuid) -> DatabaseResult<()> {
+            async fn delete_tracks_from_playlist(&mut self, id: Uuid) -> DatabaseResult<u64> {
                 self.$attr.delete_tracks_from_playlist(id).await
             }
 
-            async fn delete_tracks_from_source(&mut self, id: Uuid) -> DatabaseResult<()> {
+            async fn delete_tracks_from_source(&mut self, id: Uuid) -> DatabaseResult<u64> {
                 self.$attr.delete_tracks_from_source(id).await
+            }
+
+            async fn delete_user(&mut self, id: Uuid) -> DatabaseResult<bool> {
+                self.$attr.delete_user(id).await
             }
 
             async fn lock_playlist_synchronization(
@@ -388,13 +392,15 @@ pub trait DatabaseClient: Send + Sync {
 
     async fn create_user(&mut self, creation: &UserCreation) -> DatabaseResult<User>;
 
-    async fn delete_playlist(&mut self, id: Uuid) -> DatabaseResult<()>;
+    async fn delete_playlist(&mut self, id: Uuid) -> DatabaseResult<bool>;
 
-    async fn delete_source(&mut self, id: Uuid) -> DatabaseResult<()>;
+    async fn delete_source(&mut self, id: Uuid) -> DatabaseResult<bool>;
 
-    async fn delete_tracks_from_playlist(&mut self, id: Uuid) -> DatabaseResult<()>;
+    async fn delete_tracks_from_playlist(&mut self, id: Uuid) -> DatabaseResult<u64>;
 
-    async fn delete_tracks_from_source(&mut self, id: Uuid) -> DatabaseResult<()>;
+    async fn delete_tracks_from_source(&mut self, id: Uuid) -> DatabaseResult<u64>;
+
+    async fn delete_user(&mut self, id: Uuid) -> DatabaseResult<bool>;
 
     async fn lock_playlist_synchronization(
         &mut self,

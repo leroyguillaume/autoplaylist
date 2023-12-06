@@ -9,14 +9,17 @@ use autoplaylist_common::{
     },
     model::{Page, User},
 };
+use uuid::Uuid;
 
-use crate::ServiceResult;
+use crate::{ServiceError, ServiceResult};
 
 // UserService
 
 #[cfg_attr(test, mockall::automock)]
 #[async_trait]
 pub trait UserService: Send + Sync {
+    async fn delete(&self, id: Uuid) -> ServiceResult<()>;
+
     async fn search_users_by_email(
         &self,
         params: &SearchQueryParam,
@@ -52,6 +55,15 @@ impl DefaultUserService<PostgresConnection, PostgresTransaction<'_>, PostgresPoo
 impl<DBCONN: DatabaseConnection, DBTX: DatabaseTransaction, DB: DatabasePool<DBCONN, DBTX>>
     UserService for DefaultUserService<DBCONN, DBTX, DB>
 {
+    async fn delete(&self, id: Uuid) -> ServiceResult<()> {
+        let mut db_conn = self.db.acquire().await?;
+        if db_conn.delete_user(id).await? {
+            Ok(())
+        } else {
+            Err(ServiceError::NotFound(id))
+        }
+    }
+
     async fn search_users_by_email(
         &self,
         params: &SearchQueryParam,
@@ -79,8 +91,69 @@ mod test {
 
     use super::*;
 
+    // Mods
+
     mod default_user_message {
         use super::*;
+
+        // Mods
+
+        mod delete {
+            use super::*;
+
+            // run
+
+            async fn run(id: Uuid, mock: Mock<bool>) -> ServiceResult<()> {
+                let db = MockDatabasePool {
+                    acquire: Mock::once({
+                        let mock = mock.clone();
+                        move || {
+                            let mut conn = MockDatabaseConnection::new();
+                            conn.0
+                                .expect_delete_user()
+                                .with(eq(id))
+                                .times(1)
+                                .returning({
+                                    let mock = mock.clone();
+                                    move |_| Ok(mock.call())
+                                });
+                            conn
+                        }
+                    }),
+                    ..Default::default()
+                };
+                let usr_svc = DefaultUserService {
+                    db: Arc::new(db),
+                    _dbconn: PhantomData,
+                    _dbtx: PhantomData,
+                };
+                usr_svc.delete(id).await
+            }
+
+            // Tests
+
+            #[tokio::test]
+            async fn not_found() {
+                let expected = Uuid::new_v4();
+                let err = run(expected, Mock::once(|| false))
+                    .await
+                    .expect_err("deleting user should failed");
+                match err {
+                    ServiceError::NotFound(id) => {
+                        assert_eq!(id, expected);
+                    }
+                    _ => panic!("unexpected error: {err:?}"),
+                }
+            }
+
+            #[tokio::test]
+            async fn unit() {
+                let id = Uuid::new_v4();
+                run(id, Mock::once(|| true))
+                    .await
+                    .expect("failed to delete user");
+            }
+        }
 
         mod search_users {
             use super::*;

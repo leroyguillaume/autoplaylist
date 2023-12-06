@@ -604,13 +604,13 @@ mod test {
                                 .expect_delete_playlist()
                                 .with(eq(playlist.id))
                                 .times(mocks.delete_playlist.times())
-                                .returning(move |_| Ok(()));
+                                .returning(move |_| Ok(true));
                             db_tx
                                 .client
                                 .expect_delete_source()
                                 .with(eq(playlist.src.id))
                                 .times(mocks.delete_src.times())
-                                .returning(move |_| Ok(()));
+                                .returning(move |_| Ok(true));
                             db_tx
                         }
                     }),
