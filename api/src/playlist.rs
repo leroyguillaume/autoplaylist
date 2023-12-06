@@ -2,7 +2,7 @@ use std::{marker::PhantomData, sync::Arc};
 
 use async_trait::async_trait;
 use autoplaylist_common::{
-    api::{CreatePlaylistRequest, Platform, QQueryParam},
+    api::{CreatePlaylistRequest, PageRequestQueryParams, Platform, QQueryParam},
     broker::{
         rabbitmq::{RabbitMqClient, RabbitMqConsumer},
         BrokerClient, Consumer, PlaylistMessage, PlaylistMessageKind, SourceMessage,
@@ -12,7 +12,7 @@ use autoplaylist_common::{
         pg::{PostgresConnection, PostgresPool, PostgresTransaction},
         DatabaseConnection, DatabasePool, DatabaseTransaction, PlaylistCreation, SourceCreation,
     },
-    model::{Page, PageRequest, Playlist, Target, User},
+    model::{Page, Playlist, Target, User},
     spotify::{rspotify::RSpotifyClient, SpotifyClient},
     transactional,
 };
@@ -29,7 +29,7 @@ pub trait PlaylistService: Send + Sync {
     async fn authenticated_user_playlists(
         &self,
         usr_id: Uuid,
-        req: PageRequest,
+        req: PageRequestQueryParams<25>,
     ) -> ServiceResult<Page<Playlist>>;
 
     async fn create(&self, req: CreatePlaylistRequest, owner: User) -> ServiceResult<Playlist>;
@@ -38,19 +38,19 @@ pub trait PlaylistService: Send + Sync {
 
     async fn playlist_by_id(&self, id: Uuid) -> ServiceResult<Option<Playlist>>;
 
-    async fn playlists(&self, req: PageRequest) -> ServiceResult<Page<Playlist>>;
+    async fn playlists(&self, req: PageRequestQueryParams<25>) -> ServiceResult<Page<Playlist>>;
 
     async fn search_authenticated_user_playlists_by_name(
         &self,
         usr_id: Uuid,
-        param: &QQueryParam,
-        req: PageRequest,
+        params: &QQueryParam,
+        req: PageRequestQueryParams<25>,
     ) -> ServiceResult<Page<Playlist>>;
 
     async fn search_playlists_by_name(
         &self,
-        param: &QQueryParam,
-        req: PageRequest,
+        params: &QQueryParam,
+        req: PageRequestQueryParams<25>,
     ) -> ServiceResult<Page<Playlist>>;
 
     async fn start_synchronization(&self, id: Uuid) -> ServiceResult<()>;
@@ -113,10 +113,10 @@ impl<
     async fn authenticated_user_playlists(
         &self,
         usr_id: Uuid,
-        req: PageRequest,
+        req: PageRequestQueryParams<25>,
     ) -> ServiceResult<Page<Playlist>> {
         let mut db_conn = self.db.acquire().await?;
-        let page = db_conn.user_playlists(usr_id, req).await?;
+        let page = db_conn.user_playlists(usr_id, req.into()).await?;
         Ok(page)
     }
 
@@ -193,32 +193,34 @@ impl<
         Ok(playlist)
     }
 
-    async fn playlists(&self, req: PageRequest) -> ServiceResult<Page<Playlist>> {
+    async fn playlists(&self, req: PageRequestQueryParams<25>) -> ServiceResult<Page<Playlist>> {
         let mut db_conn = self.db.acquire().await?;
-        let page = db_conn.playlists(req).await?;
+        let page = db_conn.playlists(req.into()).await?;
         Ok(page)
     }
 
     async fn search_authenticated_user_playlists_by_name(
         &self,
         usr_id: Uuid,
-        param: &QQueryParam,
-        req: PageRequest,
+        params: &QQueryParam,
+        req: PageRequestQueryParams<25>,
     ) -> ServiceResult<Page<Playlist>> {
         let mut db_conn = self.db.acquire().await?;
         let page = db_conn
-            .search_user_playlists_by_name(usr_id, &param.q, req)
+            .search_user_playlists_by_name(usr_id, &params.q, req.into())
             .await?;
         Ok(page)
     }
 
     async fn search_playlists_by_name(
         &self,
-        param: &QQueryParam,
-        req: PageRequest,
+        params: &QQueryParam,
+        req: PageRequestQueryParams<25>,
     ) -> ServiceResult<Page<Playlist>> {
         let mut db_conn = self.db.acquire().await?;
-        let page = db_conn.search_playlists_by_name(&param.q, req).await?;
+        let page = db_conn
+            .search_playlists_by_name(&params.q, req.into())
+            .await?;
         Ok(page)
     }
 
@@ -270,12 +272,12 @@ mod test {
             #[tokio::test]
             async fn page() {
                 let id = Uuid::new_v4();
-                let req = PageRequest::new(10, 0);
+                let req = PageRequestQueryParams::<25>::default();
                 let expected = Page {
                     first: true,
                     items: vec![],
                     last: true,
-                    req,
+                    req: req.into(),
                     total: 0,
                 };
                 let db = MockDatabasePool {
@@ -285,7 +287,7 @@ mod test {
                             let mut conn = MockDatabaseConnection::new();
                             conn.0
                                 .expect_user_playlists()
-                                .with(eq(id), eq(req))
+                                .with(eq(id), eq(expected.req))
                                 .times(1)
                                 .returning({
                                     let expected = expected.clone();
@@ -738,12 +740,12 @@ mod test {
 
             #[tokio::test]
             async fn page() {
-                let req = PageRequest::new(10, 0);
+                let req = PageRequestQueryParams::<25>::default();
                 let expected = Page {
                     first: true,
                     items: vec![],
                     last: true,
-                    req,
+                    req: req.into(),
                     total: 0,
                 };
                 let db = MockDatabasePool {
@@ -751,10 +753,14 @@ mod test {
                         let expected = expected.clone();
                         move || {
                             let mut conn = MockDatabaseConnection::new();
-                            conn.0.expect_playlists().with(eq(req)).times(1).returning({
-                                let expected = expected.clone();
-                                move |_| Ok(expected.clone())
-                            });
+                            conn.0
+                                .expect_playlists()
+                                .with(eq(expected.req))
+                                .times(1)
+                                .returning({
+                                    let expected = expected.clone();
+                                    move |_| Ok(expected.clone())
+                                });
                             conn
                         }
                     }),
@@ -784,24 +790,24 @@ mod test {
             #[tokio::test]
             async fn page() {
                 let id = Uuid::new_v4();
-                let param = QQueryParam { q: "query".into() };
-                let req = PageRequest::new(10, 0);
+                let params = QQueryParam { q: "query".into() };
+                let req = PageRequestQueryParams::<25>::default();
                 let expected = Page {
                     first: true,
                     items: vec![],
                     last: true,
-                    req,
+                    req: req.into(),
                     total: 0,
                 };
                 let db = MockDatabasePool {
                     acquire: Mock::once({
                         let expected = expected.clone();
-                        let param = param.clone();
+                        let params = params.clone();
                         move || {
                             let mut conn = MockDatabaseConnection::new();
                             conn.0
                                 .expect_search_user_playlists_by_name()
-                                .with(eq(id), eq(param.q.clone()), eq(req))
+                                .with(eq(id), eq(params.q.clone()), eq(expected.req))
                                 .times(1)
                                 .returning({
                                     let expected = expected.clone();
@@ -821,7 +827,7 @@ mod test {
                     _dbtx: PhantomData,
                 };
                 let page = playlist_svc
-                    .search_authenticated_user_playlists_by_name(id, &param, req)
+                    .search_authenticated_user_playlists_by_name(id, &params, req)
                     .await
                     .expect("failed to get playlists");
                 assert_eq!(page, expected);
@@ -835,24 +841,24 @@ mod test {
 
             #[tokio::test]
             async fn page() {
-                let req = PageRequest::new(10, 0);
-                let param = QQueryParam { q: "query".into() };
+                let req = PageRequestQueryParams::<25>::default();
+                let params = QQueryParam { q: "query".into() };
                 let expected = Page {
                     first: true,
                     items: vec![],
                     last: true,
-                    req,
+                    req: req.into(),
                     total: 0,
                 };
                 let db = MockDatabasePool {
                     acquire: Mock::once({
                         let expected = expected.clone();
-                        let param = param.clone();
+                        let params = params.clone();
                         move || {
                             let mut conn = MockDatabaseConnection::new();
                             conn.0
                                 .expect_search_playlists_by_name()
-                                .with(eq(param.q.clone()), eq(req))
+                                .with(eq(params.q.clone()), eq(expected.req))
                                 .times(1)
                                 .returning({
                                     let expected = expected.clone();
@@ -872,7 +878,7 @@ mod test {
                     _dbtx: PhantomData,
                 };
                 let page = playlist_svc
-                    .search_playlists_by_name(&param, req)
+                    .search_playlists_by_name(&params, req)
                     .await
                     .expect("failed to get playlists");
                 assert_eq!(page, expected);
