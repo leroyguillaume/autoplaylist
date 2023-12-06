@@ -1988,7 +1988,7 @@ mod test {
                 .expect_delete_tracks_from_playlist()
                 .with(eq(data.playlist.id))
                 .times(mocks.delete_tracks_from_playlist.times())
-                .returning(|_| Ok(()));
+                .returning(|_| Ok(1));
             db_conn
                 .0
                 .expect_playlist_tracks()
@@ -3288,7 +3288,7 @@ mod test {
                 .expect_delete_tracks_from_source()
                 .with(eq(data.src.id))
                 .times(mocks.delete_tracks_from_src.times())
-                .returning(|_| Ok(()));
+                .returning(|_| Ok(1));
             db_conn
                 .0
                 .expect_playlist_ids_by_source()

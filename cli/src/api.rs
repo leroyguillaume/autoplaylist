@@ -74,6 +74,8 @@ pub trait ApiClient: Send + Sync {
 
     async fn delete_playlist(&self, id: Uuid, token: &str) -> ApiResult<()>;
 
+    async fn delete_user(&self, id: Uuid, token: &str) -> ApiResult<()>;
+
     async fn playlists(
         &self,
         req: PageRequestQueryParams<25>,
@@ -259,6 +261,18 @@ impl ApiClient for DefaultApiClient {
         let span = debug_span!("delete_playlist", playlist.id = %id);
         async {
             let url = format!("{}{PATH_PLAYLIST}/{id}", self.base_url);
+            debug!(url, "doing DELETE");
+            let resp = Client::new().delete(&url).bearer_auth(token).send().await?;
+            Self::parse_empty_response(resp).await
+        }
+        .instrument(span)
+        .await
+    }
+
+    async fn delete_user(&self, id: Uuid, token: &str) -> ApiResult<()> {
+        let span = debug_span!("delete_user", user.id = %id);
+        async {
+            let url = format!("{}{PATH_ADMIN}{PATH_USR}/{id}", self.base_url);
             debug!(url, "doing DELETE");
             let resp = Client::new().delete(&url).bearer_auth(token).send().await?;
             Self::parse_empty_response(resp).await
@@ -642,6 +656,22 @@ mod test {
                     .delete_playlist(id, "jwt")
                     .await
                     .expect("failed to delete playlist");
+            }
+        }
+
+        mod delete_user {
+            use super::*;
+
+            // Tests
+
+            #[tokio::test]
+            async fn no_content() {
+                let id = Uuid::from_u128(0x2f3f13153bb74b3189c58bdffdb5e8de);
+                let client = init();
+                client
+                    .delete_user(id, "jwt")
+                    .await
+                    .expect("failed to delete user");
             }
         }
 

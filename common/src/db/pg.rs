@@ -84,24 +84,29 @@ macro_rules! client_impl {
                 Ok(user)
             }
 
-            async fn delete_playlist(&mut self, id: Uuid) -> DatabaseResult<()> {
-                delete_playlist(id, &mut self.conn).await?;
-                Ok(())
+            async fn delete_playlist(&mut self, id: Uuid) -> DatabaseResult<bool> {
+                let deleted = delete_playlist(id, &mut self.conn).await?;
+                Ok(deleted)
             }
 
-            async fn delete_source(&mut self, id: Uuid) -> DatabaseResult<()> {
-                delete_source(id, &mut self.conn).await?;
-                Ok(())
+            async fn delete_source(&mut self, id: Uuid) -> DatabaseResult<bool> {
+                let deleted = delete_source(id, &mut self.conn).await?;
+                Ok(deleted)
             }
 
-            async fn delete_tracks_from_playlist(&mut self, id: Uuid) -> DatabaseResult<()> {
-                delete_tracks_from_playlist(id, &mut self.conn).await?;
-                Ok(())
+            async fn delete_tracks_from_playlist(&mut self, id: Uuid) -> DatabaseResult<u64> {
+                let count = delete_tracks_from_playlist(id, &mut self.conn).await?;
+                Ok(count)
             }
 
-            async fn delete_tracks_from_source(&mut self, id: Uuid) -> DatabaseResult<()> {
-                delete_tracks_from_source(id, &mut self.conn).await?;
-                Ok(())
+            async fn delete_tracks_from_source(&mut self, id: Uuid) -> DatabaseResult<u64> {
+                let count = delete_tracks_from_source(id, &mut self.conn).await?;
+                Ok(count)
+            }
+
+            async fn delete_user(&mut self, id: Uuid) -> DatabaseResult<bool> {
+                let deleted = delete_user(id, &mut self.conn).await?;
+                Ok(deleted)
             }
 
             async fn lock_playlist_synchronization(
@@ -936,7 +941,7 @@ async fn delete_playlist<
 >(
     id: Uuid,
     conn: A,
-) -> PostgresResult<()> {
+) -> PostgresResult<bool> {
     let span = debug_span!(
         "delete_playlist",
         playlist.id = %id,
@@ -945,10 +950,14 @@ async fn delete_playlist<
         trace!("acquiring database connection");
         let conn = conn.acquire().await?;
         debug!("deleting playlist");
-        query_file!("resources/main/db/pg/queries/delete-playlist.sql", id,)
+        let res = query_file!("resources/main/db/pg/queries/delete-playlist.sql", id,)
             .execute(&mut *conn)
             .await?;
-        Ok(())
+        let deleted = res.rows_affected() > 0;
+        if deleted {
+            debug!("playlist deleted");
+        }
+        Ok(deleted)
     }
     .instrument(span)
     .await
@@ -963,7 +972,7 @@ async fn delete_source<
 >(
     id: Uuid,
     conn: A,
-) -> PostgresResult<()> {
+) -> PostgresResult<bool> {
     let span = debug_span!(
         "delete_source",
         src.id = %id,
@@ -972,10 +981,14 @@ async fn delete_source<
         trace!("acquiring database connection");
         let conn = conn.acquire().await?;
         debug!("deleting source");
-        query_file!("resources/main/db/pg/queries/delete-source.sql", id,)
+        let res = query_file!("resources/main/db/pg/queries/delete-source.sql", id,)
             .execute(&mut *conn)
             .await?;
-        Ok(())
+        let deleted = res.rows_affected() > 0;
+        if deleted {
+            debug!("source deleted");
+        }
+        Ok(deleted)
     }
     .instrument(span)
     .await
@@ -990,7 +1003,7 @@ async fn delete_tracks_from_playlist<
 >(
     id: Uuid,
     conn: A,
-) -> PostgresResult<()> {
+) -> PostgresResult<u64> {
     let span = debug_span!(
         "delete_tracks_from_playlist",
         playlist.id = %id,
@@ -999,13 +1012,15 @@ async fn delete_tracks_from_playlist<
         trace!("acquiring database connection");
         let conn = conn.acquire().await?;
         debug!("deleting tracks");
-        query_file!(
+        let res = query_file!(
             "resources/main/db/pg/queries/delete-tracks-from-playlist.sql",
             id,
         )
         .execute(&mut *conn)
         .await?;
-        Ok(())
+        let count = res.rows_affected();
+        debug!(count, "tracks deleted");
+        Ok(count)
     }
     .instrument(span)
     .await
@@ -1020,7 +1035,7 @@ async fn delete_tracks_from_source<
 >(
     id: Uuid,
     conn: A,
-) -> PostgresResult<()> {
+) -> PostgresResult<u64> {
     let span = debug_span!(
         "delete_tracks_from_source",
         src.id = %id,
@@ -1029,13 +1044,43 @@ async fn delete_tracks_from_source<
         trace!("acquiring database connection");
         let conn = conn.acquire().await?;
         debug!("deleting tracks");
-        query_file!(
+        let res = query_file!(
             "resources/main/db/pg/queries/delete-tracks-from-source.sql",
             id,
         )
         .execute(&mut *conn)
         .await?;
-        Ok(())
+        let count = res.rows_affected();
+        debug!(count, "tracks deleted");
+        Ok(count)
+    }
+    .instrument(span)
+    .await
+}
+
+// delete_user
+
+#[inline]
+async fn delete_user<'a, A: Acquire<'a, Database = Postgres, Connection = &'a mut PgConnection>>(
+    id: Uuid,
+    conn: A,
+) -> PostgresResult<bool> {
+    let span = debug_span!(
+        "delete_user",
+        usr.id = %id,
+    );
+    async {
+        trace!("acquiring database connection");
+        let conn = conn.acquire().await?;
+        debug!("deleting user");
+        let res = query_file!("resources/main/db/pg/queries/delete-user.sql", id,)
+            .execute(&mut *conn)
+            .await?;
+        let deleted = res.rows_affected() > 0;
+        if deleted {
+            debug!("user deleted");
+        }
+        Ok(deleted)
     }
     .instrument(span)
     .await
@@ -2759,15 +2804,13 @@ mod test {
         mod delete_playlist {
             use super::*;
 
-            // Tests
+            // run
 
-            #[sqlx::test]
-            async fn unit(db: PgPool) {
-                let data = Data::new();
-                let id = data.playlists[0].id;
+            async fn run(id: Uuid, db: PgPool) -> bool {
                 let db = init(db).await;
                 let mut conn = db.acquire().await.expect("failed to acquire connection");
-                conn.delete_playlist(id)
+                let deleted = conn
+                    .delete_playlist(id)
                     .await
                     .expect("failed to delete playlist");
                 let playlist = conn
@@ -2775,25 +2818,56 @@ mod test {
                     .await
                     .expect("failed to fetch playlist");
                 assert!(playlist.is_none());
+                deleted
+            }
+
+            // Tests
+
+            #[sqlx::test]
+            async fn no(db: PgPool) {
+                let deleted = run(Uuid::new_v4(), db).await;
+                assert!(!deleted);
+            }
+
+            #[sqlx::test]
+            async fn yes(db: PgPool) {
+                let data = Data::new();
+                let deleted = run(data.playlists[0].id, db).await;
+                assert!(deleted);
             }
         }
 
         mod delete_source {
             use super::*;
 
-            // Tests
+            // run
 
-            #[sqlx::test]
-            async fn unit(db: PgPool) {
-                let data = Data::new();
-                let id = data.srcs[0].id;
+            async fn run(id: Uuid, db: PgPool) -> bool {
                 let db = init(db).await;
                 let mut conn = db.acquire().await.expect("failed to acquire connection");
-                conn.delete_source(id)
+                let deleted = conn
+                    .delete_source(id)
                     .await
                     .expect("failed to delete source");
                 let src = conn.source_by_id(id).await.expect("failed to fetch source");
                 assert!(src.is_none());
+                deleted
+            }
+
+            // Tests
+
+            #[sqlx::test]
+            async fn no(db: PgPool) {
+                let deleted = run(Uuid::new_v4(), db).await;
+                assert!(!deleted);
+            }
+
+            #[sqlx::test]
+            async fn yes(db: PgPool) {
+                let data = Data::new();
+                let id = data.srcs[0].id;
+                let deleted = run(id, db).await;
+                assert!(deleted);
             }
         }
 
@@ -2808,7 +2882,8 @@ mod test {
                 let id = data.playlists[0].id;
                 let db = init(db).await;
                 let mut conn = db.acquire().await.expect("failed to acquire connection");
-                conn.delete_tracks_from_playlist(id)
+                let count = conn
+                    .delete_tracks_from_playlist(id)
                     .await
                     .expect("failed to delete tracks");
                 let page = conn
@@ -2816,6 +2891,7 @@ mod test {
                     .await
                     .expect("failed to fetch tracks");
                 assert_eq!(page.total, 0);
+                assert_eq!(count, 1);
             }
         }
 
@@ -2830,7 +2906,8 @@ mod test {
                 let id = data.srcs[0].id;
                 let db = init(db).await;
                 let mut conn = db.acquire().await.expect("failed to acquire connection");
-                conn.delete_tracks_from_source(id)
+                let count = conn
+                    .delete_tracks_from_source(id)
                     .await
                     .expect("failed to delete tracks");
                 let page = conn
@@ -2838,6 +2915,38 @@ mod test {
                     .await
                     .expect("failed to fetch tracks");
                 assert_eq!(page.total, 0);
+                assert_eq!(count, 1);
+            }
+        }
+
+        mod delete_user {
+            use super::*;
+
+            // run
+
+            async fn run(id: Uuid, db: PgPool) -> bool {
+                let db = init(db).await;
+                let mut conn = db.acquire().await.expect("failed to acquire connection");
+                let deleted = conn.delete_user(id).await.expect("failed to delete user");
+                let usr = conn.user_by_id(id).await.expect("failed to fetch user");
+                assert!(usr.is_none());
+                deleted
+            }
+
+            // Tests
+
+            #[sqlx::test]
+            async fn no(db: PgPool) {
+                let deleted = run(Uuid::new_v4(), db).await;
+                assert!(!deleted);
+            }
+
+            #[sqlx::test]
+            async fn yes(db: PgPool) {
+                let data = Data::new();
+                let id = data.usrs[1].id;
+                let deleted = run(id, db).await;
+                assert!(deleted);
             }
         }
 

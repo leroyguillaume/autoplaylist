@@ -340,6 +340,24 @@ fn create_app<SVC: Services + 'static>(svc: Arc<SVC>) -> Router {
             .instrument(span)
             .await
         }))
+        .route(&format!("{PATH_ADMIN}{PATH_USR}/:id"), routing::delete(|Path(id): Path<Uuid>, headers: HeaderMap, State(svc): State<Arc<SVC>>,| async move {
+            let usr = authenticated_admin!(svc.auth(), &headers);
+            let usr_svc = svc.user();
+            let span = info_span!(
+                "delete_user",
+                auth.usr.email = usr.email,
+                auth.usr.id = %usr.id,
+                playlist.id = %id,
+            );
+            async {
+                match usr_svc.delete(id).await {
+                    Ok(_) => StatusCode::NO_CONTENT.into_response(),
+                    Err(err) => handle_error(err),
+                }
+            }
+            .instrument(span)
+            .await
+        }))
         .route(&format!("{PATH_ADMIN}{PATH_USR}{PATH_SEARCH}"), routing::get(|headers: HeaderMap, State(svc): State<Arc<SVC>>, Query(params): Query<SearchQueryParam>, Query(req): Query<PageRequestQueryParams<25>>| async move {
             let usr = authenticated_admin!(svc.auth(), &headers);
             let span = info_span!(
@@ -1060,7 +1078,7 @@ mod test {
         }
 
         #[tokio::test]
-        async fn forbidden_when_playlist_is_not_owned_by_user_and_it_is_not_admin() {
+        async fn forbidden() {
             let mocks = Mocks {
                 authenticated_usr: Mock::once_with_args(|usr| {
                     Ok(User {
@@ -1100,6 +1118,104 @@ mod test {
                 }),
                 delete_playlist: Mock::once(|| ()),
                 playlist_by_id: Mock::once_with_args(Some),
+            };
+            let resp = run(mocks).await;
+            resp.assert_status(StatusCode::NO_CONTENT);
+            assert!(resp.as_bytes().is_empty());
+        }
+    }
+
+    mod delete_user {
+        use super::*;
+
+        // Mocks
+
+        #[derive(Clone, Default)]
+        struct Mocks {
+            authenticated_usr: Mock<ServiceResult<User>, User>,
+            delete_usr: Mock<ServiceResult<()>>,
+        }
+
+        // run
+
+        async fn run(mocks: Mocks) -> TestResponse {
+            let id = Uuid::new_v4();
+            let usr = User {
+                creation: Utc::now(),
+                creds: Default::default(),
+                email: "user@test".into(),
+                id: Uuid::new_v4(),
+                role: Role::Admin,
+            };
+            let mut auth_svc = MockAuthService::new();
+            auth_svc.expect_authenticated_user().times(1).returning({
+                let usr = usr.clone();
+                let mock = mocks.authenticated_usr.clone();
+                move |_| mock.call_with_args(usr.clone())
+            });
+            let mut usr_svc = MockUserService::new();
+            usr_svc
+                .expect_delete()
+                .with(eq(id))
+                .times(mocks.delete_usr.times())
+                .returning({
+                    let mock = mocks.delete_usr.clone();
+                    move |_| mock.call()
+                });
+            let svc = MockServices {
+                auth: auth_svc,
+                usr: usr_svc,
+                ..Default::default()
+            };
+            let server = init(svc);
+            server.delete(&format!("{PATH_ADMIN}{PATH_USR}/{id}")).await
+        }
+
+        // Tests
+
+        #[tokio::test]
+        async fn unauthorized() {
+            let mocks = Mocks {
+                authenticated_usr: Mock::once_with_args(|_| Err(ServiceError::Unauthorized)),
+                ..Default::default()
+            };
+            let resp = run(mocks).await;
+            resp.assert_status_unauthorized();
+            assert!(resp.as_bytes().is_empty());
+        }
+
+        #[tokio::test]
+        async fn forbidden() {
+            let mocks = Mocks {
+                authenticated_usr: Mock::once_with_args(|usr| {
+                    Ok(User {
+                        role: Role::User,
+                        ..usr
+                    })
+                }),
+                ..Default::default()
+            };
+            let resp = run(mocks).await;
+            resp.assert_status(StatusCode::FORBIDDEN);
+            assert!(resp.as_bytes().is_empty());
+        }
+
+        #[tokio::test]
+        async fn not_found() {
+            let mocks = Mocks {
+                authenticated_usr: Mock::once_with_args(Ok),
+                delete_usr: Mock::once(|| Err(ServiceError::NotFound(Uuid::new_v4()))),
+            };
+            let resp = run(mocks).await;
+            resp.assert_status(StatusCode::NOT_FOUND);
+            assert!(resp.as_bytes().is_empty());
+        }
+
+        #[tokio::test]
+        async fn no_content() {
+            let mocks = Mocks {
+                authenticated_usr: Mock::once_with_args(Ok),
+                delete_usr: Mock::once(|| Ok(())),
             };
             let resp = run(mocks).await;
             resp.assert_status(StatusCode::NO_CONTENT);
