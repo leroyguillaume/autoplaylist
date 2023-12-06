@@ -3,9 +3,9 @@ use std::{io::stdout, marker::PhantomData, sync::Arc};
 use async_trait::async_trait;
 use autoplaylist_common::{
     broker::{
-        rabbitmq::{RabbitMqClient, RabbitMqConfig},
+        rabbitmq::{RabbitMqClient, RabbitMqConfig, RabbitMqConsumer},
         BrokerClient, BrokerError, Consumer, Message, MessageHandler, PlaylistMessage,
-        PlaylistMessageKind, Publisher, SourceMessage,
+        PlaylistMessageKind, SourceMessage,
     },
     db::{
         pg::{PostgresConfig, PostgresPool},
@@ -57,14 +57,18 @@ async fn main() -> anyhow::Result<()> {
     let playlist_msg_handler =
         DefaultMessageHandler::new(db.clone(), svc.clone(), PlaylistStateProcessor::new());
     let src_msg_handler = DefaultMessageHandler::new(db, svc.clone(), SourceStateProcessor::new());
-    let playlist_csm = svc
-        .broker
-        .start_playlist_message_consumer(&playlist_msg_queue, playlist_msg_handler)
-        .await?;
-    let src_csm = svc
-        .broker
-        .start_source_message_consumer(&src_msg_queue, src_msg_handler)
-        .await?;
+    let playlist_csm = RabbitMqConsumer::start_playlist_message_consumer(
+        &playlist_msg_queue,
+        &svc.broker,
+        playlist_msg_handler,
+    )
+    .await?;
+    let src_csm = RabbitMqConsumer::start_source_message_consumer(
+        &src_msg_queue,
+        &svc.broker,
+        src_msg_handler,
+    )
+    .await?;
     term.await;
     playlist_csm.stop().await?;
     src_csm.stop().await?;
@@ -159,9 +163,9 @@ trait Puller<STEP: SynchronizationStep, SYNCABLE: Synchronizable<STEP>>: Send + 
 // Services
 
 trait Services: Send + Sync {
-    fn clock(&self) -> &dyn Clock;
+    fn broker(&self) -> &dyn BrokerClient;
 
-    fn publisher(&self) -> &dyn Publisher;
+    fn clock(&self) -> &dyn Clock;
 
     fn spotify(&self) -> &dyn SpotifyClient;
 }
@@ -350,12 +354,12 @@ struct DefaultServices {
 }
 
 impl Services for DefaultServices {
-    fn clock(&self) -> &dyn Clock {
-        &self.clock
+    fn broker(&self) -> &dyn BrokerClient {
+        &self.broker
     }
 
-    fn publisher(&self) -> &dyn Publisher {
-        self.broker.publisher()
+    fn clock(&self) -> &dyn Clock {
+        &self.clock
     }
 
     fn spotify(&self) -> &dyn SpotifyClient {
@@ -764,7 +768,7 @@ impl<PULLER: Puller<SourceSynchronizationStep, Source>>
                         id,
                         kind: PlaylistMessageKind::Sync,
                     };
-                    svc.publisher().publish_playlist_message(&msg).await?;
+                    svc.broker().publish_playlist_message(&msg).await?;
                 }
                 if page.last {
                     state.step = SourceSynchronizationStep::Finished;
@@ -797,7 +801,7 @@ mod test {
     use std::{collections::BTreeSet, sync::Arc};
 
     use autoplaylist_common::{
-        broker::{MockPublisher, SourceMessageKind},
+        broker::{MockBrokerClient, SourceMessageKind},
         db::{MockDatabaseConnection, MockDatabasePool, TrackCreation},
         model::{
             Album, Credentials, PlaylistSynchronizationState, Predicate, Role, Source, SourceKind,
@@ -861,18 +865,18 @@ mod test {
 
     #[derive(Default)]
     struct MockServices {
+        broker: MockBrokerClient,
         clock: MockClock,
-        publisher: MockPublisher,
         spotify: MockSpotifyClient,
     }
 
     impl Services for MockServices {
-        fn clock(&self) -> &dyn Clock {
-            &self.clock
+        fn broker(&self) -> &dyn BrokerClient {
+            &self.broker
         }
 
-        fn publisher(&self) -> &dyn Publisher {
-            &self.publisher
+        fn clock(&self) -> &dyn Clock {
+            &self.clock
         }
 
         fn spotify(&self) -> &dyn SpotifyClient {
@@ -3295,8 +3299,8 @@ mod test {
                     move |_, req| Ok(mock.call_with_args(req))
                 });
             let puller = MockPuller::new(mocks.pull);
-            let mut publisher = MockPublisher::new();
-            publisher
+            let mut broker = MockBrokerClient::new();
+            broker
                 .expect_publish_playlist_message()
                 .times(mocks.publish_playlist_message.times())
                 .returning({
@@ -3307,7 +3311,7 @@ mod test {
                     }
                 });
             let svc = MockServices {
-                publisher,
+                broker,
                 ..Default::default()
             };
             let proc = SourceStateProcessor(puller);

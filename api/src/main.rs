@@ -13,7 +13,7 @@ use autoplaylist_common::{
         PATH_HEALTH, PATH_PLAYLIST, PATH_SEARCH, PATH_SRC, PATH_SYNC, PATH_USR,
     },
     broker::{
-        rabbitmq::{RabbitMqClient, RabbitMqConfig, RabbitMqConsumer},
+        rabbitmq::{RabbitMqClient, RabbitMqConfig},
         BrokerError,
     },
     db::{
@@ -204,7 +204,6 @@ struct DefaultServices<'a> {
         RSpotifyClient,
     >,
     playlist: DefaultPlaylistService<
-        RabbitMqConsumer,
         RabbitMqClient,
         PostgresConnection,
         PostgresTransaction<'a>,
@@ -212,7 +211,6 @@ struct DefaultServices<'a> {
         RSpotifyClient,
     >,
     src: DefaultSourceService<
-        RabbitMqConsumer,
         RabbitMqClient,
         PostgresConnection,
         PostgresTransaction<'a>,

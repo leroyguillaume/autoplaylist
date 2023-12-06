@@ -4,9 +4,8 @@ use async_trait::async_trait;
 use autoplaylist_common::{
     api::{CreatePlaylistRequest, PageRequestQueryParams, Platform, SearchQueryParam},
     broker::{
-        rabbitmq::{RabbitMqClient, RabbitMqConsumer},
-        BrokerClient, Consumer, PlaylistMessage, PlaylistMessageKind, SourceMessage,
-        SourceMessageKind,
+        rabbitmq::RabbitMqClient, BrokerClient, PlaylistMessage, PlaylistMessageKind,
+        SourceMessage, SourceMessageKind,
     },
     db::{
         pg::{PostgresConnection, PostgresPool, PostgresTransaction},
@@ -59,8 +58,7 @@ pub trait PlaylistService: Send + Sync {
 // DefaultPlaylistService
 
 pub struct DefaultPlaylistService<
-    CSM: Consumer,
-    BROKER: BrokerClient<CSM>,
+    BROKER: BrokerClient,
     DBCONN: DatabaseConnection,
     DBTX: DatabaseTransaction,
     DB: DatabasePool<DBCONN, DBTX>,
@@ -69,14 +67,12 @@ pub struct DefaultPlaylistService<
     broker: Arc<BROKER>,
     db: Arc<DB>,
     spotify: Arc<SPOTIFY>,
-    _csm: PhantomData<CSM>,
     _dbconn: PhantomData<DBCONN>,
     _dbtx: PhantomData<DBTX>,
 }
 
 impl
     DefaultPlaylistService<
-        RabbitMqConsumer,
         RabbitMqClient,
         PostgresConnection,
         PostgresTransaction<'_>,
@@ -93,7 +89,6 @@ impl
             broker,
             db,
             spotify,
-            _csm: PhantomData,
             _dbconn: PhantomData,
             _dbtx: PhantomData,
         }
@@ -102,13 +97,12 @@ impl
 
 #[async_trait]
 impl<
-        CSM: Consumer,
-        BROKER: BrokerClient<CSM>,
+        BROKER: BrokerClient,
         DBCONN: DatabaseConnection,
         DBTX: DatabaseTransaction,
         DB: DatabasePool<DBCONN, DBTX>,
         SPOTIFY: SpotifyClient,
-    > PlaylistService for DefaultPlaylistService<CSM, BROKER, DBCONN, DBTX, DB, SPOTIFY>
+    > PlaylistService for DefaultPlaylistService<BROKER, DBCONN, DBTX, DB, SPOTIFY>
 {
     async fn authenticated_user_playlists(
         &self,
@@ -157,19 +151,18 @@ impl<
             info!(%playlist.id, playlist.src.owner.email, %playlist.src.owner.id, "playlist created");
             Ok::<(Playlist, bool), ServiceError>((playlist, new_src))
         })?;
-        let publisher = self.broker.publisher();
         if new_src {
             let msg = SourceMessage {
                 id: playlist.src.id,
                 kind: SourceMessageKind::Created,
             };
-            publisher.publish_source_message(&msg).await?;
+            self.broker.publish_source_message(&msg).await?;
         }
         let msg = PlaylistMessage {
             id: playlist.src.id,
             kind: PlaylistMessageKind::Created,
         };
-        publisher.publish_playlist_message(&msg).await?;
+        self.broker.publish_playlist_message(&msg).await?;
         Ok(playlist)
     }
 
@@ -229,10 +222,7 @@ impl<
             id,
             kind: PlaylistMessageKind::Sync,
         };
-        self.broker
-            .publisher()
-            .publish_playlist_message(&msg)
-            .await?;
+        self.broker.publish_playlist_message(&msg).await?;
         Ok(())
     }
 }
@@ -242,7 +232,7 @@ impl<
 #[cfg(test)]
 mod test {
     use autoplaylist_common::{
-        broker::{MockBrokerClient, MockPublisher},
+        broker::MockBrokerClient,
         db::{MockDatabaseConnection, MockDatabasePool, MockDatabaseTransaction},
         model::{
             Credentials, Playlist, Predicate, Role, Source, SourceKind, SpotifyCredentials,
@@ -302,7 +292,6 @@ mod test {
                     broker: Arc::new(MockBrokerClient::default()),
                     db: Arc::new(db),
                     spotify: Arc::new(MockSpotifyClient::default()),
-                    _csm: PhantomData,
                     _dbconn: PhantomData,
                     _dbtx: PhantomData,
                 };
@@ -406,26 +395,21 @@ mod test {
                     }),
                     ..Default::default()
                 };
-                let mut publisher = MockPublisher::new();
-                publisher
+                let mut broker = MockBrokerClient::new();
+                broker
                     .expect_publish_source_message()
                     .with(eq(src_msg))
                     .times(mocks.publish_src_msg.times())
                     .returning(|_| Ok(()));
-                publisher
+                broker
                     .expect_publish_playlist_message()
                     .with(eq(playlist_msg))
                     .times(mocks.publish_playlist_msg.times())
                     .returning(|_| Ok(()));
-                let broker = MockBrokerClient {
-                    publisher,
-                    ..Default::default()
-                };
                 let playlist_svc = DefaultPlaylistService {
                     broker: Arc::new(broker),
                     db: Arc::new(db),
                     spotify: Arc::new(spotify),
-                    _csm: PhantomData,
                     _dbconn: PhantomData,
                     _dbtx: PhantomData,
                 };
@@ -636,7 +620,6 @@ mod test {
                     broker: Arc::new(MockBrokerClient::default()),
                     db: Arc::new(db),
                     spotify: Arc::new(MockSpotifyClient::default()),
-                    _csm: PhantomData,
                     _dbconn: PhantomData,
                     _dbtx: PhantomData,
                 };
@@ -720,7 +703,6 @@ mod test {
                     broker: Arc::new(MockBrokerClient::default()),
                     db: Arc::new(db),
                     spotify: Arc::new(MockSpotifyClient::default()),
-                    _csm: PhantomData,
                     _dbconn: PhantomData,
                     _dbtx: PhantomData,
                 };
@@ -770,7 +752,6 @@ mod test {
                     broker: Arc::new(MockBrokerClient::default()),
                     db: Arc::new(db),
                     spotify: Arc::new(MockSpotifyClient::default()),
-                    _csm: PhantomData,
                     _dbconn: PhantomData,
                     _dbtx: PhantomData,
                 };
@@ -822,7 +803,6 @@ mod test {
                     broker: Arc::new(MockBrokerClient::default()),
                     db: Arc::new(db),
                     spotify: Arc::new(MockSpotifyClient::default()),
-                    _csm: PhantomData,
                     _dbconn: PhantomData,
                     _dbtx: PhantomData,
                 };
@@ -873,7 +853,6 @@ mod test {
                     broker: Arc::new(MockBrokerClient::default()),
                     db: Arc::new(db),
                     spotify: Arc::new(MockSpotifyClient::default()),
-                    _csm: PhantomData,
                     _dbconn: PhantomData,
                     _dbtx: PhantomData,
                 };
@@ -896,21 +875,16 @@ mod test {
                     id: Uuid::new_v4(),
                     kind: PlaylistMessageKind::Sync,
                 };
-                let mut publisher = MockPublisher::new();
-                publisher
+                let mut broker = MockBrokerClient::new();
+                broker
                     .expect_publish_playlist_message()
                     .with(eq(msg.clone()))
                     .times(1)
                     .returning(|_| Ok(()));
-                let broker = MockBrokerClient {
-                    publisher,
-                    ..Default::default()
-                };
                 let playlist_svc = DefaultPlaylistService {
                     broker: Arc::new(broker),
                     db: Arc::new(MockDatabasePool::default()),
                     spotify: Arc::new(MockSpotifyClient::default()),
-                    _csm: PhantomData,
                     _dbconn: PhantomData,
                     _dbtx: PhantomData,
                 };
