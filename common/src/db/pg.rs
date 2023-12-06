@@ -178,6 +178,15 @@ macro_rules! client_impl {
                 Ok(page)
             }
 
+            async fn search_users_by_email(
+                &mut self,
+                q: &str,
+                req: PageRequest,
+            ) -> DatabaseResult<Page<User>> {
+                let page = search_users_by_email(q, req, &self.key, &mut self.conn).await?;
+                Ok(page)
+            }
+
             async fn source_by_id(&mut self, id: Uuid) -> DatabaseResult<Option<Source>> {
                 let src = source_by_id(id, &self.key, &mut self.conn).await?;
                 Ok(src)
@@ -1347,7 +1356,7 @@ async fn search_playlists_by_name<
         let conn = conn.acquire().await?;
         debug!("counting playlists matching query");
         let record = query_file!(
-            "resources/main/db/pg/queries/count-playlists-with-name-like.sql",
+            "resources/main/db/pg/queries/count-playlists-by-name-rows.sql",
             q
         )
         .fetch_one(&mut *conn)
@@ -1356,7 +1365,7 @@ async fn search_playlists_by_name<
         debug!("fetching playlists matching query");
         let records = query_file_as!(
             PlaylistRecord,
-            "resources/main/db/pg/queries/playlists-with-name-like.sql",
+            "resources/main/db/pg/queries/search-playlists-by-name.sql",
             q,
             limit,
             offset,
@@ -1404,7 +1413,7 @@ async fn search_user_playlists_by_name<
         let conn = conn.acquire().await?;
         debug!("counting user playlists matching query");
         let record = query_file!(
-            "resources/main/db/pg/queries/count-user-playlists-with-name-like.sql",
+            "resources/main/db/pg/queries/count-user-playlists-by-name-rows.sql",
             id,
             q
         )
@@ -1414,8 +1423,64 @@ async fn search_user_playlists_by_name<
         debug!("fetching user playlists matching query");
         let records = query_file_as!(
             PlaylistRecord,
-            "resources/main/db/pg/queries/user-playlists-with-name-like.sql",
+            "resources/main/db/pg/queries/search-user-playlists-by-name.sql",
             id,
+            q,
+            limit,
+            offset,
+        )
+        .fetch_all(&mut *conn)
+        .await?;
+        Ok(Page {
+            first: req.offset == 0,
+            items: records
+                .into_iter()
+                .map(|record| record.into_entity(key))
+                .collect::<PostgresResult<Vec<_>>>()?,
+            last: (req.offset + req.limit) >= total,
+            req,
+            total,
+        })
+    }
+    .instrument(span)
+    .await
+}
+
+// search_users_by_email
+
+#[inline]
+async fn search_users_by_email<
+    'a,
+    A: Acquire<'a, Database = Postgres, Connection = &'a mut PgConnection>,
+>(
+    q: &str,
+    req: PageRequest,
+    key: &MagicCrypt256,
+    conn: A,
+) -> PostgresResult<Page<User>> {
+    let span = debug_span!(
+        "search_users_by_email",
+        params.limit = req.limit,
+        params.offset = req.offset,
+        params.q = q,
+    );
+    async {
+        let limit: i64 = req.limit.into();
+        let offset: i64 = req.offset.into();
+        trace!("acquiring database connection");
+        let conn = conn.acquire().await?;
+        debug!("counting users matching query");
+        let record = query_file!(
+            "resources/main/db/pg/queries/count-users-by-email-rows.sql",
+            q
+        )
+        .fetch_one(&mut *conn)
+        .await?;
+        let total = record.count.unwrap_or(0).try_into()?;
+        debug!("fetching users matching query");
+        let records = query_file_as!(
+            UserRecord,
+            "resources/main/db/pg/queries/search-users-by-email.sql",
             q,
             limit,
             offset,
@@ -2214,6 +2279,15 @@ mod test {
                 id: Uuid::from_u128(0x8fc899c5f25449669b5ae8f1c4f97f7c),
                 role: Role::User,
             };
+            let usr_4 = User {
+                creation: DateTime::parse_from_rfc3339("2023-04-01T00:00:00Z")
+                    .expect("failed to parse date")
+                    .into(),
+                creds: Default::default(),
+                email: "test_4@test".into(),
+                id: Uuid::from_u128(0x83e3a7ed9d6c4e4fb7328a00cab3fcb5),
+                role: Role::User,
+            };
             let src_1 = Source {
                 creation: DateTime::parse_from_rfc3339("2023-01-05T01:00:00Z")
                     .expect("failed to parse date")
@@ -2321,7 +2395,7 @@ mod test {
                 ],
                 srcs: vec![src_1, src_2, src_3, src_4],
                 tracks: vec![track_1, track_2, track_3],
-                usrs: vec![usr_1, usr_2, usr_3],
+                usrs: vec![usr_4, usr_1, usr_2, usr_3],
             }
         }
     }
@@ -2594,7 +2668,7 @@ mod test {
                 let mut conn = db.acquire().await.expect("failed to acquire connection");
                 let creation = SourceCreation {
                     kind: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
-                    owner: data.usrs[1].clone(),
+                    owner: data.usrs[2].clone(),
                 };
                 let src = conn
                     .create_source(&creation)
@@ -3079,7 +3153,7 @@ mod test {
                     req: PageRequest::new(100, 0),
                     total: 3,
                 };
-                run(data.usrs[0].id, "PlAyLiSt", expected, db).await;
+                run(data.usrs[1].id, "PlAyLiSt", expected, db).await;
             }
 
             #[sqlx::test]
@@ -3092,7 +3166,55 @@ mod test {
                     req: PageRequest::new(1, 1),
                     total: 3,
                 };
-                run(data.usrs[0].id, "PlAyLiSt", expected, db).await;
+                run(data.usrs[1].id, "PlAyLiSt", expected, db).await;
+            }
+        }
+
+        mod search_users_by_email {
+            use super::*;
+
+            // run
+
+            async fn run(q: &str, expected: Page<User>, db: PgPool) {
+                let db = init(db).await;
+                let mut conn = db.acquire().await.expect("failed to acquire connection");
+                let page = conn
+                    .search_users_by_email(q, expected.req)
+                    .await
+                    .expect("failed to fetch users");
+                assert_eq!(page, expected);
+            }
+
+            // Tests
+
+            #[sqlx::test]
+            async fn first_and_last(db: PgPool) {
+                let data = Data::new();
+                let expected = Page {
+                    first: true,
+                    items: vec![
+                        data.usrs[1].clone(),
+                        data.usrs[2].clone(),
+                        data.usrs[3].clone(),
+                    ],
+                    last: true,
+                    req: PageRequest::new(100, 0),
+                    total: 3,
+                };
+                run("UsEr", expected, db).await;
+            }
+
+            #[sqlx::test]
+            async fn middle(db: PgPool) {
+                let data = Data::new();
+                let expected = Page {
+                    first: false,
+                    items: vec![data.usrs[2].clone()],
+                    last: false,
+                    req: PageRequest::new(1, 1),
+                    total: 3,
+                };
+                run("UsEr", expected, db).await;
             }
         }
 
@@ -3499,7 +3621,7 @@ mod test {
                     creation: Utc::now(),
                     id: expected.id,
                     kind: SourceKind::Spotify(SpotifyResourceKind::Playlist("id".into())),
-                    owner: data.usrs[1].clone(),
+                    owner: data.usrs[2].clone(),
                     sync: expected.sync.clone(),
                 };
                 conn.update_source(&source_updated)
@@ -3566,7 +3688,7 @@ mod test {
                     email: "user_1_1@test".into(),
                     creds: Default::default(),
                     role: Role::User,
-                    ..data.usrs[0].clone()
+                    ..data.usrs[1].clone()
                 };
                 let usr_updated = User {
                     creation: Utc::now(),
@@ -3610,8 +3732,8 @@ mod test {
             #[sqlx::test]
             async fn user(db: PgPool) {
                 let data = Data::new();
-                let usr = &data.usrs[0];
-                run(&data.usrs[0].email, Some(usr), db).await;
+                let usr = &data.usrs[1];
+                run(&usr.email, Some(usr), db).await;
             }
         }
 
@@ -3637,7 +3759,7 @@ mod test {
             #[sqlx::test]
             async fn user(db: PgPool) {
                 let data = Data::new();
-                let usr = &data.usrs[0];
+                let usr = &data.usrs[1];
                 run(usr.id, Some(usr), db).await;
             }
         }
@@ -3674,7 +3796,7 @@ mod test {
                     req: PageRequest::new(100, 0),
                     total: 4,
                 };
-                run(data.usrs[0].id, expected, db).await;
+                run(data.usrs[1].id, expected, db).await;
             }
 
             #[sqlx::test]
@@ -3687,7 +3809,7 @@ mod test {
                     req: PageRequest::new(1, 1),
                     total: 4,
                 };
-                run(data.usrs[0].id, expected, db).await;
+                run(data.usrs[1].id, expected, db).await;
             }
         }
 
@@ -3722,7 +3844,7 @@ mod test {
                     req: PageRequest::new(100, 0),
                     total: 3,
                 };
-                run(data.usrs[0].id, expected, db).await;
+                run(data.usrs[1].id, expected, db).await;
             }
 
             #[sqlx::test]
@@ -3735,7 +3857,7 @@ mod test {
                     req: PageRequest::new(1, 1),
                     total: 3,
                 };
-                run(data.usrs[0].id, expected, db).await;
+                run(data.usrs[1].id, expected, db).await;
             }
         }
 
@@ -3764,11 +3886,7 @@ mod test {
                     items: data.usrs.clone(),
                     last: true,
                     req: PageRequest::new(100, 0),
-                    total: data
-                        .tracks
-                        .len()
-                        .try_into()
-                        .expect("failed to convert usize to u32"),
+                    total: 4,
                 };
                 run(expected, db).await;
             }
@@ -3781,11 +3899,7 @@ mod test {
                     items: vec![data.usrs[1].clone()],
                     last: false,
                     req: PageRequest::new(1, 1),
-                    total: data
-                        .tracks
-                        .len()
-                        .try_into()
-                        .expect("failed to convert usize to u32"),
+                    total: 4,
                 };
                 run(expected, db).await;
             }

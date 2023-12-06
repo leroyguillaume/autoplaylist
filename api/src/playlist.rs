@@ -2,7 +2,7 @@ use std::{marker::PhantomData, sync::Arc};
 
 use async_trait::async_trait;
 use autoplaylist_common::{
-    api::{CreatePlaylistRequest, PageRequestQueryParams, Platform, QQueryParam},
+    api::{CreatePlaylistRequest, PageRequestQueryParams, Platform, SearchQueryParam},
     broker::{
         rabbitmq::{RabbitMqClient, RabbitMqConsumer},
         BrokerClient, Consumer, PlaylistMessage, PlaylistMessageKind, SourceMessage,
@@ -43,13 +43,13 @@ pub trait PlaylistService: Send + Sync {
     async fn search_authenticated_user_playlists_by_name(
         &self,
         usr_id: Uuid,
-        params: &QQueryParam,
+        params: &SearchQueryParam,
         req: PageRequestQueryParams<25>,
     ) -> ServiceResult<Page<Playlist>>;
 
     async fn search_playlists_by_name(
         &self,
-        params: &QQueryParam,
+        params: &SearchQueryParam,
         req: PageRequestQueryParams<25>,
     ) -> ServiceResult<Page<Playlist>>;
 
@@ -202,7 +202,7 @@ impl<
     async fn search_authenticated_user_playlists_by_name(
         &self,
         usr_id: Uuid,
-        params: &QQueryParam,
+        params: &SearchQueryParam,
         req: PageRequestQueryParams<25>,
     ) -> ServiceResult<Page<Playlist>> {
         let mut db_conn = self.db.acquire().await?;
@@ -214,7 +214,7 @@ impl<
 
     async fn search_playlists_by_name(
         &self,
-        params: &QQueryParam,
+        params: &SearchQueryParam,
         req: PageRequestQueryParams<25>,
     ) -> ServiceResult<Page<Playlist>> {
         let mut db_conn = self.db.acquire().await?;
@@ -790,7 +790,7 @@ mod test {
             #[tokio::test]
             async fn page() {
                 let id = Uuid::new_v4();
-                let params = QQueryParam { q: "query".into() };
+                let params = SearchQueryParam { q: "query".into() };
                 let req = PageRequestQueryParams::<25>::default();
                 let expected = Page {
                     first: true,
@@ -842,7 +842,7 @@ mod test {
             #[tokio::test]
             async fn page() {
                 let req = PageRequestQueryParams::<25>::default();
-                let params = QQueryParam { q: "query".into() };
+                let params = SearchQueryParam { q: "query".into() };
                 let expected = Page {
                     first: true,
                     items: vec![],

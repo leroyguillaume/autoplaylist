@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::model::{
-    PageRequest, Playlist, PlaylistSynchronization, Predicate, Source, SourceKind,
-    SourceSynchronization, Target,
+    PageRequest, Playlist, PlaylistSynchronization, Predicate, Role, Source, SourceKind,
+    SourceSynchronization, Target, User,
 };
 
 // Consts - Paths
@@ -18,6 +18,7 @@ pub const PATH_PLAYLIST: &str = "/playlist";
 pub const PATH_SEARCH: &str = "/search";
 pub const PATH_SRC: &str = "/source";
 pub const PATH_SYNC: &str = "/sync";
+pub const PATH_USR: &str = "/user";
 
 // AuthenticateViaSpotifyQueryParams
 
@@ -107,13 +108,6 @@ impl From<String> for JwtResponse {
     }
 }
 
-// QQueryParam
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct QQueryParam {
-    pub q: String,
-}
-
 // RedirectUriQueryParam
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -127,6 +121,13 @@ impl From<String> for RedirectUriQueryParam {
     }
 }
 
+// SearchQueryParam
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct SearchQueryParam {
+    pub q: String,
+}
+
 // SourceResponse
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -135,7 +136,7 @@ pub struct SourceResponse {
     pub creation: DateTime<Utc>,
     pub id: Uuid,
     pub kind: SourceKind,
-    pub owner: Uuid,
+    pub owner: UserResponse,
     pub sync: SourceSynchronization,
 }
 
@@ -145,8 +146,30 @@ impl From<Source> for SourceResponse {
             creation: src.creation,
             id: src.id,
             kind: src.kind,
-            owner: src.owner.id,
+            owner: src.owner.into(),
             sync: src.sync,
+        }
+    }
+}
+
+// UserResponse
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserResponse {
+    pub creation: DateTime<Utc>,
+    pub email: String,
+    pub id: Uuid,
+    pub role: Role,
+}
+
+impl From<User> for UserResponse {
+    fn from(usr: User) -> Self {
+        Self {
+            creation: usr.creation,
+            email: usr.email,
+            id: usr.id,
+            role: usr.role,
         }
     }
 }
@@ -283,10 +306,37 @@ mod test {
                     creation: src.creation,
                     id: src.id,
                     kind: src.kind.clone(),
-                    owner: src.owner.id,
+                    owner: src.owner.clone().into(),
                     sync: src.sync.clone(),
                 };
                 let resp = SourceResponse::from(src);
+                assert_eq!(resp, expected);
+            }
+        }
+    }
+
+    mod user_response {
+        use super::*;
+
+        mod from_user {
+            use super::*;
+
+            #[test]
+            fn response() {
+                let usr = User {
+                    creation: Utc::now(),
+                    creds: Default::default(),
+                    email: "user@test".into(),
+                    id: Uuid::new_v4(),
+                    role: Role::User,
+                };
+                let expected = UserResponse {
+                    creation: usr.creation,
+                    email: usr.email.clone(),
+                    id: usr.id,
+                    role: usr.role,
+                };
+                let resp = UserResponse::from(usr);
                 assert_eq!(resp, expected);
             }
         }

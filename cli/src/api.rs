@@ -2,9 +2,9 @@ use async_trait::async_trait;
 use autoplaylist_common::{
     api::{
         AuthenticateViaSpotifyQueryParams, CreatePlaylistRequest, JwtResponse,
-        PageRequestQueryParams, PlaylistResponse, QQueryParam, RedirectUriQueryParam,
-        SourceResponse, PATH_ADMIN, PATH_AUTH_SPOTIFY, PATH_AUTH_SPOTIFY_TOKEN, PATH_PLAYLIST,
-        PATH_SEARCH, PATH_SRC, PATH_SYNC,
+        PageRequestQueryParams, PlaylistResponse, RedirectUriQueryParam, SearchQueryParam,
+        SourceResponse, UserResponse, PATH_ADMIN, PATH_AUTH_SPOTIFY, PATH_AUTH_SPOTIFY_TOKEN,
+        PATH_PLAYLIST, PATH_SEARCH, PATH_SRC, PATH_SYNC, PATH_USR,
     },
     model::Page,
 };
@@ -82,21 +82,28 @@ pub trait ApiClient: Send + Sync {
 
     async fn search_authenticated_user_playlists_by_name(
         &self,
-        params: &QQueryParam,
+        params: &SearchQueryParam,
         req: PageRequestQueryParams<25>,
         token: &str,
     ) -> ApiResult<Page<PlaylistResponse>>;
 
     async fn search_playlists_by_name(
         &self,
-        params: &QQueryParam,
+        params: &SearchQueryParam,
         req: PageRequestQueryParams<25>,
         token: &str,
     ) -> ApiResult<Page<PlaylistResponse>>;
 
+    async fn search_users_by_email(
+        &self,
+        params: &SearchQueryParam,
+        req: PageRequestQueryParams<25>,
+        token: &str,
+    ) -> ApiResult<Page<UserResponse>>;
+
     async fn sources(
         &self,
-        params: PageRequestQueryParams<25>,
+        req: PageRequestQueryParams<25>,
         token: &str,
     ) -> ApiResult<Page<SourceResponse>>;
 
@@ -105,6 +112,12 @@ pub trait ApiClient: Send + Sync {
     async fn start_playlist_synchronization(&self, id: Uuid, token: &str) -> ApiResult<()>;
 
     async fn start_source_synchronization(&self, id: Uuid, token: &str) -> ApiResult<()>;
+
+    async fn users(
+        &self,
+        params: PageRequestQueryParams<25>,
+        token: &str,
+    ) -> ApiResult<Page<UserResponse>>;
 }
 
 // DefautApiClient
@@ -281,7 +294,7 @@ impl ApiClient for DefaultApiClient {
 
     async fn search_authenticated_user_playlists_by_name(
         &self,
-        params: &QQueryParam,
+        params: &SearchQueryParam,
         req: PageRequestQueryParams<25>,
         token: &str,
     ) -> ApiResult<Page<PlaylistResponse>> {
@@ -309,18 +322,46 @@ impl ApiClient for DefaultApiClient {
 
     async fn search_playlists_by_name(
         &self,
-        params: &QQueryParam,
+        params: &SearchQueryParam,
         req: PageRequestQueryParams<25>,
         token: &str,
     ) -> ApiResult<Page<PlaylistResponse>> {
         let span = debug_span!(
-            "search_authenticated_user_playlists_by_name",
+            "search_playlists_by_name",
             params.limit = req.limit,
             params.offset = req.offset,
             params.q = params.q
         );
         async {
             let url = format!("{}{PATH_ADMIN}{PATH_PLAYLIST}{PATH_SEARCH}", self.base_url);
+            debug!(url, "doing GET");
+            let resp = Client::new()
+                .get(&url)
+                .bearer_auth(token)
+                .query(&params)
+                .query(&req)
+                .send()
+                .await?;
+            Self::parse_json_response(resp).await
+        }
+        .instrument(span)
+        .await
+    }
+
+    async fn search_users_by_email(
+        &self,
+        params: &SearchQueryParam,
+        req: PageRequestQueryParams<25>,
+        token: &str,
+    ) -> ApiResult<Page<UserResponse>> {
+        let span = debug_span!(
+            "search_users_by_email",
+            params.limit = req.limit,
+            params.offset = req.offset,
+            params.q = params.q
+        );
+        async {
+            let url = format!("{}{PATH_ADMIN}{PATH_USR}{PATH_SEARCH}", self.base_url);
             debug!(url, "doing GET");
             let resp = Client::new()
                 .get(&url)
@@ -407,6 +448,31 @@ impl ApiClient for DefaultApiClient {
         .instrument(span)
         .await
     }
+
+    async fn users(
+        &self,
+        req: PageRequestQueryParams<25>,
+        token: &str,
+    ) -> ApiResult<Page<UserResponse>> {
+        let span = debug_span!(
+            "users",
+            params.limit = req.limit,
+            params.offset = req.offset,
+        );
+        async {
+            let url = format!("{}{PATH_ADMIN}{PATH_USR}", self.base_url);
+            debug!(url, "doing GET");
+            let resp = Client::new()
+                .get(&url)
+                .bearer_auth(token)
+                .query(&req)
+                .send()
+                .await?;
+            Self::parse_json_response(resp).await
+        }
+        .instrument(span)
+        .await
+    }
 }
 
 // Tests
@@ -418,7 +484,9 @@ mod test {
     use autoplaylist_common::{
         api::Platform,
         api::SourceResponse,
-        model::{PageRequest, Predicate, SourceKind, SpotifyResourceKind, Synchronization, Target},
+        model::{
+            PageRequest, Predicate, Role, SourceKind, SpotifyResourceKind, Synchronization, Target,
+        },
         test_env_var, TracingConfig,
     };
     use chrono::DateTime;
@@ -539,7 +607,14 @@ mod test {
                             .into(),
                         id: Uuid::from_u128(0x2f3f13153bb74b3189c58bdffdb5e8de),
                         kind: req.src.clone(),
-                        owner: Uuid::from_u128(0x730ea2158aa44463a1379c4c71d50ed6),
+                        owner: UserResponse {
+                            creation: DateTime::parse_from_rfc3339("2022-01-02T00:00:00Z")
+                                .expect("failed to parse date")
+                                .into(),
+                            email: "user@test".into(),
+                            id: Uuid::from_u128(0x730ea2158aa44463a1379c4c71d50ed6),
+                            role: Role::User,
+                        },
                         sync: Synchronization::Pending,
                     },
                     sync: Synchronization::Pending,
@@ -608,7 +683,7 @@ mod test {
                     req: PageRequest::new(10, 0),
                     total: 0,
                 };
-                let params = QQueryParam { q: "name".into() };
+                let params = SearchQueryParam { q: "name".into() };
                 let req = PageRequestQueryParams::from(expected.req);
                 let client = init();
                 let resp = client
@@ -633,13 +708,38 @@ mod test {
                     req: PageRequest::new(10, 0),
                     total: 0,
                 };
-                let params = QQueryParam { q: "name".into() };
+                let params = SearchQueryParam { q: "name".into() };
                 let req = PageRequestQueryParams::from(expected.req);
                 let client = init();
                 let resp = client
                     .search_playlists_by_name(&params, req, "jwt")
                     .await
                     .expect("failed to get playlists");
+                assert_eq!(resp, expected);
+            }
+        }
+
+        mod search_users_by_email {
+            use super::*;
+
+            // Tests
+
+            #[tokio::test]
+            async fn page() {
+                let expected = Page {
+                    first: true,
+                    items: vec![],
+                    last: true,
+                    req: PageRequest::new(10, 0),
+                    total: 0,
+                };
+                let params = SearchQueryParam { q: "name".into() };
+                let req = PageRequestQueryParams::from(expected.req);
+                let client = init();
+                let resp = client
+                    .search_users_by_email(&params, req, "jwt")
+                    .await
+                    .expect("failed to get users");
                 assert_eq!(resp, expected);
             }
         }
@@ -716,6 +816,27 @@ mod test {
                     .start_source_synchronization(id, "jwt")
                     .await
                     .expect("failed to start source synchronization");
+            }
+        }
+
+        mod users {
+            use super::*;
+
+            // Tests
+
+            #[tokio::test]
+            async fn page() {
+                let expected = Page {
+                    first: true,
+                    items: vec![],
+                    last: true,
+                    req: PageRequest::new(10, 0),
+                    total: 0,
+                };
+                let req = PageRequestQueryParams::from(expected.req);
+                let client = init();
+                let resp = client.users(req, "jwt").await.expect("failed to get users");
+                assert_eq!(resp, expected);
             }
         }
     }

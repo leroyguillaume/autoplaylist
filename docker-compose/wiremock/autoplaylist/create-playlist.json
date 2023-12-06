@@ -36,7 +36,12 @@
         "kind": {
           "spotify": "savedTracks"
         },
-        "owner": "730ea215-8aa4-4463-a137-9c4c71d50ed6",
+        "owner": {
+          "creation": "2022-01-02T00:00:00Z",
+          "email": "user@test",
+          "id": "730ea215-8aa4-4463-a137-9c4c71d50ed6",
+          "role": "user"
+        },
         "sync": "pending"
       },
       "sync": "pending",

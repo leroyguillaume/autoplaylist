@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use autoplaylist_common::{
     api::{
         AuthenticateViaSpotifyQueryParams, CreatePlaylistRequest, PageRequestQueryParams,
-        QQueryParam, RedirectUriQueryParam,
+        RedirectUriQueryParam, SearchQueryParam,
     },
     db::{
         pg::{PostgresConfig, PostgresConnection, PostgresPool, PostgresTransaction},
@@ -135,6 +135,8 @@ enum Command {
     Playlist(PlaylistCommand),
     #[command(subcommand, alias = "src")]
     Source(SourceCommand),
+    #[command(subcommand, alias = "usr")]
+    User(UserCommand),
 }
 
 // DatabaseArgs
@@ -339,6 +341,29 @@ struct TokenArg {
     value: String,
 }
 
+// UserCommand
+
+#[derive(Clone, Debug, Eq, PartialEq, Subcommand)]
+#[command(about = "Playlist commands")]
+enum UserCommand {
+    #[command(about = "List users", alias = "ls")]
+    List(UserListCommandArgs),
+}
+
+// UserListCommandArgs
+
+#[derive(clap::Args, Clone, Debug, Eq, PartialEq)]
+struct UserListCommandArgs {
+    #[command(flatten)]
+    api_base_url: ApiBaseUrlArg,
+    #[command(flatten)]
+    api_token: TokenArg,
+    #[arg(short, long, help = "Search by email")]
+    email: Option<String>,
+    #[command(flatten)]
+    req: PageRequestArgs<25>,
+}
+
 // Services
 
 #[async_trait]
@@ -526,13 +551,13 @@ impl<
                     let api = self.svc.api(args.api_base_url.value);
                     let req = PageRequestQueryParams::from(args.req);
                     let resp = if let Some(name) = args.name {
-                        let q = QQueryParam { q: name };
+                        let params = SearchQueryParam { q: name };
                         if args.all {
-                            api.search_playlists_by_name(&q, req, &args.api_token.value)
+                            api.search_playlists_by_name(&params, req, &args.api_token.value)
                                 .await?
                         } else {
                             api.search_authenticated_user_playlists_by_name(
-                                &q,
+                                &params,
                                 req,
                                 &args.api_token.value,
                             )
@@ -601,6 +626,32 @@ impl<
                     let api = self.svc.api(args.api_base_url.value);
                     api.start_source_synchronization(args.id, &args.api_token.value)
                         .await?;
+                    Ok(())
+                }
+                .instrument(span)
+                .await
+            }
+            Command::User(UserCommand::List(args)) => {
+                let span = info_span!(
+                    "users",
+                    api_base_url = %args.api_base_url.value,
+                    params.limit = args.req.limit,
+                    params.offset = args.req.offset,
+                    params.email = args.email,
+                );
+                async {
+                    let api = self.svc.api(args.api_base_url.value);
+                    let req = PageRequestQueryParams::from(args.req);
+                    let resp = if let Some(email) = args.email {
+                        let params = SearchQueryParam { q: email };
+                        api.search_users_by_email(&params, args.req.into(), &args.api_token.value)
+                            .await?
+                    } else {
+                        api.users(req, &args.api_token.value).await?
+                    };
+                    trace!("writing response on output");
+                    serde_json::to_writer(&mut out, &resp)?;
+                    writeln!(out)?;
                     Ok(())
                 }
                 .instrument(span)
@@ -694,7 +745,7 @@ mod test {
     use std::collections::HashMap;
 
     use autoplaylist_common::{
-        api::{JwtResponse, Platform, PlaylistResponse, SourceResponse},
+        api::{JwtResponse, Platform, PlaylistResponse, SourceResponse, UserResponse},
         db::{MockDatabaseConnection, MockDatabasePool, MockDatabaseTransaction},
         model::{
             PageRequest, Predicate, SourceKind, SpotifyResourceKind, Synchronization, Target, User,
@@ -769,8 +820,8 @@ mod test {
                 db: DatabaseArgs,
                 email: &'static str,
                 id: Uuid,
-                name: &'static str,
                 port: u16,
+                q: &'static str,
                 req: PageRequestArgs<LIMIT>,
                 role: Role,
             }
@@ -789,12 +840,14 @@ mod test {
                 playlists: Mock<Page<PlaylistResponse>>,
                 search_auth_usr_plalists: Mock<Page<PlaylistResponse>>,
                 search_plalists: Mock<Page<PlaylistResponse>>,
+                search_usrs: Mock<Page<UserResponse>>,
                 spotify_authorize_url: Mock<()>,
                 srcs: Mock<Page<SourceResponse>>,
                 start_playlist_sync: Mock<()>,
                 start_src_sync: Mock<()>,
                 update_usr: Mock<()>,
                 usr_by_email: Mock<User, User>,
+                usrs: Mock<Page<UserResponse>>,
             }
 
             // run
@@ -826,9 +879,7 @@ mod test {
                             limit: Some(data.req.limit),
                             offset: Some(data.req.offset),
                         };
-                        let name = QQueryParam {
-                            q: data.name.into(),
-                        };
+                        let params = SearchQueryParam { q: data.q.into() };
                         let mut api = MockApiClient::new();
                         api.expect_spotify_authorize_url()
                             .with(eq(redirect_uri_param.clone()))
@@ -889,17 +940,31 @@ mod test {
                             .times(mocks.delete_playlist.times())
                             .returning(|_, _| Ok(()));
                         api.expect_search_playlists_by_name()
-                            .with(eq(name.clone()), eq(req), eq(data.api_token))
+                            .with(eq(params.clone()), eq(req), eq(data.api_token))
                             .times(mocks.search_plalists.times())
                             .returning({
                                 let mock = mocks.search_plalists.clone();
                                 move |_, _, _| Ok(mock.call())
                             });
                         api.expect_search_authenticated_user_playlists_by_name()
-                            .with(eq(name), eq(req), eq(data.api_token))
+                            .with(eq(params.clone()), eq(req), eq(data.api_token))
                             .times(mocks.search_auth_usr_plalists.times())
                             .returning({
                                 let mock = mocks.search_auth_usr_plalists.clone();
+                                move |_, _, _| Ok(mock.call())
+                            });
+                        api.expect_users()
+                            .with(eq(req), eq(data.api_token))
+                            .times(mocks.usrs.times())
+                            .returning({
+                                let mock = mocks.usrs.clone();
+                                move |_, _| Ok(mock.call())
+                            });
+                        api.expect_search_users_by_email()
+                            .with(eq(params), eq(req), eq(data.api_token))
+                            .times(mocks.search_usrs.times())
+                            .returning({
+                                let mock = mocks.search_usrs.clone();
                                 move |_, _, _| Ok(mock.call())
                             });
                         api
@@ -1029,8 +1094,8 @@ mod test {
                     },
                     email: "user@test",
                     id: Uuid::new_v4(),
-                    name: "name",
                     port,
+                    q: "name",
                     req: PageRequestArgs::<25> {
                         limit: 25,
                         offset: 0,
@@ -1098,8 +1163,8 @@ mod test {
                     },
                     email: "user@test",
                     id: Uuid::new_v4(),
-                    name: "name",
                     port,
+                    q: "name",
                     req,
                     role: Role::Admin,
                 };
@@ -1159,9 +1224,9 @@ mod test {
                         user: "user".into(),
                     },
                     email: "user@test",
-                    name: "name",
                     id: Uuid::new_v4(),
                     port,
+                    q: "name",
                     req,
                     role: Role::Admin,
                 };
@@ -1193,7 +1258,12 @@ mod test {
                     src: SourceResponse {
                         creation: Utc::now(),
                         id: Uuid::new_v4(),
-                        owner: Uuid::new_v4(),
+                        owner: UserResponse {
+                            creation: Utc::now(),
+                            email: "user@test".into(),
+                            id: Uuid::new_v4(),
+                            role: Role::User,
+                        },
                         kind: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
                         sync: Synchronization::Pending,
                     },
@@ -1228,8 +1298,8 @@ mod test {
                         user: "user".into(),
                     },
                     email: "user@test",
-                    name: "name",
                     port: 8080,
+                    q: "name",
                     req: PageRequestArgs::<25> {
                         limit: 25,
                         offset: 0,
@@ -1285,8 +1355,8 @@ mod test {
                     },
                     email: "user@test",
                     id,
-                    name: "name",
                     port: 8080,
+                    q: "name",
                     req: PageRequestArgs::<25> {
                         limit: 25,
                         offset: 0,
@@ -1346,7 +1416,7 @@ mod test {
                     },
                     email: "user@test",
                     id: Uuid::new_v4(),
-                    name: "name",
+                    q: "name",
                     port,
                     req,
                     role: Role::Admin,
@@ -1379,7 +1449,7 @@ mod test {
                     limit: 25,
                     offset: 0,
                 };
-                let name = "name";
+                let q = "name";
                 let data = Data {
                     api_base_url,
                     api_token: "jwt",
@@ -1391,7 +1461,7 @@ mod test {
                         api_token: TokenArg {
                             value: "jwt".into(),
                         },
-                        name: Some(name.into()),
+                        name: Some(q.into()),
                         req,
                     })),
                     create_playlist_req: CreatePlaylistRequest {
@@ -1402,7 +1472,7 @@ mod test {
                     },
                     db: DatabaseArgs {
                         host: "host".into(),
-                        name: name.into(),
+                        name: q.into(),
                         password: "password".into(),
                         port: 5432,
                         secret: "secret".into(),
@@ -1410,8 +1480,8 @@ mod test {
                     },
                     email: "user@test",
                     id: Uuid::new_v4(),
-                    name,
                     port,
+                    q,
                     req,
                     role: Role::Admin,
                 };
@@ -1443,7 +1513,7 @@ mod test {
                     limit: 25,
                     offset: 0,
                 };
-                let name = "name";
+                let q = "name";
                 let data = Data {
                     api_base_url,
                     api_token: "jwt",
@@ -1455,7 +1525,7 @@ mod test {
                         api_token: TokenArg {
                             value: "jwt".into(),
                         },
-                        name: Some(name.into()),
+                        name: Some(q.into()),
                         req,
                     })),
                     create_playlist_req: CreatePlaylistRequest {
@@ -1474,13 +1544,76 @@ mod test {
                     },
                     email: "user@test",
                     id: Uuid::new_v4(),
-                    name,
                     port,
+                    q,
                     req,
                     role: Role::Admin,
                 };
                 let mocks = Mocks {
                     search_plalists: Mock::once({
+                        let resp = resp.clone();
+                        move || resp.clone()
+                    }),
+                    ..Default::default()
+                };
+                let expected = serde_json::to_string(&resp).expect("failed to serialize");
+                let expected = format!("{expected}\n");
+                let out = run(data, mocks).await;
+                assert_eq!(out, expected);
+            }
+
+            #[tokio::test]
+            async fn search_users_by_email() {
+                let resp = Page {
+                    first: true,
+                    items: vec![],
+                    last: true,
+                    req: PageRequest::new(25, 0),
+                    total: 0,
+                };
+                let api_base_url = "http://localhost:8000";
+                let port = 3000;
+                let req = PageRequestArgs::<25> {
+                    limit: 25,
+                    offset: 0,
+                };
+                let q = "name";
+                let data = Data {
+                    api_base_url,
+                    api_token: "jwt",
+                    cmd: Command::User(UserCommand::List(UserListCommandArgs {
+                        api_base_url: ApiBaseUrlArg {
+                            value: api_base_url.into(),
+                        },
+                        api_token: TokenArg {
+                            value: "jwt".into(),
+                        },
+                        email: Some(q.into()),
+                        req,
+                    })),
+                    create_playlist_req: CreatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearEquals(1993),
+                        platform: Platform::Spotify,
+                        src: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                    },
+                    db: DatabaseArgs {
+                        host: "host".into(),
+                        name: "name".into(),
+                        password: "password".into(),
+                        port: 5432,
+                        secret: "secret".into(),
+                        user: "user".into(),
+                    },
+                    email: "user@test",
+                    id: Uuid::new_v4(),
+                    q,
+                    port,
+                    req,
+                    role: Role::Admin,
+                };
+                let mocks = Mocks {
+                    search_usrs: Mock::once({
                         let resp = resp.clone();
                         move || resp.clone()
                     }),
@@ -1536,7 +1669,7 @@ mod test {
                     },
                     email: "user@test",
                     id: Uuid::new_v4(),
-                    name: "name",
+                    q: "name",
                     port,
                     req,
                     role: Role::Admin,
@@ -1589,7 +1722,7 @@ mod test {
                         user: "user".into(),
                     },
                     email: "user@test",
-                    name: "name",
+                    q: "name",
                     port: 8080,
                     req: PageRequestArgs::<25> {
                         limit: 25,
@@ -1640,7 +1773,7 @@ mod test {
                     },
                     email: "user@test",
                     id,
-                    name: "name",
+                    q: "name",
                     port: 8080,
                     req: PageRequestArgs::<25> {
                         limit: 25,
@@ -1687,7 +1820,7 @@ mod test {
                     },
                     db,
                     email,
-                    name: "name",
+                    q: "name",
                     port: 8080,
                     req: PageRequestArgs::<25> {
                         limit: 25,
@@ -1702,6 +1835,68 @@ mod test {
                 };
                 let out = run(data, mocks).await;
                 assert!(out.is_empty());
+            }
+
+            #[tokio::test]
+            async fn users() {
+                let resp = Page {
+                    first: true,
+                    items: vec![],
+                    last: true,
+                    req: PageRequest::new(25, 0),
+                    total: 0,
+                };
+                let api_base_url = "http://localhost:8000";
+                let port = 3000;
+                let req = PageRequestArgs::<25> {
+                    limit: 25,
+                    offset: 0,
+                };
+                let data = Data {
+                    api_base_url,
+                    api_token: "jwt",
+                    cmd: Command::User(UserCommand::List(UserListCommandArgs {
+                        api_base_url: ApiBaseUrlArg {
+                            value: api_base_url.into(),
+                        },
+                        api_token: TokenArg {
+                            value: "jwt".into(),
+                        },
+                        email: None,
+                        req,
+                    })),
+                    create_playlist_req: CreatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearEquals(1993),
+                        platform: Platform::Spotify,
+                        src: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                    },
+                    db: DatabaseArgs {
+                        host: "host".into(),
+                        name: "name".into(),
+                        password: "password".into(),
+                        port: 5432,
+                        secret: "secret".into(),
+                        user: "user".into(),
+                    },
+                    email: "user@test",
+                    id: Uuid::new_v4(),
+                    q: "name",
+                    port,
+                    req,
+                    role: Role::Admin,
+                };
+                let mocks = Mocks {
+                    usrs: Mock::once({
+                        let resp = resp.clone();
+                        move || resp.clone()
+                    }),
+                    ..Default::default()
+                };
+                let expected = serde_json::to_string(&resp).expect("failed to serialize");
+                let expected = format!("{expected}\n");
+                let out = run(data, mocks).await;
+                assert_eq!(out, expected);
             }
         }
     }
