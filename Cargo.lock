@@ -1838,15 +1838,16 @@ dependencies = [
 
 [[package]]
 name = "mockable"
-version = "2.3.2"
+version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79a8c6112d9dc2e1b3ee6050e85ea070c9ba60af1eab9d5bb3f9c17d770a162b"
+checksum = "f06c562e7c7ccc02314c8186d739360ec59db6791111767c35f1b55b57c37cf1"
 dependencies = [
  "async-trait",
  "axum",
  "chrono",
  "mockall",
  "open",
+ "serde_json",
  "tokio",
  "tracing",
 ]
