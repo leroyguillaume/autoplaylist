@@ -21,7 +21,7 @@ use autoplaylist_common::{
     TracingConfig,
 };
 use clap::{Parser, Subcommand, ValueEnum};
-use mockable::{DefaultEnv, DefaultHttpServer, DefaultSystem, HttpServer, System};
+use mockable::{DefaultEnv, DefaultHttpServer, DefaultSystem, HttpResponse, HttpServer, System};
 use tracing::{debug, error, info_span, trace, Instrument};
 use uuid::Uuid;
 
@@ -714,9 +714,11 @@ impl
     }
 
     async fn start_server(&self, port: u16) -> anyhow::Result<DefaultHttpServer> {
+        let html = include_str!("../resources/main/html/close.html");
         let addr = SocketAddr::from(([127, 0, 0, 1], port));
         debug!(%addr, "starting server");
-        let server = DefaultHttpServer::start(&addr).await?;
+        let server =
+            DefaultHttpServer::with_response(&addr, HttpResponse::Html(html.into())).await?;
         Ok(server)
     }
 
