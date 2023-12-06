@@ -11,10 +11,11 @@ use autoplaylist_common::{
 use reqwest::{
     header::{self, HeaderName, ToStrError},
     redirect::Policy,
-    Client, ClientBuilder, StatusCode,
+    Client, ClientBuilder, Response, StatusCode,
 };
+use serde::de::DeserializeOwned;
 use thiserror::Error;
-use tracing::{debug, debug_span, Instrument};
+use tracing::{debug, debug_span, error, Instrument};
 use uuid::Uuid;
 
 // Types
@@ -25,8 +26,8 @@ pub type ApiResult<T> = Result<T, ApiError>;
 
 #[derive(Debug, Error)]
 pub enum ApiError {
-    #[error("API error ({0})")]
-    Api(StatusCode),
+    #[error("API error ({status}): `{body}`")]
+    Api { body: String, status: StatusCode },
     #[error("failed to decode header: {0}")]
     HeaderDecoding(
         #[from]
@@ -55,13 +56,13 @@ pub trait ApiClient: Send + Sync {
 
     async fn authenticated_user_playlists(
         &self,
-        params: PageRequestQueryParams<25>,
+        req: PageRequestQueryParams<25>,
         token: &str,
     ) -> ApiResult<Page<PlaylistResponse>>;
 
     async fn authenticated_user_sources(
         &self,
-        params: PageRequestQueryParams<25>,
+        req: PageRequestQueryParams<25>,
         token: &str,
     ) -> ApiResult<Page<SourceResponse>>;
 
@@ -75,21 +76,21 @@ pub trait ApiClient: Send + Sync {
 
     async fn playlists(
         &self,
-        params: PageRequestQueryParams<25>,
+        req: PageRequestQueryParams<25>,
         token: &str,
     ) -> ApiResult<Page<PlaylistResponse>>;
 
     async fn search_authenticated_user_playlists_by_name(
         &self,
-        param: &QQueryParam,
-        params: PageRequestQueryParams<25>,
+        params: &QQueryParam,
+        req: PageRequestQueryParams<25>,
         token: &str,
     ) -> ApiResult<Page<PlaylistResponse>>;
 
     async fn search_playlists_by_name(
         &self,
-        param: &QQueryParam,
-        params: PageRequestQueryParams<25>,
+        params: &QQueryParam,
+        req: PageRequestQueryParams<25>,
         token: &str,
     ) -> ApiResult<Page<PlaylistResponse>>;
 
@@ -99,7 +100,7 @@ pub trait ApiClient: Send + Sync {
         token: &str,
     ) -> ApiResult<Page<SourceResponse>>;
 
-    async fn spotify_authorize_url(&self, param: &RedirectUriQueryParam) -> ApiResult<String>;
+    async fn spotify_authorize_url(&self, params: &RedirectUriQueryParam) -> ApiResult<String>;
 
     async fn start_playlist_synchronization(&self, id: Uuid, token: &str) -> ApiResult<()>;
 
@@ -116,6 +117,37 @@ impl DefaultApiClient {
     pub fn new(base_url: String) -> Self {
         Self { base_url }
     }
+
+    #[inline]
+    async fn decode_text_response(resp: Response) -> String {
+        resp.text().await.unwrap_or_else(|err| {
+            error!(details = %err, "failed to decode response body");
+            String::new()
+        })
+    }
+
+    #[inline]
+    async fn parse_json_response<T: DeserializeOwned>(resp: Response) -> ApiResult<T> {
+        let status = resp.status();
+        if status.is_success() {
+            let resp: T = resp.json().await?;
+            Ok(resp)
+        } else {
+            let body = Self::decode_text_response(resp).await;
+            Err(ApiError::Api { body, status })
+        }
+    }
+
+    #[inline]
+    async fn parse_empty_response(resp: Response) -> ApiResult<()> {
+        let status = resp.status();
+        if status.is_success() {
+            Ok(())
+        } else {
+            let body = Self::decode_text_response(resp).await;
+            Err(ApiError::Api { body, status })
+        }
+    }
 }
 
 #[async_trait]
@@ -129,13 +161,7 @@ impl ApiClient for DefaultApiClient {
             let url = format!("{}{PATH_AUTH_SPOTIFY_TOKEN}", self.base_url);
             debug!(url, "doing GET");
             let resp = Client::new().get(&url).query(params).send().await?;
-            let status = resp.status();
-            if status.is_success() {
-                let resp: JwtResponse = resp.json().await?;
-                Ok(resp)
-            } else {
-                Err(ApiError::Api(status))
-            }
+            Self::parse_json_response(resp).await
         }
         .instrument(span)
         .await
@@ -143,26 +169,24 @@ impl ApiClient for DefaultApiClient {
 
     async fn authenticated_user_playlists(
         &self,
-        params: PageRequestQueryParams<25>,
+        req: PageRequestQueryParams<25>,
         token: &str,
     ) -> ApiResult<Page<PlaylistResponse>> {
-        let span = debug_span!("authenticated_user_playlists", params.limit, params.offset);
+        let span = debug_span!(
+            "authenticated_user_playlists",
+            params.limit = req.limit,
+            params.offset = req.offset,
+        );
         async {
             let url = format!("{}{PATH_PLAYLIST}", self.base_url);
             debug!(url, "doing GET");
             let resp = Client::new()
                 .get(&url)
                 .bearer_auth(token)
-                .query(&params)
+                .query(&req)
                 .send()
                 .await?;
-            let status = resp.status();
-            if status.is_success() {
-                let resp: Page<PlaylistResponse> = resp.json().await?;
-                Ok(resp)
-            } else {
-                Err(ApiError::Api(status))
-            }
+            Self::parse_json_response(resp).await
         }
         .instrument(span)
         .await
@@ -170,26 +194,24 @@ impl ApiClient for DefaultApiClient {
 
     async fn authenticated_user_sources(
         &self,
-        params: PageRequestQueryParams<25>,
+        req: PageRequestQueryParams<25>,
         token: &str,
     ) -> ApiResult<Page<SourceResponse>> {
-        let span = debug_span!("authenticated_user_sources", params.limit, params.offset);
+        let span = debug_span!(
+            "authenticated_user_sources",
+            params.limit = req.limit,
+            params.offset = req.offset,
+        );
         async {
             let url = format!("{}{PATH_PLAYLIST}", self.base_url);
             debug!(url, "doing GET");
             let resp = Client::new()
                 .get(&url)
                 .bearer_auth(token)
-                .query(&params)
+                .query(&req)
                 .send()
                 .await?;
-            let status = resp.status();
-            if status.is_success() {
-                let resp: Page<SourceResponse> = resp.json().await?;
-                Ok(resp)
-            } else {
-                Err(ApiError::Api(status))
-            }
+            Self::parse_json_response(resp).await
         }
         .instrument(span)
         .await
@@ -214,13 +236,7 @@ impl ApiClient for DefaultApiClient {
                 .json(req)
                 .send()
                 .await?;
-            let status = resp.status();
-            if status.is_success() {
-                let resp: PlaylistResponse = resp.json().await?;
-                Ok(resp)
-            } else {
-                Err(ApiError::Api(status))
-            }
+            Self::parse_json_response(resp).await
         }
         .instrument(span)
         .await
@@ -232,12 +248,7 @@ impl ApiClient for DefaultApiClient {
             let url = format!("{}{PATH_PLAYLIST}/{id}", self.base_url);
             debug!(url, "doing DELETE");
             let resp = Client::new().delete(&url).bearer_auth(token).send().await?;
-            let status = resp.status();
-            if status.is_success() {
-                Ok(())
-            } else {
-                Err(ApiError::Api(status))
-            }
+            Self::parse_empty_response(resp).await
         }
         .instrument(span)
         .await
@@ -245,26 +256,24 @@ impl ApiClient for DefaultApiClient {
 
     async fn playlists(
         &self,
-        params: PageRequestQueryParams<25>,
+        req: PageRequestQueryParams<25>,
         token: &str,
     ) -> ApiResult<Page<PlaylistResponse>> {
-        let span = debug_span!("playlists", params.limit, params.offset);
+        let span = debug_span!(
+            "playlists",
+            params.limit = req.limit,
+            params.offset = req.offset,
+        );
         async {
             let url = format!("{}{PATH_ADMIN}{PATH_PLAYLIST}", self.base_url);
             debug!(url, "doing GET");
             let resp = Client::new()
                 .get(&url)
                 .bearer_auth(token)
-                .query(&params)
+                .query(&req)
                 .send()
                 .await?;
-            let status = resp.status();
-            if status.is_success() {
-                let resp: Page<PlaylistResponse> = resp.json().await?;
-                Ok(resp)
-            } else {
-                Err(ApiError::Api(status))
-            }
+            Self::parse_json_response(resp).await
         }
         .instrument(span)
         .await
@@ -272,15 +281,15 @@ impl ApiClient for DefaultApiClient {
 
     async fn search_authenticated_user_playlists_by_name(
         &self,
-        param: &QQueryParam,
-        params: PageRequestQueryParams<25>,
+        params: &QQueryParam,
+        req: PageRequestQueryParams<25>,
         token: &str,
     ) -> ApiResult<Page<PlaylistResponse>> {
         let span = debug_span!(
             "search_authenticated_user_playlists_by_name",
-            params.limit,
-            params.offset,
-            params.q = param.q
+            params.limit = req.limit,
+            params.offset = req.offset,
+            params.q = params.q
         );
         async {
             let url = format!("{}{PATH_PLAYLIST}{PATH_SEARCH}", self.base_url);
@@ -288,17 +297,11 @@ impl ApiClient for DefaultApiClient {
             let resp = Client::new()
                 .get(&url)
                 .bearer_auth(token)
-                .query(&param)
                 .query(&params)
+                .query(&req)
                 .send()
                 .await?;
-            let status = resp.status();
-            if status.is_success() {
-                let resp: Page<PlaylistResponse> = resp.json().await?;
-                Ok(resp)
-            } else {
-                Err(ApiError::Api(status))
-            }
+            Self::parse_json_response(resp).await
         }
         .instrument(span)
         .await
@@ -306,15 +309,15 @@ impl ApiClient for DefaultApiClient {
 
     async fn search_playlists_by_name(
         &self,
-        param: &QQueryParam,
-        params: PageRequestQueryParams<25>,
+        params: &QQueryParam,
+        req: PageRequestQueryParams<25>,
         token: &str,
     ) -> ApiResult<Page<PlaylistResponse>> {
         let span = debug_span!(
             "search_authenticated_user_playlists_by_name",
-            params.limit,
-            params.offset,
-            params.q = param.q
+            params.limit = req.limit,
+            params.offset = req.offset,
+            params.q = params.q
         );
         async {
             let url = format!("{}{PATH_ADMIN}{PATH_PLAYLIST}{PATH_SEARCH}", self.base_url);
@@ -322,17 +325,11 @@ impl ApiClient for DefaultApiClient {
             let resp = Client::new()
                 .get(&url)
                 .bearer_auth(token)
-                .query(&param)
                 .query(&params)
+                .query(&req)
                 .send()
                 .await?;
-            let status = resp.status();
-            if status.is_success() {
-                let resp: Page<PlaylistResponse> = resp.json().await?;
-                Ok(resp)
-            } else {
-                Err(ApiError::Api(status))
-            }
+            Self::parse_json_response(resp).await
         }
         .instrument(span)
         .await
@@ -340,26 +337,24 @@ impl ApiClient for DefaultApiClient {
 
     async fn sources(
         &self,
-        params: PageRequestQueryParams<25>,
+        req: PageRequestQueryParams<25>,
         token: &str,
     ) -> ApiResult<Page<SourceResponse>> {
-        let span = debug_span!("sources", params.limit, params.offset);
+        let span = debug_span!(
+            "sources",
+            params.limit = req.limit,
+            params.offset = req.offset,
+        );
         async {
             let url = format!("{}{PATH_ADMIN}{PATH_SRC}", self.base_url);
             debug!(url, "doing GET");
             let resp = Client::new()
                 .get(&url)
                 .bearer_auth(token)
-                .query(&params)
+                .query(&req)
                 .send()
                 .await?;
-            let status = resp.status();
-            if status.is_success() {
-                let resp: Page<SourceResponse> = resp.json().await?;
-                Ok(resp)
-            } else {
-                Err(ApiError::Api(status))
-            }
+            Self::parse_json_response(resp).await
         }
         .instrument(span)
         .await
@@ -381,7 +376,8 @@ impl ApiClient for DefaultApiClient {
                 let url = loc.to_str()?;
                 Ok(url.into())
             } else {
-                Err(ApiError::Api(status))
+                let body = Self::decode_text_response(resp).await;
+                Err(ApiError::Api { body, status })
             }
         }
         .instrument(span)
@@ -394,12 +390,7 @@ impl ApiClient for DefaultApiClient {
             let url = format!("{}{PATH_PLAYLIST}/{id}{PATH_SYNC}", self.base_url);
             debug!(url, "doing PUT");
             let resp = Client::new().put(&url).bearer_auth(token).send().await?;
-            let status = resp.status();
-            if status.is_success() {
-                Ok(())
-            } else {
-                Err(ApiError::Api(status))
-            }
+            Self::parse_empty_response(resp).await
         }
         .instrument(span)
         .await
@@ -411,12 +402,7 @@ impl ApiClient for DefaultApiClient {
             let url = format!("{}{PATH_SRC}/{id}{PATH_SYNC}", self.base_url);
             debug!(url, "doing PUT");
             let resp = Client::new().put(&url).bearer_auth(token).send().await?;
-            let status = resp.status();
-            if status.is_success() {
-                Ok(())
-            } else {
-                Err(ApiError::Api(status))
-            }
+            Self::parse_empty_response(resp).await
         }
         .instrument(span)
         .await
@@ -493,10 +479,10 @@ mod test {
                     req: PageRequest::new(10, 0),
                     total: 0,
                 };
-                let params = PageRequestQueryParams::from(expected.req);
+                let req = PageRequestQueryParams::from(expected.req);
                 let client = init();
                 let resp = client
-                    .authenticated_user_playlists(params, "jwt")
+                    .authenticated_user_playlists(req, "jwt")
                     .await
                     .expect("failed to get playlists");
                 assert_eq!(resp, expected);
@@ -517,10 +503,10 @@ mod test {
                     req: PageRequest::new(10, 0),
                     total: 0,
                 };
-                let params = PageRequestQueryParams::from(expected.req);
+                let req = PageRequestQueryParams::from(expected.req);
                 let client = init();
                 let resp = client
-                    .authenticated_user_sources(params, "jwt")
+                    .authenticated_user_sources(req, "jwt")
                     .await
                     .expect("failed to get sources");
                 assert_eq!(resp, expected);
@@ -598,10 +584,10 @@ mod test {
                     req: PageRequest::new(10, 0),
                     total: 0,
                 };
-                let params = PageRequestQueryParams::from(expected.req);
+                let req = PageRequestQueryParams::from(expected.req);
                 let client = init();
                 let resp = client
-                    .playlists(params, "jwt")
+                    .playlists(req, "jwt")
                     .await
                     .expect("failed to get playlists");
                 assert_eq!(resp, expected);
@@ -622,11 +608,11 @@ mod test {
                     req: PageRequest::new(10, 0),
                     total: 0,
                 };
-                let param = QQueryParam { q: "name".into() };
-                let params = PageRequestQueryParams::from(expected.req);
+                let params = QQueryParam { q: "name".into() };
+                let req = PageRequestQueryParams::from(expected.req);
                 let client = init();
                 let resp = client
-                    .search_authenticated_user_playlists_by_name(&param, params, "jwt")
+                    .search_authenticated_user_playlists_by_name(&params, req, "jwt")
                     .await
                     .expect("failed to get playlists");
                 assert_eq!(resp, expected);
@@ -647,11 +633,11 @@ mod test {
                     req: PageRequest::new(10, 0),
                     total: 0,
                 };
-                let param = QQueryParam { q: "name".into() };
-                let params = PageRequestQueryParams::from(expected.req);
+                let params = QQueryParam { q: "name".into() };
+                let req = PageRequestQueryParams::from(expected.req);
                 let client = init();
                 let resp = client
-                    .search_playlists_by_name(&param, params, "jwt")
+                    .search_playlists_by_name(&params, req, "jwt")
                     .await
                     .expect("failed to get playlists");
                 assert_eq!(resp, expected);
@@ -672,10 +658,10 @@ mod test {
                     req: PageRequest::new(10, 0),
                     total: 0,
                 };
-                let params = PageRequestQueryParams::from(expected.req);
+                let req = PageRequestQueryParams::from(expected.req);
                 let client = init();
                 let resp = client
-                    .sources(params, "jwt")
+                    .sources(req, "jwt")
                     .await
                     .expect("failed to get sources");
                 assert_eq!(resp, expected);
@@ -689,12 +675,12 @@ mod test {
 
             #[tokio::test]
             async fn url() {
-                let param = RedirectUriQueryParam {
+                let params = RedirectUriQueryParam {
                     redirect_uri: "http://localhost:8080/".into(),
                 };
                 let client = init();
                 let url = client
-                    .spotify_authorize_url(&param)
+                    .spotify_authorize_url(&params)
                     .await
                     .expect("failed to get Spotify authorize URL");
                 assert_eq!(url, "http://localhost:8081/spotify/auth");

@@ -386,6 +386,7 @@ dependencies = [
  "mockable",
  "mockall",
  "reqwest",
+ "serde",
  "serde_json",
  "tempdir",
  "thiserror",
