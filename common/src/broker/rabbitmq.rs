@@ -14,7 +14,7 @@ use tracing::{debug, debug_span, error, info, info_span, trace, warn, Instrument
 
 use super::{
     BrokerClient, BrokerError, BrokerResult, Consumer, Message, MessageHandler, PlaylistMessage,
-    Publisher, SourceMessage,
+    SourceMessage,
 };
 
 // Consts - Env var keys
@@ -90,8 +90,9 @@ impl RabbitMqConfig {
 // RabbitMqClient
 
 pub struct RabbitMqClient {
+    cfg: RabbitMqConfig,
+    channel: Channel,
     conn: Connection,
-    publisher: RabbitMqPublisher,
 }
 
 impl RabbitMqClient {
@@ -100,10 +101,62 @@ impl RabbitMqClient {
         let conn = Connection::connect(&cfg.url, Default::default()).await?;
         trace!("opening channel");
         let channel = conn.create_channel().await?;
-        Ok(Self {
-            conn,
-            publisher: RabbitMqPublisher { channel, cfg },
-        })
+        Ok(Self { cfg, channel, conn })
+    }
+
+    #[inline]
+    async fn publish_message<M: Message>(&self, msg: &M, exch: &str) -> RabbitMqResult<()> {
+        let span = debug_span!("publish_message", csm.exch = exch);
+        async {
+            trace!("serializing message");
+            let payload = serde_json::to_vec(msg)?;
+            debug!("publishing message");
+            self.channel
+                .basic_publish(exch, "", Default::default(), &payload, Default::default())
+                .await?;
+            Ok(())
+        }
+        .instrument(span)
+        .await
+    }
+}
+
+#[async_trait]
+impl BrokerClient for RabbitMqClient {
+    async fn publish_playlist_message(&self, msg: &PlaylistMessage) -> BrokerResult<()> {
+        self.publish_message(msg, &self.cfg.playlist_msg_exch)
+            .await?;
+        Ok(())
+    }
+
+    async fn publish_source_message(&self, msg: &SourceMessage) -> BrokerResult<()> {
+        self.publish_message(msg, &self.cfg.src_msg_exch).await?;
+        Ok(())
+    }
+}
+
+// RabbitMqConsumer
+
+pub struct RabbitMqConsumer {
+    stop_tx: Sender<()>,
+    task: JoinHandle<()>,
+}
+
+impl RabbitMqConsumer {
+    pub async fn start_playlist_message_consumer<H: MessageHandler<PlaylistMessage> + 'static>(
+        queue: &str,
+        client: &RabbitMqClient,
+        handler: H,
+    ) -> RabbitMqResult<Self> {
+        Self::start(queue, &client.cfg.playlist_msg_exch, client, handler).await
+    }
+
+    pub async fn start_source_message_consumer<H: MessageHandler<SourceMessage> + 'static>(
+        queue: &str,
+        client: &RabbitMqClient,
+        handler: H,
+    ) -> RabbitMqResult<Self> {
+        Self::start(queue, &client.cfg.src_msg_exch, client, handler).await
     }
 
     #[inline]
@@ -229,16 +282,16 @@ impl RabbitMqClient {
     }
 
     #[inline]
-    async fn start_consumer<M: Message + 'static, H: MessageHandler<M> + 'static>(
-        &self,
+    async fn start<MSG: Message + 'static, HANDLER: MessageHandler<MSG> + 'static>(
         queue: &str,
         exch: &str,
-        handler: H,
-    ) -> RabbitMqResult<RabbitMqConsumer> {
-        let span = debug_span!("start_consumer", csm.exch = exch, csm.queue = queue);
+        client: &RabbitMqClient,
+        handler: HANDLER,
+    ) -> RabbitMqResult<Self> {
+        let span = info_span!("start", csm.exch = exch, csm.queue = queue);
         async {
             debug!("opening channel");
-            let channel = self.conn.create_channel().await?;
+            let channel = client.conn.create_channel().await?;
             debug!("declaring queue");
             channel
                 .queue_declare(queue, Default::default(), Default::default())
@@ -277,87 +330,12 @@ impl RabbitMqClient {
 }
 
 #[async_trait]
-impl BrokerClient<RabbitMqConsumer> for RabbitMqClient {
-    fn publisher(&self) -> &dyn Publisher {
-        &self.publisher
-    }
-
-    async fn start_playlist_message_consumer(
-        &self,
-        queue: &str,
-        handle: impl MessageHandler<PlaylistMessage> + 'static,
-    ) -> BrokerResult<RabbitMqConsumer> {
-        let csm = self
-            .start_consumer(queue, &self.publisher.cfg.playlist_msg_exch, handle)
-            .await?;
-        Ok(csm)
-    }
-
-    async fn start_source_message_consumer(
-        &self,
-        queue: &str,
-        handle: impl MessageHandler<SourceMessage> + 'static,
-    ) -> BrokerResult<RabbitMqConsumer> {
-        let csm = self
-            .start_consumer(queue, &self.publisher.cfg.src_msg_exch, handle)
-            .await?;
-        Ok(csm)
-    }
-}
-
-// RabbitMqConsumer
-
-pub struct RabbitMqConsumer {
-    stop_tx: Sender<()>,
-    task: JoinHandle<()>,
-}
-
-#[async_trait]
 impl Consumer for RabbitMqConsumer {
     async fn stop(self) -> Result<(), JoinError> {
         debug!("stopping consumer");
         self.stop_tx.send(()).ok();
         trace!("waiting for consumer to stop");
         self.task.await
-    }
-}
-
-// RabbitMqPublisher
-
-pub struct RabbitMqPublisher {
-    channel: Channel,
-    cfg: RabbitMqConfig,
-}
-
-impl RabbitMqPublisher {
-    #[inline]
-    async fn publish_message<M: Message>(&self, msg: &M, exch: &str) -> RabbitMqResult<()> {
-        let span = debug_span!("publish_message", csm.exch = exch);
-        async {
-            trace!("serializing message");
-            let payload = serde_json::to_vec(msg)?;
-            debug!("publishing message");
-            self.channel
-                .basic_publish(exch, "", Default::default(), &payload, Default::default())
-                .await?;
-            Ok(())
-        }
-        .instrument(span)
-        .await
-    }
-}
-
-#[async_trait]
-impl Publisher for RabbitMqPublisher {
-    async fn publish_playlist_message(&self, msg: &PlaylistMessage) -> BrokerResult<()> {
-        self.publish_message(msg, &self.cfg.playlist_msg_exch)
-            .await?;
-        Ok(())
-    }
-
-    async fn publish_source_message(&self, msg: &SourceMessage) -> BrokerResult<()> {
-        self.publish_message(msg, &self.cfg.src_msg_exch).await?;
-        Ok(())
     }
 }
 
@@ -520,12 +498,11 @@ mod test {
                     .expect("failed to initialize RabbitMQ client");
                 let (msg_tx, mut msg_rx) = mpsc::channel(1);
                 let handler = TestHandler::new(msg_tx);
-                let csm = client
-                    .start_playlist_message_consumer(&queue, handler)
-                    .await
-                    .expect("failed to start consumer");
+                let csm =
+                    RabbitMqConsumer::start_playlist_message_consumer(&queue, &client, handler)
+                        .await
+                        .expect("failed to start consumer");
                 client
-                    .publisher()
                     .publish_playlist_message(&expected)
                     .await
                     .expect("failed to publish message");
@@ -559,12 +536,10 @@ mod test {
                     .expect("failed to initialize RabbitMQ client");
                 let (msg_tx, mut msg_rx) = mpsc::channel(1);
                 let handler = TestHandler::new(msg_tx);
-                let csm = client
-                    .start_source_message_consumer(&queue, handler)
+                let csm = RabbitMqConsumer::start_source_message_consumer(&queue, &client, handler)
                     .await
                     .expect("failed to start consumer");
                 client
-                    .publisher()
                     .publish_source_message(&expected)
                     .await
                     .expect("failed to publish message");

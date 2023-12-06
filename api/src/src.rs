@@ -3,10 +3,7 @@ use std::{marker::PhantomData, sync::Arc};
 use async_trait::async_trait;
 use autoplaylist_common::{
     api::PageRequestQueryParams,
-    broker::{
-        rabbitmq::{RabbitMqClient, RabbitMqConsumer},
-        BrokerClient, Consumer, SourceMessage, SourceMessageKind,
-    },
+    broker::{rabbitmq::RabbitMqClient, BrokerClient, SourceMessage, SourceMessageKind},
     db::{
         pg::{PostgresConnection, PostgresPool, PostgresTransaction},
         DatabaseConnection, DatabasePool, DatabaseTransaction,
@@ -36,33 +33,24 @@ pub trait SourceService: Send + Sync {
 // DefaultSourceService
 
 pub struct DefaultSourceService<
-    CSM: Consumer,
-    BROKER: BrokerClient<CSM>,
+    BROKER: BrokerClient,
     DBCONN: DatabaseConnection,
     DBTX: DatabaseTransaction,
     DB: DatabasePool<DBCONN, DBTX>,
 > {
     broker: Arc<BROKER>,
     db: Arc<DB>,
-    _csm: PhantomData<CSM>,
     _dbconn: PhantomData<DBCONN>,
     _dbtx: PhantomData<DBTX>,
 }
 
 impl
-    DefaultSourceService<
-        RabbitMqConsumer,
-        RabbitMqClient,
-        PostgresConnection,
-        PostgresTransaction<'_>,
-        PostgresPool,
-    >
+    DefaultSourceService<RabbitMqClient, PostgresConnection, PostgresTransaction<'_>, PostgresPool>
 {
     pub fn new(broker: Arc<RabbitMqClient>, db: Arc<PostgresPool>) -> Self {
         Self {
             broker,
             db,
-            _csm: PhantomData,
             _dbconn: PhantomData,
             _dbtx: PhantomData,
         }
@@ -71,12 +59,11 @@ impl
 
 #[async_trait]
 impl<
-        CSM: Consumer,
-        BROKER: BrokerClient<CSM>,
+        BROKER: BrokerClient,
         DBCONN: DatabaseConnection,
         DBTX: DatabaseTransaction,
         DB: DatabasePool<DBCONN, DBTX>,
-    > SourceService for DefaultSourceService<CSM, BROKER, DBCONN, DBTX, DB>
+    > SourceService for DefaultSourceService<BROKER, DBCONN, DBTX, DB>
 {
     async fn authenticated_user_sources(
         &self,
@@ -99,7 +86,7 @@ impl<
             id,
             kind: SourceMessageKind::Sync,
         };
-        self.broker.publisher().publish_source_message(&msg).await?;
+        self.broker.publish_source_message(&msg).await?;
         Ok(())
     }
 }
@@ -109,7 +96,7 @@ impl<
 #[cfg(test)]
 mod test {
     use autoplaylist_common::{
-        broker::{MockBrokerClient, MockPublisher},
+        broker::MockBrokerClient,
         db::{MockDatabaseConnection, MockDatabasePool},
     };
     use mockable::Mock;
@@ -158,7 +145,6 @@ mod test {
                 let src_svc = DefaultSourceService {
                     broker: Arc::new(MockBrokerClient::default()),
                     db: Arc::new(db),
-                    _csm: PhantomData,
                     _dbconn: PhantomData,
                     _dbtx: PhantomData,
                 };
@@ -206,7 +192,6 @@ mod test {
                 let src_svc = DefaultSourceService {
                     broker: Arc::new(MockBrokerClient::default()),
                     db: Arc::new(db),
-                    _csm: PhantomData,
                     _dbconn: PhantomData,
                     _dbtx: PhantomData,
                 };
@@ -226,20 +211,15 @@ mod test {
                     id: Uuid::new_v4(),
                     kind: SourceMessageKind::Sync,
                 };
-                let mut publisher = MockPublisher::new();
-                publisher
+                let mut broker = MockBrokerClient::new();
+                broker
                     .expect_publish_source_message()
                     .with(eq(msg.clone()))
                     .times(1)
                     .returning(|_| Ok(()));
-                let broker = MockBrokerClient {
-                    publisher,
-                    ..Default::default()
-                };
                 let src_svc = DefaultSourceService {
                     broker: Arc::new(broker),
                     db: Arc::new(MockDatabasePool::default()),
-                    _csm: PhantomData,
                     _dbconn: PhantomData,
                     _dbtx: PhantomData,
                 };
