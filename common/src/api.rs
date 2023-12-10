@@ -1,10 +1,9 @@
 use chrono::{DateTime, Utc};
-use enum_display::EnumDisplay;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::model::{
-    PageRequest, Playlist, PlaylistSynchronization, Predicate, Role, Source, SourceKind,
+    PageRequest, Platform, Playlist, PlaylistSynchronization, Predicate, Role, Source, SourceKind,
     SourceSynchronization, Target, User,
 };
 
@@ -56,15 +55,6 @@ impl<const LIMIT: u32> From<PageRequest> for PageRequestQueryParams<LIMIT> {
             offset: Some(req.offset),
         }
     }
-}
-
-// Platform
-
-#[derive(Clone, Copy, Debug, Deserialize, EnumDisplay, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-#[enum_display(case = "Kebab")]
-pub enum Platform {
-    Spotify,
 }
 
 // PlaylistResponse
@@ -167,7 +157,7 @@ impl From<User> for UserResponse {
 
 #[cfg(test)]
 mod test {
-    use crate::model::{Role, SpotifyResourceKind, Target, User};
+    use crate::model::{Role, SpotifySourceKind, Target, User};
 
     use super::*;
 
@@ -208,7 +198,7 @@ mod test {
                     src: Source {
                         creation: Utc::now(),
                         id: Uuid::new_v4(),
-                        kind: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                        kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                         owner: User {
                             creation: Utc::now(),
                             creds: Default::default(),
@@ -247,7 +237,7 @@ mod test {
                 let src = Source {
                     creation: Utc::now(),
                     id: Uuid::new_v4(),
-                    kind: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                    kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     owner: User {
                         creation: Utc::now(),
                         creds: Default::default(),

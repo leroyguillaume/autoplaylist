@@ -50,9 +50,9 @@ pub trait Synchronizable<STEP: SynchronizationStep>: Send + Sync {
 
     fn owner_mut(&mut self) -> &mut User;
 
-    fn set_synchronization(&mut self, sync: Synchronization<STEP>);
+    fn source_kind(&self) -> SourceKind;
 
-    fn to_resource(&self) -> PlatformResource;
+    fn set_synchronization(&mut self, sync: Synchronization<STEP>);
 
     #[cfg(feature = "db")]
     async fn update(
@@ -133,12 +133,15 @@ impl<const LIMIT: u32> From<crate::api::PageRequestQueryParams<LIMIT>> for PageR
     }
 }
 
-// PlatformResource
+// Platform
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, EnumDisplay, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub enum PlatformResource {
-    Spotify(SpotifyResourceKind),
+#[enum_display(case = "Kebab")]
+#[cfg_attr(feature = "db", derive(sqlx::Type))]
+#[cfg_attr(feature = "db", sqlx(type_name = "platform", rename_all = "lowercase"))]
+pub enum Platform {
+    Spotify,
 }
 
 // Playlist
@@ -198,11 +201,9 @@ impl Synchronizable<PlaylistSynchronizationStep> for Playlist {
         self.sync = sync;
     }
 
-    fn to_resource(&self) -> PlatformResource {
+    fn source_kind(&self) -> SourceKind {
         match &self.tgt {
-            Target::Spotify(id) => {
-                PlatformResource::Spotify(SpotifyResourceKind::Playlist(id.clone()))
-            }
+            Target::Spotify(id) => SourceKind::Spotify(SpotifySourceKind::Playlist(id.clone())),
         }
     }
 
@@ -316,10 +317,8 @@ impl Synchronizable<SourceSynchronizationStep> for Source {
         self.sync = sync;
     }
 
-    fn to_resource(&self) -> PlatformResource {
-        match &self.kind {
-            SourceKind::Spotify(kind) => PlatformResource::Spotify(kind.clone()),
-        }
+    fn source_kind(&self) -> SourceKind {
+        self.kind.clone()
     }
 
     #[cfg(feature = "db")]
@@ -336,7 +335,7 @@ impl Synchronizable<SourceSynchronizationStep> for Source {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SourceKind {
-    Spotify(SpotifyResourceKind),
+    Spotify(SpotifySourceKind),
 }
 
 // SourceSynchronizationStep
@@ -365,11 +364,11 @@ pub struct SpotifyCredentials {
     pub token: SpotifyToken,
 }
 
-// SpotifyResourceKind
+// SpotifySourceKind
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub enum SpotifyResourceKind {
+pub enum SpotifySourceKind {
     Playlist(String),
     SavedTracks,
 }
@@ -428,7 +427,8 @@ pub struct Track {
     pub artists: BTreeSet<String>,
     pub creation: DateTime<Utc>,
     pub id: Uuid,
-    pub spotify_id: Option<String>,
+    pub platform: Platform,
+    pub platform_id: String,
     pub title: String,
     pub year: i32,
 }
@@ -461,7 +461,7 @@ mod test {
             id: Uuid::new_v4(),
             name: "name".into(),
             predicate: Predicate::YearEquals(2020),
-            src: new_source(SourceKind::Spotify(SpotifyResourceKind::SavedTracks)),
+            src: new_source(SourceKind::Spotify(SpotifySourceKind::SavedTracks)),
             sync: Synchronization::Pending,
             tgt,
         }
@@ -663,7 +663,7 @@ mod test {
             }
         }
 
-        mod to_resource {
+        mod source_kind {
             use super::*;
 
             // Tests
@@ -672,9 +672,9 @@ mod test {
             fn spotify() {
                 let id = "id";
                 let playlist = new_playlist(Target::Spotify(id.into()));
-                let expected = PlatformResource::Spotify(SpotifyResourceKind::Playlist(id.into()));
-                let res = playlist.to_resource();
-                assert_eq!(res, expected);
+                let expected = SourceKind::Spotify(SpotifySourceKind::Playlist(id.into()));
+                let kind = playlist.source_kind();
+                assert_eq!(kind, expected);
             }
         }
 
@@ -739,7 +739,8 @@ mod test {
                     artists: BTreeSet::from_iter(["pink floyd".into()]),
                     creation: Utc::now(),
                     id: Uuid::new_v4(),
-                    spotify_id: None,
+                    platform: Platform::Spotify,
+                    platform_id: "id".into(),
                     title: "time".into(),
                     year: 1973,
                 };
@@ -763,7 +764,7 @@ mod test {
 
             #[tokio::test]
             async fn source() {
-                let expected = new_source(SourceKind::Spotify(SpotifyResourceKind::SavedTracks));
+                let expected = new_source(SourceKind::Spotify(SpotifySourceKind::SavedTracks));
                 let mut db_conn = crate::db::MockDatabaseClient::new();
                 db_conn
                     .expect_source_by_id()
@@ -789,7 +790,7 @@ mod test {
 
             #[tokio::test]
             async fn unit() {
-                let src = new_source(SourceKind::Spotify(SpotifyResourceKind::SavedTracks));
+                let src = new_source(SourceKind::Spotify(SpotifySourceKind::SavedTracks));
                 let track_id = Uuid::new_v4();
                 let mut db_conn = crate::db::MockDatabaseClient::new();
                 db_conn
@@ -810,7 +811,7 @@ mod test {
 
             #[test]
             fn id() {
-                let src = new_source(SourceKind::Spotify(SpotifyResourceKind::SavedTracks));
+                let src = new_source(SourceKind::Spotify(SpotifySourceKind::SavedTracks));
                 let id = src.id();
                 assert_eq!(id, src.id);
             }
@@ -824,7 +825,7 @@ mod test {
 
             #[tokio::test]
             async fn unit() {
-                let src = new_source(SourceKind::Spotify(SpotifyResourceKind::SavedTracks));
+                let src = new_source(SourceKind::Spotify(SpotifySourceKind::SavedTracks));
                 let mut db_conn = crate::db::MockDatabaseClient::new();
                 db_conn
                     .expect_lock_source_synchronization()
@@ -850,7 +851,7 @@ mod test {
 
             #[test]
             fn unit() {
-                let mut src = new_source(SourceKind::Spotify(SpotifyResourceKind::SavedTracks));
+                let mut src = new_source(SourceKind::Spotify(SpotifySourceKind::SavedTracks));
                 let sync = Synchronization::Running;
                 let expected = Source {
                     sync: sync.clone(),
@@ -866,27 +867,23 @@ mod test {
 
             // spotify
 
-            fn spotify(expected: SpotifyResourceKind) {
+            fn spotify(expected: SpotifySourceKind) {
                 let src = new_source(SourceKind::Spotify(expected.clone()));
-                let res = src.to_resource();
-                match res {
-                    PlatformResource::Spotify(kind) => {
-                        assert_eq!(kind, expected)
-                    }
-                }
+                let kind = src.source_kind();
+                assert_eq!(kind, SourceKind::Spotify(expected));
             }
 
             // Tests
 
             #[test]
             fn spotify_playlist() {
-                let expected = SpotifyResourceKind::Playlist("id".into());
+                let expected = SpotifySourceKind::Playlist("id".into());
                 spotify(expected);
             }
 
             #[test]
             fn spotify_saved_track() {
-                let expected = SpotifyResourceKind::SavedTracks;
+                let expected = SpotifySourceKind::SavedTracks;
                 spotify(expected);
             }
         }
@@ -899,7 +896,7 @@ mod test {
 
             #[tokio::test]
             async fn unit() {
-                let src = new_source(SourceKind::Spotify(SpotifyResourceKind::SavedTracks));
+                let src = new_source(SourceKind::Spotify(SpotifySourceKind::SavedTracks));
                 let mut db_conn = crate::db::MockDatabaseClient::new();
                 db_conn
                     .expect_update_source()

@@ -6,10 +6,9 @@ SELECT
     album AS track_album,
     from_compil AS track_from_compil,
     year AS track_year,
-    spotify_id AS track_spotify_id
+    platform AS "track_platform: Platform", -- noqa: disable=RF05,
+    platform_id AS track_platform_id
 FROM track
 WHERE
-    title = $1
-    AND artists = $2::VARCHAR[]
-    AND album = $3
-    AND year = $4;
+    platform = $1
+    AND platform_id = $2;

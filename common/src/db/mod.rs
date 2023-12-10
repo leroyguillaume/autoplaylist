@@ -5,8 +5,8 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::model::{
-    Album, Credentials, Page, PageRequest, Playlist, PlaylistSynchronization, Predicate, Source,
-    SourceKind, SourceSynchronization, Target, Track, User,
+    Album, Credentials, Page, PageRequest, Platform, Playlist, PlaylistSynchronization, Predicate,
+    Source, SourceKind, SourceSynchronization, Target, Track, User,
 };
 
 // Macros
@@ -206,16 +206,12 @@ macro_rules! mock_client_impl {
                 self.$attr.track_by_id(id).await
             }
 
-            async fn track_by_title_artists_album_year(
+            async fn track_by_platform_id(
                 &mut self,
-                title: &str,
-                artists: &BTreeSet<String>,
-                album: &str,
-                year: i32,
+                platform: Platform,
+                id: &str,
             ) -> DatabaseResult<Option<Track>> {
-                self.$attr
-                    .track_by_title_artists_album_year(title, artists, album, year)
-                    .await
+                self.$attr.track_by_platform_id(platform, id).await
             }
 
             async fn tracks(&mut self, req: PageRequest) -> DatabaseResult<Page<Track>> {
@@ -228,10 +224,6 @@ macro_rules! mock_client_impl {
 
             async fn update_source(&mut self, src: &Source) -> DatabaseResult<()> {
                 self.$attr.update_source(src).await
-            }
-
-            async fn update_track(&mut self, track: &Track) -> DatabaseResult<()> {
-                self.$attr.update_track(track).await
             }
 
             async fn update_user(&mut self, user: &User) -> DatabaseResult<()> {
@@ -333,7 +325,8 @@ impl From<Source> for SourceCreation {
 pub struct TrackCreation {
     pub album: Album,
     pub artists: BTreeSet<String>,
-    pub spotify_id: Option<String>,
+    pub platform: Platform,
+    pub platform_id: String,
     pub title: String,
     pub year: i32,
 }
@@ -343,7 +336,8 @@ impl From<Track> for TrackCreation {
         Self {
             album: track.album,
             artists: track.artists,
-            spotify_id: track.spotify_id,
+            platform: track.platform,
+            platform_id: track.platform_id,
             title: track.title,
             year: track.year,
         }
@@ -466,12 +460,10 @@ pub trait DatabaseClient: Send + Sync {
 
     async fn track_by_id(&mut self, id: Uuid) -> DatabaseResult<Option<Track>>;
 
-    async fn track_by_title_artists_album_year(
+    async fn track_by_platform_id(
         &mut self,
-        title: &str,
-        artists: &BTreeSet<String>,
-        album: &str,
-        year: i32,
+        platform: Platform,
+        id: &str,
     ) -> DatabaseResult<Option<Track>>;
 
     async fn tracks(&mut self, req: PageRequest) -> DatabaseResult<Page<Track>>;
@@ -479,8 +471,6 @@ pub trait DatabaseClient: Send + Sync {
     async fn update_playlist(&mut self, playlist: &Playlist) -> DatabaseResult<()>;
 
     async fn update_source(&mut self, src: &Source) -> DatabaseResult<()>;
-
-    async fn update_track(&mut self, track: &Track) -> DatabaseResult<()>;
 
     async fn update_user(&mut self, user: &User) -> DatabaseResult<()>;
 
@@ -614,7 +604,7 @@ mod test {
     use chrono::Utc;
     use mockable::Mock;
 
-    use crate::model::{Role, SpotifyResourceKind, Synchronization};
+    use crate::model::{Role, SpotifySourceKind, Synchronization};
 
     use super::*;
 
@@ -634,7 +624,7 @@ mod test {
                     src: Source {
                         creation: Utc::now(),
                         id: Uuid::new_v4(),
-                        kind: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                        kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                         owner: User {
                             creation: Utc::now(),
                             creds: Default::default(),
@@ -670,7 +660,7 @@ mod test {
                 let src = Source {
                     creation: Utc::now(),
                     id: Uuid::new_v4(),
-                    kind: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                    kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     owner: User {
                         creation: Utc::now(),
                         creds: Default::default(),
@@ -706,14 +696,16 @@ mod test {
                     artists: BTreeSet::from_iter(["Pink Floyd".into()]),
                     creation: Utc::now(),
                     id: Uuid::new_v4(),
-                    spotify_id: Some("id".into()),
+                    platform: Platform::Spotify,
+                    platform_id: "id".into(),
                     title: "Time".into(),
                     year: 1973,
                 };
                 let expected = TrackCreation {
                     album: track.album.clone(),
                     artists: track.artists.clone(),
-                    spotify_id: track.spotify_id.clone(),
+                    platform: track.platform,
+                    platform_id: track.platform_id.clone(),
                     title: track.title.clone(),
                     year: track.year,
                 };

@@ -496,10 +496,10 @@ mod test {
     use std::io::stderr;
 
     use autoplaylist_common::{
-        api::Platform,
         api::SourceResponse,
         model::{
-            PageRequest, Predicate, Role, SourceKind, SpotifyResourceKind, Synchronization, Target,
+            PageRequest, Platform, Predicate, Role, SourceKind, SpotifySourceKind, Synchronization,
+            Target,
         },
         test_env_var, TracingConfig,
     };
@@ -606,7 +606,7 @@ mod test {
                     name: "name".into(),
                     platform: Platform::Spotify,
                     predicate: Predicate::YearEquals(1993),
-                    src: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                    src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                 };
                 let expected = PlaylistResponse {
                     creation: DateTime::parse_from_rfc3339("2023-01-02T00:00:10Z")

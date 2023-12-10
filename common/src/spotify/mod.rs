@@ -40,7 +40,8 @@ impl PlatformTrack for SpotifyTrack {
         crate::db::TrackCreation {
             album: self.album,
             artists: self.artists,
-            spotify_id: Some(self.id),
+            platform: crate::model::Platform::Spotify,
+            platform_id: self.id,
             title: self.title,
             year: self.year,
         }
@@ -138,7 +139,8 @@ mod test {
                 let expected = crate::db::TrackCreation {
                     album: track.album.clone(),
                     artists: track.artists.clone(),
-                    spotify_id: Some(track.id.clone()),
+                    platform: crate::model::Platform::Spotify,
+                    platform_id: track.id.clone(),
                     title: track.title.clone(),
                     year: track.year,
                 };
