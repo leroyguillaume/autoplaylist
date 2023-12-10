@@ -11,13 +11,14 @@ use crate::model::{
 // Consts - Paths
 
 pub const PATH_ADMIN: &str = "/admin";
-pub const PATH_AUTH_SPOTIFY: &str = "/auth/spotify";
-pub const PATH_AUTH_SPOTIFY_TOKEN: &str = "/auth/spotify/token";
+pub const PATH_AUTH: &str = "/auth";
 pub const PATH_HEALTH: &str = "/health";
 pub const PATH_PLAYLIST: &str = "/playlist";
 pub const PATH_SEARCH: &str = "/search";
+pub const PATH_SPOTIFY: &str = "/spotify";
 pub const PATH_SRC: &str = "/source";
 pub const PATH_SYNC: &str = "/sync";
+pub const PATH_TOKEN: &str = "/token";
 pub const PATH_USR: &str = "/user";
 
 // AuthenticateViaSpotifyQueryParams
@@ -102,23 +103,11 @@ pub struct JwtResponse {
     pub jwt: String,
 }
 
-impl From<String> for JwtResponse {
-    fn from(jwt: String) -> Self {
-        Self { jwt }
-    }
-}
-
 // RedirectUriQueryParam
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RedirectUriQueryParam {
     pub redirect_uri: String,
-}
-
-impl From<String> for RedirectUriQueryParam {
-    fn from(redirect_uri: String) -> Self {
-        Self { redirect_uri }
-    }
 }
 
 // SearchQueryParam
@@ -243,40 +232,6 @@ mod test {
                 };
                 let resp = PlaylistResponse::from(playlist);
                 assert_eq!(resp, expected);
-            }
-        }
-    }
-
-    mod jwt_response {
-        use super::*;
-
-        mod from_string {
-            use super::*;
-
-            #[test]
-            fn response() {
-                let jwt = "jwt";
-                let expected = JwtResponse { jwt: jwt.into() };
-                let resp = JwtResponse::from(String::from(jwt));
-                assert_eq!(resp, expected);
-            }
-        }
-    }
-
-    mod redirect_uri_param {
-        use super::*;
-
-        mod from_string {
-            use super::*;
-
-            #[test]
-            fn param() {
-                let redirect_uri = "uri";
-                let expected = RedirectUriQueryParam {
-                    redirect_uri: redirect_uri.into(),
-                };
-                let param = RedirectUriQueryParam::from(String::from(redirect_uri));
-                assert_eq!(param, expected);
             }
         }
     }

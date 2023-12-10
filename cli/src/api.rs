@@ -3,8 +3,8 @@ use autoplaylist_common::{
     api::{
         AuthenticateViaSpotifyQueryParams, CreatePlaylistRequest, JwtResponse,
         PageRequestQueryParams, PlaylistResponse, RedirectUriQueryParam, SearchQueryParam,
-        SourceResponse, UserResponse, PATH_ADMIN, PATH_AUTH_SPOTIFY, PATH_AUTH_SPOTIFY_TOKEN,
-        PATH_PLAYLIST, PATH_SEARCH, PATH_SRC, PATH_SYNC, PATH_USR,
+        SourceResponse, UserResponse, PATH_ADMIN, PATH_AUTH, PATH_PLAYLIST, PATH_SEARCH,
+        PATH_SPOTIFY, PATH_SRC, PATH_SYNC, PATH_TOKEN, PATH_USR,
     },
     model::Page,
 };
@@ -173,7 +173,7 @@ impl ApiClient for DefaultApiClient {
     ) -> ApiResult<JwtResponse> {
         let span = debug_span!("authenticate_via_spotify", params.code, params.redirect_uri);
         async {
-            let url = format!("{}{PATH_AUTH_SPOTIFY_TOKEN}", self.base_url);
+            let url = format!("{}{PATH_AUTH}{PATH_SPOTIFY}{PATH_TOKEN}", self.base_url);
             debug!(url, "doing GET");
             let resp = Client::new().get(&url).query(params).send().await?;
             Self::parse_json_response(resp).await
@@ -419,7 +419,7 @@ impl ApiClient for DefaultApiClient {
         let span = debug_span!("spotify_authorize_url", params.redirect_uri);
         async {
             let client = ClientBuilder::new().redirect(Policy::none()).build()?;
-            let url = format!("{}{PATH_AUTH_SPOTIFY}", self.base_url);
+            let url = format!("{}{PATH_AUTH}{PATH_SPOTIFY}", self.base_url);
             debug!(url, "doing GET");
             let resp = client.get(&url).query(params).send().await?;
             let status = resp.status();
