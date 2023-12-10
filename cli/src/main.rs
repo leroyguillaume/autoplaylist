@@ -131,6 +131,8 @@ enum Command {
     Admin(AdminCommand),
     #[command(subcommand)]
     Auth(AuthCommand),
+    #[command(about = "Get your account information")]
+    Me(MeCommandArgs),
     #[command(subcommand)]
     Playlist(PlaylistCommand),
     #[command(subcommand, alias = "src")]
@@ -189,6 +191,18 @@ struct DatabaseArgs {
         name = "DATABASE_USER"
     )]
     user: String,
+}
+
+// MeCommandArgs
+
+#[derive(clap::Args, Clone, Debug, Eq, PartialEq)]
+struct MeCommandArgs {
+    #[command(flatten)]
+    api_base_url: ApiBaseUrlArg,
+    #[command(flatten)]
+    api_token: TokenArg,
+    #[arg(short, long, default_value_t = false, help = "Delete your account")]
+    delete: bool,
 }
 
 // PageRequestArgs
@@ -512,6 +526,27 @@ impl<
                     trace!("writing response on output");
                     serde_json::to_writer(&mut out, &resp)?;
                     writeln!(out)?;
+                    Ok(())
+                }
+                .instrument(span)
+                .await
+            }
+            Command::Me(args) => {
+                let span = info_span!(
+                    "me",
+                    api_base_url = %args.api_base_url.value,
+                    params.delete = args.delete
+                );
+                async {
+                    let api = self.svc.api(args.api_base_url.value);
+                    if args.delete {
+                        api.delete_authenticated_user(&args.api_token.value).await?;
+                    } else {
+                        let resp = api.authenticated_user(&args.api_token.value).await?;
+                        trace!("writing response on output");
+                        serde_json::to_writer(&mut out, &resp)?;
+                        writeln!(out)?;
+                    }
                     Ok(())
                 }
                 .instrument(span)
@@ -861,10 +896,12 @@ mod test {
 
             #[derive(Clone, Default)]
             struct Mocks {
-                auth_via_spotify: Mock<JwtResponse>,
+                auth_usr: Mock<UserResponse>,
                 auth_usr_playlists: Mock<Page<PlaylistResponse>>,
                 auth_usr_srcs: Mock<Page<SourceResponse>>,
+                auth_via_spotify: Mock<JwtResponse>,
                 create_playlist: Mock<PlaylistResponse>,
+                delete_auth_usr: Mock<()>,
                 delete_playlist: Mock<()>,
                 delete_usr: Mock<()>,
                 open_spotify_authorize_url: Mock<()>,
@@ -1003,6 +1040,17 @@ mod test {
                             .with(eq(data.id), eq(data.api_token))
                             .times(mocks.delete_usr.times())
                             .returning(|_, _| Ok(()));
+                        api.expect_delete_authenticated_user()
+                            .with(eq(data.api_token))
+                            .times(mocks.delete_auth_usr.times())
+                            .returning(|_| Ok(()));
+                        api.expect_authenticated_user()
+                            .with(eq(data.api_token))
+                            .times(mocks.auth_usr.times())
+                            .returning({
+                                let mock = mocks.auth_usr.clone();
+                                move |_| Ok(mock.call())
+                            });
                         api
                     }
                 });
@@ -1146,6 +1194,66 @@ mod test {
                     next_http_req: Mock::once(|| ()),
                     open_spotify_authorize_url: Mock::once(|| ()),
                     spotify_authorize_url: Mock::once(|| ()),
+                    ..Default::default()
+                };
+                let expected = serde_json::to_string(&resp).expect("failed to serialize");
+                let expected = format!("{expected}\n");
+                let out = run(data, mocks).await;
+                assert_eq!(out, expected);
+            }
+
+            #[tokio::test]
+            async fn authenticated_user() {
+                let resp = UserResponse {
+                    creation: Utc::now(),
+                    email: "user@test".into(),
+                    id: Uuid::new_v4(),
+                    role: Role::User,
+                };
+                let api_base_url = "http://localhost:8000";
+                let port = 3000;
+                let api_token = "jwt";
+                let data = Data {
+                    api_base_url,
+                    api_token,
+                    cmd: Command::Me(MeCommandArgs {
+                        api_base_url: ApiBaseUrlArg {
+                            value: api_base_url.into(),
+                        },
+                        api_token: TokenArg {
+                            value: api_token.into(),
+                        },
+                        delete: false,
+                    }),
+                    create_playlist_req: CreatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearEquals(1993),
+                        platform: Platform::Spotify,
+                        src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
+                    },
+                    db: DatabaseArgs {
+                        host: "host".into(),
+                        name: "name".into(),
+                        password: "password".into(),
+                        port: 5432,
+                        secret: "secret".into(),
+                        user: "user".into(),
+                    },
+                    email: "user@test",
+                    id: Uuid::new_v4(),
+                    q: "name",
+                    port,
+                    req: PageRequestArgs::<25> {
+                        limit: 25,
+                        offset: 0,
+                    },
+                    role: Role::Admin,
+                };
+                let mocks = Mocks {
+                    auth_usr: Mock::once({
+                        let resp = resp.clone();
+                        move || resp.clone()
+                    }),
                     ..Default::default()
                 };
                 let expected = serde_json::to_string(&resp).expect("failed to serialize");
@@ -1356,6 +1464,55 @@ mod test {
                 let expected = format!("{expected}\n");
                 let out = run(data, mocks).await;
                 assert_eq!(out, expected);
+            }
+
+            #[tokio::test]
+            async fn delete_authenticated_user() {
+                let api_base_url = "http://localhost:8000";
+                let port = 3000;
+                let api_token = "jwt";
+                let data = Data {
+                    api_base_url,
+                    api_token,
+                    cmd: Command::Me(MeCommandArgs {
+                        api_base_url: ApiBaseUrlArg {
+                            value: api_base_url.into(),
+                        },
+                        api_token: TokenArg {
+                            value: api_token.into(),
+                        },
+                        delete: true,
+                    }),
+                    create_playlist_req: CreatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearEquals(1993),
+                        platform: Platform::Spotify,
+                        src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
+                    },
+                    db: DatabaseArgs {
+                        host: "host".into(),
+                        name: "name".into(),
+                        password: "password".into(),
+                        port: 5432,
+                        secret: "secret".into(),
+                        user: "user".into(),
+                    },
+                    email: "user@test",
+                    id: Uuid::new_v4(),
+                    q: "name",
+                    port,
+                    req: PageRequestArgs::<25> {
+                        limit: 25,
+                        offset: 0,
+                    },
+                    role: Role::Admin,
+                };
+                let mocks = Mocks {
+                    delete_auth_usr: Mock::once(|| ()),
+                    ..Default::default()
+                };
+                let out = run(data, mocks).await;
+                assert!(out.is_empty());
             }
 
             #[tokio::test]

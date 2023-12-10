@@ -11,7 +11,7 @@ use autoplaylist_common::{
     api::{
         AuthenticateViaSpotifyQueryParams, CreatePlaylistRequest, JwtResponse,
         PageRequestQueryParams, PlaylistResponse, RedirectUriQueryParam, SearchQueryParam,
-        SourceResponse, UserResponse, PATH_ADMIN, PATH_AUTH, PATH_HEALTH, PATH_PLAYLIST,
+        SourceResponse, UserResponse, PATH_ADMIN, PATH_AUTH, PATH_HEALTH, PATH_ME, PATH_PLAYLIST,
         PATH_SEARCH, PATH_SPOTIFY, PATH_SRC, PATH_SYNC, PATH_TOKEN, PATH_USR,
     },
     broker::{
@@ -518,6 +518,68 @@ fn create_app<
         .route(
             PATH_HEALTH,
             routing::get(|| async { StatusCode::NO_CONTENT }),
+        )
+        // auth_user
+        .route(
+            PATH_ME,
+            routing::get(
+                |headers: HeaderMap,
+                 State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>| async move {
+                     handling_error(async {
+                        let mut db_conn = state.db.acquire().await?;
+                        let usr = state
+                            .svc
+                            .auth()
+                            .authenticate(&headers, &mut db_conn)
+                            .await?;
+                        let span = info_span!(
+                            "auth_user",
+                            auth.usr.email = %usr.email,
+                            auth.usr.id = %usr.id,
+                        );
+                        async {
+                            let resp = UserResponse::from(usr);
+                            Ok((StatusCode::OK, Json(resp)))
+                        }
+                        .instrument(span)
+                        .await
+                    })
+                    .await
+                },
+            ),
+        )
+        // delete_auth_user
+        .route(
+            PATH_ME,
+            routing::delete(
+                |headers: HeaderMap,
+                 State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>| async move {
+                     handling_error(async {
+                        let mut db_conn = state.db.acquire().await?;
+                        let usr = state
+                            .svc
+                            .auth()
+                            .authenticate(&headers, &mut db_conn)
+                            .await?;
+                        let span = info_span!(
+                            "delete_auth_user",
+                            auth.usr.email = %usr.email,
+                            auth.usr.id = %usr.id,
+                        );
+                        async {
+                            if db_conn.delete_user(usr.id).await? {
+                                info!(usr.email, %usr.id, "user deleted");
+                                Ok(StatusCode::NO_CONTENT)
+                            } else {
+                                Ok(StatusCode::UNAUTHORIZED)
+                            }
+                        }
+                        .instrument(span)
+                        .await
+                    })
+                    .await
+                },
+            ),
         )
         // auth_user_playlists
         .route(
@@ -1110,7 +1172,83 @@ mod test {
         }
     }
 
-    mod auth_user_playlists {
+    mod authenticated_user {
+        use super::*;
+
+        // Mocks
+
+        #[derive(Clone, Default)]
+        struct Mocks {
+            auth: Mock<ApiResult<User>, User>,
+        }
+
+        // Tests
+
+        async fn run(mocks: Mocks) -> (TestResponse, UserResponse) {
+            let usr = User {
+                creation: Utc::now(),
+                creds: Default::default(),
+                email: "user@test".into(),
+                id: Uuid::new_v4(),
+                role: Role::User,
+            };
+            let expected = UserResponse::from(usr.clone());
+            let mut auth = MockAuthenticator::new();
+            auth.expect_authenticate()
+                .times(mocks.auth.times())
+                .returning({
+                    let usr = usr.clone();
+                    let mock = mocks.auth.clone();
+                    move |_, _| {
+                        Box::pin({
+                            let usr = usr.clone();
+                            let mock = mock.clone();
+                            async move { mock.call_with_args(usr.clone()) }
+                        })
+                    }
+                });
+            let db = MockDatabasePool {
+                acquire: Mock::once(MockDatabaseConnection::new),
+                ..Default::default()
+            };
+            let state = AppState {
+                db,
+                svc: MockServices {
+                    auth,
+                    ..Default::default()
+                },
+                _dbconn: PhantomData,
+                _dbtx: PhantomData,
+            };
+            let server = init(state);
+            let resp = server.get(PATH_ME).await;
+            (resp, expected)
+        }
+
+        // Tests
+
+        #[tokio::test]
+        async fn unauthorized() {
+            let mocks = Mocks {
+                auth: Mock::once_with_args(|_| Err(ApiError::Unauthorized)),
+            };
+            let (resp, _) = run(mocks).await;
+            resp.assert_status_unauthorized();
+            assert!(resp.as_bytes().is_empty());
+        }
+
+        #[tokio::test]
+        async fn ok() {
+            let mocks = Mocks {
+                auth: Mock::once_with_args(Ok),
+            };
+            let (resp, expected) = run(mocks).await;
+            resp.assert_status_ok();
+            resp.assert_json(&expected);
+        }
+    }
+
+    mod authenticated_user_playlists {
         use super::*;
 
         // Mocks
@@ -1213,7 +1351,7 @@ mod test {
         }
     }
 
-    mod auth_user_sources {
+    mod authenticated_user_sources {
         use super::*;
 
         // Mocks
@@ -1568,6 +1706,108 @@ mod test {
             let (resp, expected) = run(data, mocks).await;
             resp.assert_status(StatusCode::CREATED);
             resp.assert_json(&expected);
+        }
+    }
+
+    mod delete_authenticated_user {
+        use super::*;
+
+        // Mocks
+
+        #[derive(Clone, Default)]
+        struct Mocks {
+            auth: Mock<ApiResult<User>, User>,
+            del: Mock<bool>,
+        }
+
+        // Tests
+
+        async fn run(mocks: Mocks) -> TestResponse {
+            let usr = User {
+                creation: Utc::now(),
+                creds: Default::default(),
+                email: "user@test".into(),
+                id: Uuid::new_v4(),
+                role: Role::User,
+            };
+            let mut auth = MockAuthenticator::new();
+            auth.expect_authenticate()
+                .times(mocks.auth.times())
+                .returning({
+                    let usr = usr.clone();
+                    let mock = mocks.auth.clone();
+                    move |_, _| {
+                        Box::pin({
+                            let usr = usr.clone();
+                            let mock = mock.clone();
+                            async move { mock.call_with_args(usr.clone()) }
+                        })
+                    }
+                });
+            let db = MockDatabasePool {
+                acquire: Mock::once({
+                    let mocks = mocks.clone();
+                    move || {
+                        let mut conn = MockDatabaseConnection::new();
+                        conn.0
+                            .expect_delete_user()
+                            .with(eq(usr.id))
+                            .times(mocks.del.times())
+                            .returning({
+                                let mock = mocks.del.clone();
+                                move |_| Ok(mock.call())
+                            });
+                        conn
+                    }
+                }),
+                ..Default::default()
+            };
+            let state = AppState {
+                db,
+                svc: MockServices {
+                    auth,
+                    ..Default::default()
+                },
+                _dbconn: PhantomData,
+                _dbtx: PhantomData,
+            };
+            let server = init(state);
+            server.delete(PATH_ME).await
+        }
+
+        // Tests
+
+        #[tokio::test]
+        async fn unauthorized_when_auth_failed() {
+            let mocks = Mocks {
+                auth: Mock::once_with_args(|_| Err(ApiError::Unauthorized)),
+                ..Default::default()
+            };
+            let resp = run(mocks).await;
+            resp.assert_status_unauthorized();
+            assert!(resp.as_bytes().is_empty());
+        }
+
+        #[tokio::test]
+        async fn unauthorized_when_user_was_already_deleted() {
+            let mocks = Mocks {
+                auth: Mock::once_with_args(Ok),
+                del: Mock::once(|| false),
+            };
+            let resp = run(mocks).await;
+            resp.assert_status(StatusCode::UNAUTHORIZED);
+            assert!(resp.as_bytes().is_empty());
+        }
+
+        #[tokio::test]
+        async fn no_content() {
+            let mocks = Mocks {
+                auth: Mock::once_with_args(Ok),
+                del: Mock::once(|| true),
+            };
+            let resp = run(mocks).await;
+            resp.assert_status(StatusCode::NO_CONTENT);
+            assert!(resp.as_bytes().is_empty());
         }
     }
 

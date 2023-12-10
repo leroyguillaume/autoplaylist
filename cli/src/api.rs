@@ -3,7 +3,7 @@ use autoplaylist_common::{
     api::{
         AuthenticateViaSpotifyQueryParams, CreatePlaylistRequest, JwtResponse,
         PageRequestQueryParams, PlaylistResponse, RedirectUriQueryParam, SearchQueryParam,
-        SourceResponse, UserResponse, PATH_ADMIN, PATH_AUTH, PATH_PLAYLIST, PATH_SEARCH,
+        SourceResponse, UserResponse, PATH_ADMIN, PATH_AUTH, PATH_ME, PATH_PLAYLIST, PATH_SEARCH,
         PATH_SPOTIFY, PATH_SRC, PATH_SYNC, PATH_TOKEN, PATH_USR,
     },
     model::Page,
@@ -11,7 +11,7 @@ use autoplaylist_common::{
 use reqwest::{
     header::{self, HeaderName, ToStrError},
     redirect::Policy,
-    Client, ClientBuilder, Response, StatusCode,
+    Client, ClientBuilder, Request, Response, StatusCode,
 };
 use serde::de::DeserializeOwned;
 use thiserror::Error;
@@ -54,6 +54,8 @@ pub trait ApiClient: Send + Sync {
         params: &AuthenticateViaSpotifyQueryParams,
     ) -> ApiResult<JwtResponse>;
 
+    async fn authenticated_user(&self, token: &str) -> ApiResult<UserResponse>;
+
     async fn authenticated_user_playlists(
         &self,
         req: PageRequestQueryParams<25>,
@@ -71,6 +73,8 @@ pub trait ApiClient: Send + Sync {
         req: &CreatePlaylistRequest,
         token: &str,
     ) -> ApiResult<PlaylistResponse>;
+
+    async fn delete_authenticated_user(&self, token: &str) -> ApiResult<()>;
 
     async fn delete_playlist(&self, id: Uuid, token: &str) -> ApiResult<()>;
 
@@ -142,10 +146,12 @@ impl DefaultApiClient {
     }
 
     #[inline]
-    async fn parse_json_response<T: DeserializeOwned>(resp: Response) -> ApiResult<T> {
+    async fn send(req: Request) -> ApiResult<Response> {
+        debug!(method = %req.method(), url = %req.url(), "sending request");
+        let client = ClientBuilder::new().redirect(Policy::none()).build()?;
+        let resp = client.execute(req).await?;
         let status = resp.status();
-        if status.is_success() {
-            let resp: T = resp.json().await?;
+        if status.is_success() || status.is_redirection() {
             Ok(resp)
         } else {
             let body = Self::decode_text_response(resp).await;
@@ -154,14 +160,9 @@ impl DefaultApiClient {
     }
 
     #[inline]
-    async fn parse_empty_response(resp: Response) -> ApiResult<()> {
-        let status = resp.status();
-        if status.is_success() {
-            Ok(())
-        } else {
-            let body = Self::decode_text_response(resp).await;
-            Err(ApiError::Api { body, status })
-        }
+    async fn send_and_parse_json_response<T: DeserializeOwned>(req: Request) -> ApiResult<T> {
+        let resp: T = Self::send(req).await?.json().await?;
+        Ok(resp)
     }
 }
 
@@ -173,10 +174,27 @@ impl ApiClient for DefaultApiClient {
     ) -> ApiResult<JwtResponse> {
         let span = debug_span!("authenticate_via_spotify", params.code, params.redirect_uri);
         async {
-            let url = format!("{}{PATH_AUTH}{PATH_SPOTIFY}{PATH_TOKEN}", self.base_url);
-            debug!(url, "doing GET");
-            let resp = Client::new().get(&url).query(params).send().await?;
-            Self::parse_json_response(resp).await
+            let req = Client::new()
+                .get(format!(
+                    "{}{PATH_AUTH}{PATH_SPOTIFY}{PATH_TOKEN}",
+                    self.base_url
+                ))
+                .query(params)
+                .build()?;
+            Self::send_and_parse_json_response(req).await
+        }
+        .instrument(span)
+        .await
+    }
+
+    async fn authenticated_user(&self, token: &str) -> ApiResult<UserResponse> {
+        let span = debug_span!("auth_user");
+        async {
+            let req = Client::new()
+                .get(format!("{}{PATH_ME}", self.base_url))
+                .bearer_auth(token)
+                .build()?;
+            Self::send_and_parse_json_response(req).await
         }
         .instrument(span)
         .await
@@ -188,20 +206,17 @@ impl ApiClient for DefaultApiClient {
         token: &str,
     ) -> ApiResult<Page<PlaylistResponse>> {
         let span = debug_span!(
-            "authenticated_user_playlists",
+            "auth_user_playlists",
             params.limit = req.limit,
             params.offset = req.offset,
         );
         async {
-            let url = format!("{}{PATH_PLAYLIST}", self.base_url);
-            debug!(url, "doing GET");
-            let resp = Client::new()
-                .get(&url)
+            let req = Client::new()
+                .get(format!("{}{PATH_PLAYLIST}", self.base_url))
                 .bearer_auth(token)
                 .query(&req)
-                .send()
-                .await?;
-            Self::parse_json_response(resp).await
+                .build()?;
+            Self::send_and_parse_json_response(req).await
         }
         .instrument(span)
         .await
@@ -213,20 +228,17 @@ impl ApiClient for DefaultApiClient {
         token: &str,
     ) -> ApiResult<Page<SourceResponse>> {
         let span = debug_span!(
-            "authenticated_user_sources",
+            "auth_user_sources",
             params.limit = req.limit,
             params.offset = req.offset,
         );
         async {
-            let url = format!("{}{PATH_PLAYLIST}", self.base_url);
-            debug!(url, "doing GET");
-            let resp = Client::new()
-                .get(&url)
+            let req = Client::new()
+                .get(format!("{}{PATH_PLAYLIST}", self.base_url))
                 .bearer_auth(token)
                 .query(&req)
-                .send()
-                .await?;
-            Self::parse_json_response(resp).await
+                .build()?;
+            Self::send_and_parse_json_response(req).await
         }
         .instrument(span)
         .await
@@ -243,15 +255,26 @@ impl ApiClient for DefaultApiClient {
             playlist.platform = %req.platform
         );
         async {
-            let url = format!("{}{PATH_PLAYLIST}", self.base_url);
-            debug!(url, "doing POST");
-            let resp = Client::new()
-                .post(&url)
+            let req = Client::new()
+                .post(format!("{}{PATH_PLAYLIST}", self.base_url))
                 .bearer_auth(token)
                 .json(req)
-                .send()
-                .await?;
-            Self::parse_json_response(resp).await
+                .build()?;
+            Self::send_and_parse_json_response(req).await
+        }
+        .instrument(span)
+        .await
+    }
+
+    async fn delete_authenticated_user(&self, token: &str) -> ApiResult<()> {
+        let span = debug_span!("delete_auth_user");
+        async {
+            let req = Client::new()
+                .delete(format!("{}{PATH_ME}", self.base_url))
+                .bearer_auth(token)
+                .build()?;
+            Self::send(req).await?;
+            Ok(())
         }
         .instrument(span)
         .await
@@ -260,10 +283,12 @@ impl ApiClient for DefaultApiClient {
     async fn delete_playlist(&self, id: Uuid, token: &str) -> ApiResult<()> {
         let span = debug_span!("delete_playlist", playlist.id = %id);
         async {
-            let url = format!("{}{PATH_PLAYLIST}/{id}", self.base_url);
-            debug!(url, "doing DELETE");
-            let resp = Client::new().delete(&url).bearer_auth(token).send().await?;
-            Self::parse_empty_response(resp).await
+            let req = Client::new()
+                .delete(format!("{}{PATH_PLAYLIST}/{id}", self.base_url))
+                .bearer_auth(token)
+                .build()?;
+            Self::send(req).await?;
+            Ok(())
         }
         .instrument(span)
         .await
@@ -272,10 +297,12 @@ impl ApiClient for DefaultApiClient {
     async fn delete_user(&self, id: Uuid, token: &str) -> ApiResult<()> {
         let span = debug_span!("delete_user", user.id = %id);
         async {
-            let url = format!("{}{PATH_ADMIN}{PATH_USR}/{id}", self.base_url);
-            debug!(url, "doing DELETE");
-            let resp = Client::new().delete(&url).bearer_auth(token).send().await?;
-            Self::parse_empty_response(resp).await
+            let req = Client::new()
+                .delete(format!("{}{PATH_ADMIN}{PATH_USR}/{id}", self.base_url))
+                .bearer_auth(token)
+                .build()?;
+            Self::send(req).await?;
+            Ok(())
         }
         .instrument(span)
         .await
@@ -292,15 +319,12 @@ impl ApiClient for DefaultApiClient {
             params.offset = req.offset,
         );
         async {
-            let url = format!("{}{PATH_ADMIN}{PATH_PLAYLIST}", self.base_url);
-            debug!(url, "doing GET");
-            let resp = Client::new()
-                .get(&url)
+            let req = Client::new()
+                .get(format!("{}{PATH_ADMIN}{PATH_PLAYLIST}", self.base_url))
                 .bearer_auth(token)
                 .query(&req)
-                .send()
-                .await?;
-            Self::parse_json_response(resp).await
+                .build()?;
+            Self::send_and_parse_json_response(req).await
         }
         .instrument(span)
         .await
@@ -313,22 +337,19 @@ impl ApiClient for DefaultApiClient {
         token: &str,
     ) -> ApiResult<Page<PlaylistResponse>> {
         let span = debug_span!(
-            "search_authenticated_user_playlists_by_name",
+            "search_auth_user_playlists_by_name",
             params.limit = req.limit,
             params.offset = req.offset,
             params.q = params.q
         );
         async {
-            let url = format!("{}{PATH_PLAYLIST}{PATH_SEARCH}", self.base_url);
-            debug!(url, "doing GET");
-            let resp = Client::new()
-                .get(&url)
+            let req = Client::new()
+                .get(format!("{}{PATH_PLAYLIST}{PATH_SEARCH}", self.base_url))
                 .bearer_auth(token)
                 .query(&params)
                 .query(&req)
-                .send()
-                .await?;
-            Self::parse_json_response(resp).await
+                .build()?;
+            Self::send_and_parse_json_response(req).await
         }
         .instrument(span)
         .await
@@ -347,16 +368,16 @@ impl ApiClient for DefaultApiClient {
             params.q = params.q
         );
         async {
-            let url = format!("{}{PATH_ADMIN}{PATH_PLAYLIST}{PATH_SEARCH}", self.base_url);
-            debug!(url, "doing GET");
-            let resp = Client::new()
-                .get(&url)
+            let req = Client::new()
+                .get(format!(
+                    "{}{PATH_ADMIN}{PATH_PLAYLIST}{PATH_SEARCH}",
+                    self.base_url
+                ))
                 .bearer_auth(token)
                 .query(&params)
                 .query(&req)
-                .send()
-                .await?;
-            Self::parse_json_response(resp).await
+                .build()?;
+            Self::send_and_parse_json_response(req).await
         }
         .instrument(span)
         .await
@@ -375,16 +396,16 @@ impl ApiClient for DefaultApiClient {
             params.q = params.q
         );
         async {
-            let url = format!("{}{PATH_ADMIN}{PATH_USR}{PATH_SEARCH}", self.base_url);
-            debug!(url, "doing GET");
-            let resp = Client::new()
-                .get(&url)
+            let req = Client::new()
+                .get(format!(
+                    "{}{PATH_ADMIN}{PATH_USR}{PATH_SEARCH}",
+                    self.base_url
+                ))
                 .bearer_auth(token)
                 .query(&params)
                 .query(&req)
-                .send()
-                .await?;
-            Self::parse_json_response(resp).await
+                .build()?;
+            Self::send_and_parse_json_response(req).await
         }
         .instrument(span)
         .await
@@ -401,15 +422,12 @@ impl ApiClient for DefaultApiClient {
             params.offset = req.offset,
         );
         async {
-            let url = format!("{}{PATH_ADMIN}{PATH_SRC}", self.base_url);
-            debug!(url, "doing GET");
-            let resp = Client::new()
-                .get(&url)
+            let req = Client::new()
+                .get(format!("{}{PATH_ADMIN}{PATH_SRC}", self.base_url))
                 .bearer_auth(token)
                 .query(&req)
-                .send()
-                .await?;
-            Self::parse_json_response(resp).await
+                .build()?;
+            Self::send_and_parse_json_response(req).await
         }
         .instrument(span)
         .await
@@ -418,22 +436,17 @@ impl ApiClient for DefaultApiClient {
     async fn spotify_authorize_url(&self, params: &RedirectUriQueryParam) -> ApiResult<String> {
         let span = debug_span!("spotify_authorize_url", params.redirect_uri);
         async {
-            let client = ClientBuilder::new().redirect(Policy::none()).build()?;
-            let url = format!("{}{PATH_AUTH}{PATH_SPOTIFY}", self.base_url);
-            debug!(url, "doing GET");
-            let resp = client.get(&url).query(params).send().await?;
-            let status = resp.status();
-            if status.is_redirection() {
-                let headers = resp.headers();
-                let loc = headers
-                    .get(header::LOCATION)
-                    .ok_or(ApiError::NoHeader(header::LOCATION))?;
-                let url = loc.to_str()?;
-                Ok(url.into())
-            } else {
-                let body = Self::decode_text_response(resp).await;
-                Err(ApiError::Api { body, status })
-            }
+            let req = Client::new()
+                .get(format!("{}{PATH_AUTH}{PATH_SPOTIFY}", self.base_url))
+                .query(params)
+                .build()?;
+            let resp = Self::send(req).await?;
+            let headers = resp.headers();
+            let loc = headers
+                .get(header::LOCATION)
+                .ok_or(ApiError::NoHeader(header::LOCATION))?;
+            let url = loc.to_str()?;
+            Ok(url.into())
         }
         .instrument(span)
         .await
@@ -442,10 +455,12 @@ impl ApiClient for DefaultApiClient {
     async fn start_playlist_synchronization(&self, id: Uuid, token: &str) -> ApiResult<()> {
         let span = debug_span!("start_playlist_synchronization", playlist.id = %id);
         async {
-            let url = format!("{}{PATH_PLAYLIST}/{id}{PATH_SYNC}", self.base_url);
-            debug!(url, "doing PUT");
-            let resp = Client::new().put(&url).bearer_auth(token).send().await?;
-            Self::parse_empty_response(resp).await
+            let req = Client::new()
+                .put(format!("{}{PATH_PLAYLIST}/{id}{PATH_SYNC}", self.base_url))
+                .bearer_auth(token)
+                .build()?;
+            Self::send(req).await?;
+            Ok(())
         }
         .instrument(span)
         .await
@@ -454,10 +469,12 @@ impl ApiClient for DefaultApiClient {
     async fn start_source_synchronization(&self, id: Uuid, token: &str) -> ApiResult<()> {
         let span = debug_span!("start_source_synchronization", src.id = %id);
         async {
-            let url = format!("{}{PATH_SRC}/{id}{PATH_SYNC}", self.base_url);
-            debug!(url, "doing PUT");
-            let resp = Client::new().put(&url).bearer_auth(token).send().await?;
-            Self::parse_empty_response(resp).await
+            let req = Client::new()
+                .put(format!("{}{PATH_SRC}/{id}{PATH_SYNC}", self.base_url))
+                .bearer_auth(token)
+                .build()?;
+            Self::send(req).await?;
+            Ok(())
         }
         .instrument(span)
         .await
@@ -474,15 +491,12 @@ impl ApiClient for DefaultApiClient {
             params.offset = req.offset,
         );
         async {
-            let url = format!("{}{PATH_ADMIN}{PATH_USR}", self.base_url);
-            debug!(url, "doing GET");
-            let resp = Client::new()
-                .get(&url)
+            let req = Client::new()
+                .get(format!("{}{PATH_ADMIN}{PATH_USR}", self.base_url))
                 .bearer_auth(token)
                 .query(&req)
-                .send()
-                .await?;
-            Self::parse_json_response(resp).await
+                .build()?;
+            Self::send_and_parse_json_response(req).await
         }
         .instrument(span)
         .await
@@ -544,6 +558,30 @@ mod test {
                     .await
                     .expect("failed to get JWT");
                 assert_eq!(resp.jwt, "jwt");
+            }
+        }
+
+        mod authenticated_user {
+            use super::*;
+
+            // Tests
+
+            #[tokio::test]
+            async fn user() {
+                let expected = UserResponse {
+                    creation: DateTime::parse_from_rfc3339("2022-01-02T00:00:00Z")
+                        .expect("failed to parse date")
+                        .into(),
+                    email: "user@test".into(),
+                    id: Uuid::from_u128(0x730ea2158aa44463a1379c4c71d50ed6),
+                    role: Role::User,
+                };
+                let client = init();
+                let resp = client
+                    .authenticated_user("jwt")
+                    .await
+                    .expect("failed to get authenticated user");
+                assert_eq!(resp, expected);
             }
         }
 
@@ -640,6 +678,21 @@ mod test {
                     .await
                     .expect("failed to create playlist");
                 assert_eq!(resp, expected);
+            }
+        }
+
+        mod delete_authenticated_user {
+            use super::*;
+
+            // Tests
+
+            #[tokio::test]
+            async fn no_content() {
+                let client = init();
+                client
+                    .delete_authenticated_user("jwt")
+                    .await
+                    .expect("failed to delete user");
             }
         }
 

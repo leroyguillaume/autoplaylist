@@ -1,0 +1,14 @@
+{
+  "request": {
+    "headers": {
+      "Authorization": {
+        "equalTo": "Bearer jwt"
+      }
+    },
+    "method": "DELETE",
+    "urlPath": "/autoplaylist/me"
+  },
+  "response": {
+    "status": 204
+  }
+}
