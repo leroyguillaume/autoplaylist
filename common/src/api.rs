@@ -12,6 +12,7 @@ use crate::model::{
 pub const PATH_ADMIN: &str = "/admin";
 pub const PATH_AUTH: &str = "/auth";
 pub const PATH_HEALTH: &str = "/health";
+pub const PATH_ME: &str = "/me";
 pub const PATH_PLAYLIST: &str = "/playlist";
 pub const PATH_SEARCH: &str = "/search";
 pub const PATH_SPOTIFY: &str = "/spotify";
