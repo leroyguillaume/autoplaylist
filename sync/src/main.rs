@@ -12,8 +12,8 @@ use autoplaylist_common::{
         DatabaseConnection, DatabaseError, DatabasePool, DatabaseTransaction,
     },
     model::{
-        Page, PageRequest, PlatformResource, PlatformTrack, Playlist, PlaylistSynchronizationStep,
-        Source, SourceSynchronizationStep, SpotifyResourceKind, Synchronizable, Synchronization,
+        Page, PageRequest, PlatformTrack, Playlist, PlaylistSynchronizationStep, Source,
+        SourceKind, SourceSynchronizationStep, SpotifySourceKind, Synchronizable, Synchronization,
         SynchronizationState, SynchronizationStep, Target, Track,
     },
     sigs::TerminationSignalListener,
@@ -385,18 +385,9 @@ impl DefaultPuller {
         for track in page.items {
             let creation = track.into_track_creation();
             let track = db_conn
-                .track_by_title_artists_album_year(
-                    &creation.title,
-                    &creation.artists,
-                    &creation.album.name,
-                    creation.year,
-                )
+                .track_by_platform_id(creation.platform, &creation.platform_id)
                 .await?;
-            let track = if let Some(mut track) = track {
-                if let Some(id) = creation.spotify_id {
-                    track.spotify_id = Some(id);
-                }
-                db_conn.update_track(&track).await?;
+            let track = if let Some(track) = track {
                 track
             } else {
                 let track = db_conn.create_track(&creation).await?;
@@ -404,6 +395,8 @@ impl DefaultPuller {
                     track.album = track.album.name,
                     ?track.artists,
                     %track.id,
+                    %track.platform,
+                    track.platform_id,
                     track.title,
                     track.year,
                     "track created",
@@ -436,8 +429,8 @@ impl<STEP: SynchronizationStep, SYNCABLE: Synchronizable<STEP>> Puller<STEP, SYN
         db_conn: &mut dyn DatabaseConnection,
         svc: &dyn Services,
     ) -> StateProcessorResult<Page<Track>> {
-        match syncable.to_resource() {
-            PlatformResource::Spotify(kind) => {
+        match syncable.source_kind() {
+            SourceKind::Spotify(kind) => {
                 let spotify = svc.spotify();
                 let user = syncable.owner_mut();
                 let req = PageRequest::new(spotify::PAGE_LIMIT_MAX, offset);
@@ -447,10 +440,10 @@ impl<STEP: SynchronizationStep, SYNCABLE: Synchronizable<STEP>> Puller<STEP, SYN
                     .as_mut()
                     .ok_or_else(|| StateProcessorError::NoSpotifyCredentials(user.id))?;
                 let page = match kind {
-                    SpotifyResourceKind::Playlist(id) => {
+                    SpotifySourceKind::Playlist(id) => {
                         spotify.playlist_tracks(&id, req, &mut creds.token).await
                     }
-                    SpotifyResourceKind::SavedTracks => {
+                    SpotifySourceKind::SavedTracks => {
                         spotify.saved_tracks(req, &mut creds.token).await
                     }
                 }?;
@@ -622,23 +615,8 @@ impl<PULLER: Puller<PlaylistSynchronizationStep, Playlist>>
                 if !tracks.is_empty() {
                     match syncable.tgt.clone() {
                         Target::Spotify(id) => {
-                            let tracks: Vec<String> = tracks
-                                .into_iter()
-                                .filter_map(|track| match track.spotify_id {
-                                    Some(id) => Some(id),
-                                    None => {
-                                        warn!(
-                                            track.album = track.album.name,
-                                            ?track.artists,
-                                            %track.id,
-                                            track.title,
-                                            track.year,
-                                            "track doesn't have Spotify ID"
-                                        );
-                                        None
-                                    }
-                                })
-                                .collect();
+                            let tracks: Vec<String> =
+                                tracks.into_iter().map(|track| track.platform_id).collect();
                             let user = syncable.owner_mut();
                             let creds = user.creds.spotify.as_mut().ok_or_else(|| {
                                 StateProcessorError::NoSpotifyCredentials(user.id)
@@ -681,23 +659,8 @@ impl<PULLER: Puller<PlaylistSynchronizationStep, Playlist>>
                 if !tracks.is_empty() {
                     match syncable.tgt.clone() {
                         Target::Spotify(id) => {
-                            let tracks: Vec<String> = tracks
-                                .into_iter()
-                                .filter_map(|track| match track.spotify_id {
-                                    Some(id) => Some(id),
-                                    None => {
-                                        warn!(
-                                            track.album = track.album.name,
-                                            ?track.artists,
-                                            %track.id,
-                                            track.title,
-                                            track.year,
-                                            "track doesn't have Spotify ID"
-                                        );
-                                        None
-                                    }
-                                })
-                                .collect();
+                            let tracks: Vec<String> =
+                                tracks.into_iter().map(|track| track.platform_id).collect();
                             let user = syncable.owner_mut();
                             let creds = user.creds.spotify.as_mut().ok_or_else(|| {
                                 StateProcessorError::NoSpotifyCredentials(user.id)
@@ -804,9 +767,9 @@ mod test {
         broker::{MockBrokerClient, SourceMessageKind},
         db::{MockDatabaseConnection, MockDatabasePool, TrackCreation},
         model::{
-            Album, Credentials, PlaylistSynchronizationState, Predicate, Role, Source, SourceKind,
-            SourceSynchronization, SourceSynchronizationState, SpotifyCredentials,
-            SpotifyResourceKind, SpotifyToken, Synchronization, User,
+            Album, Credentials, Platform, PlaylistSynchronizationState, Predicate, Role, Source,
+            SourceKind, SourceSynchronization, SourceSynchronizationState, SpotifyCredentials,
+            SpotifySourceKind, SpotifyToken, Synchronization, User,
         },
         spotify::{MockSpotifyClient, SpotifyTrack},
     };
@@ -1036,7 +999,7 @@ mod test {
                 let src = Source {
                     creation: Utc::now(),
                     id: Uuid::new_v4(),
-                    kind: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                    kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     owner: User {
                         creation: Utc::now(),
                         creds: Default::default(),
@@ -1065,7 +1028,7 @@ mod test {
                 let src = Source {
                     creation: Utc::now(),
                     id: Uuid::new_v4(),
-                    kind: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                    kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     owner: User {
                         creation: Utc::now(),
                         creds: Default::default(),
@@ -1098,7 +1061,7 @@ mod test {
                 let src = Source {
                     creation: Utc::now(),
                     id: Uuid::new_v4(),
-                    kind: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                    kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     owner: User {
                         creation: Utc::now(),
                         creds: Default::default(),
@@ -1139,7 +1102,7 @@ mod test {
                 let src = Source {
                     creation: Utc::now(),
                     id: Uuid::new_v4(),
-                    kind: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                    kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     owner: User {
                         creation: Utc::now(),
                         creds: Default::default(),
@@ -1191,8 +1154,6 @@ mod test {
                 offset: u32,
                 spotify_playlist_id: &'static str,
                 spotify_token: SpotifyToken,
-                spotify_track_id_1: &'static str,
-                spotify_track_id_2: &'static str,
                 src: Source,
                 track_1: Track,
                 track_2: Track,
@@ -1207,9 +1168,8 @@ mod test {
                 create_track_2: Mock<()>,
                 spotify_playlist_tracks: Mock<Page<SpotifyTrack>>,
                 spotify_saved_tracks: Mock<Page<SpotifyTrack>>,
-                track_by_title_artists_album_year_1: Mock<Option<Track>>,
-                track_by_title_artists_album_year_2: Mock<Option<Track>>,
-                update_track_1: Mock<()>,
+                track_by_platform_id_1: Mock<Option<Track>>,
+                track_by_platform_id_2: Mock<Option<Track>>,
             }
 
             // mock_add_track_to_source
@@ -1228,46 +1188,35 @@ mod test {
                     .returning(|_, _| Ok(()));
             }
 
-            // mock_track_by_title_artists_album_year
+            // mock_track_by_platform_id
 
-            fn mock_track_by_title_artists_album_year(
+            fn mock_track_by_platform_id(
                 track: &Track,
                 mock: Mock<Option<Track>>,
                 db_conn: &mut MockDatabaseConnection,
             ) {
                 db_conn
                     .0
-                    .expect_track_by_title_artists_album_year()
-                    .with(
-                        eq(track.title.clone()),
-                        eq(track.artists.clone()),
-                        eq(track.album.name.clone()),
-                        eq(track.year),
-                    )
+                    .expect_track_by_platform_id()
+                    .with(eq(track.platform), eq(track.platform_id.clone()))
                     .times(mock.times())
-                    .returning(move |_, _, _, _| Ok(mock.call()));
+                    .returning(move |_, _| Ok(mock.call()));
             }
 
             // run
 
             async fn run(data: Data, mocks: Mocks) -> StateProcessorResult<Page<Track>> {
                 let mut db_conn = MockDatabaseConnection::new();
-                mock_track_by_title_artists_album_year(
+                mock_track_by_platform_id(
                     &data.track_1,
-                    mocks.track_by_title_artists_album_year_1,
+                    mocks.track_by_platform_id_1,
                     &mut db_conn,
                 );
-                mock_track_by_title_artists_album_year(
+                mock_track_by_platform_id(
                     &data.track_2,
-                    mocks.track_by_title_artists_album_year_2,
+                    mocks.track_by_platform_id_2,
                     &mut db_conn,
                 );
-                db_conn
-                    .0
-                    .expect_update_track()
-                    .with(eq(data.track_1.clone()))
-                    .times(mocks.update_track_1.times())
-                    .returning(|_| Ok(()));
                 let creation: TrackCreation = data.track_2.clone().into();
                 db_conn
                     .0
@@ -1327,8 +1276,6 @@ mod test {
             #[tokio::test]
             async fn no_spotify_credentials() {
                 let owner_id = Uuid::new_v4();
-                let spotify_track_id_1 = "track_1";
-                let spotify_track_id_2 = "track_2";
                 let data = Data {
                     offset: 0,
                     spotify_playlist_id: "id",
@@ -1337,12 +1284,10 @@ mod test {
                         expiration: Utc::now(),
                         refresh: "refresh".into(),
                     },
-                    spotify_track_id_1,
-                    spotify_track_id_2,
                     src: Source {
                         creation: Utc::now(),
                         id: Uuid::new_v4(),
-                        kind: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                        kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                         owner: User {
                             creation: Utc::now(),
                             creds: Default::default(),
@@ -1360,7 +1305,8 @@ mod test {
                         artists: BTreeSet::from_iter(["pink floyd".into()]),
                         creation: Utc::now(),
                         id: Uuid::new_v4(),
-                        spotify_id: Some(spotify_track_id_1.into()),
+                        platform: Platform::Spotify,
+                        platform_id: "track_1".into(),
                         title: "time".into(),
                         year: 1973,
                     },
@@ -1372,7 +1318,8 @@ mod test {
                         artists: BTreeSet::from_iter(["pink floyd".into()]),
                         creation: Utc::now(),
                         id: Uuid::new_v4(),
-                        spotify_id: Some(spotify_track_id_2.into()),
+                        platform: Platform::Spotify,
+                        platform_id: "track_2".into(),
                         title: "money".into(),
                         year: 1973,
                     },
@@ -1394,18 +1341,14 @@ mod test {
                     expiration: Utc::now(),
                     refresh: "refresh".into(),
                 };
-                let spotify_track_id_1 = "track_1";
-                let spotify_track_id_2 = "track_2";
                 let data = Data {
                     offset: 0,
                     spotify_playlist_id: "id",
                     spotify_token: spotify_token.clone(),
-                    spotify_track_id_1,
-                    spotify_track_id_2,
                     src: Source {
                         creation: Utc::now(),
                         id: Uuid::new_v4(),
-                        kind: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                        kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                         owner: User {
                             creation: Utc::now(),
                             creds: Credentials {
@@ -1428,7 +1371,8 @@ mod test {
                         artists: BTreeSet::from_iter(["pink floyd".into()]),
                         creation: Utc::now(),
                         id: Uuid::new_v4(),
-                        spotify_id: Some(spotify_track_id_1.into()),
+                        platform: Platform::Spotify,
+                        platform_id: "track_1".into(),
                         title: "time".into(),
                         year: 1973,
                     },
@@ -1440,7 +1384,8 @@ mod test {
                         artists: BTreeSet::from_iter(["pink floyd".into()]),
                         creation: Utc::now(),
                         id: Uuid::new_v4(),
-                        spotify_id: Some(spotify_track_id_2.into()),
+                        platform: Platform::Spotify,
+                        platform_id: "track_2".into(),
                         title: "money".into(),
                         year: 1973,
                     },
@@ -1448,8 +1393,8 @@ mod test {
                 let page = Page {
                     first: true,
                     items: vec![
-                        spotify_track(&data.track_1, data.spotify_track_id_1),
-                        spotify_track(&data.track_2, data.spotify_track_id_2),
+                        spotify_track(&data.track_1, &data.track_1.platform_id),
+                        spotify_track(&data.track_2, &data.track_2.platform_id),
                     ],
                     last: true,
                     req: PageRequest::new(spotify::PAGE_LIMIT_MAX, data.offset),
@@ -1466,16 +1411,12 @@ mod test {
                     add_track_to_source_1: Mock::once(|| ()),
                     add_track_to_source_2: Mock::once(|| ()),
                     create_track_2: Mock::once(|| ()),
-                    update_track_1: Mock::once(|| ()),
                     spotify_saved_tracks: Mock::once(move || page.clone()),
-                    track_by_title_artists_album_year_1: Mock::once({
-                        let track = Track {
-                            spotify_id: None,
-                            ..data.track_1.clone()
-                        };
+                    track_by_platform_id_1: Mock::once({
+                        let track = data.track_1.clone();
                         move || Some(track.clone())
                     }),
-                    track_by_title_artists_album_year_2: Mock::once(|| None),
+                    track_by_platform_id_2: Mock::once(|| None),
                     ..Default::default()
                 };
                 let page = run(data, mocks).await.expect("faield to pull tracks");
@@ -1490,18 +1431,14 @@ mod test {
                     expiration: Utc::now(),
                     refresh: "refresh".into(),
                 };
-                let spotify_track_id_1 = "track_1";
-                let spotify_track_id_2 = "track_2";
                 let data = Data {
                     offset: 0,
                     spotify_playlist_id,
                     spotify_token: spotify_token.clone(),
-                    spotify_track_id_1,
-                    spotify_track_id_2,
                     src: Source {
                         creation: Utc::now(),
                         id: Uuid::new_v4(),
-                        kind: SourceKind::Spotify(SpotifyResourceKind::Playlist(
+                        kind: SourceKind::Spotify(SpotifySourceKind::Playlist(
                             spotify_playlist_id.into(),
                         )),
                         owner: User {
@@ -1526,7 +1463,8 @@ mod test {
                         artists: BTreeSet::from_iter(["pink floyd".into()]),
                         creation: Utc::now(),
                         id: Uuid::new_v4(),
-                        spotify_id: Some(spotify_track_id_1.into()),
+                        platform: Platform::Spotify,
+                        platform_id: "track_1".into(),
                         title: "time".into(),
                         year: 1973,
                     },
@@ -1538,7 +1476,8 @@ mod test {
                         artists: BTreeSet::from_iter(["pink floyd".into()]),
                         creation: Utc::now(),
                         id: Uuid::new_v4(),
-                        spotify_id: Some(spotify_track_id_2.into()),
+                        platform: Platform::Spotify,
+                        platform_id: "track_2".into(),
                         title: "money".into(),
                         year: 1973,
                     },
@@ -1546,8 +1485,8 @@ mod test {
                 let page = Page {
                     first: true,
                     items: vec![
-                        spotify_track(&data.track_1, data.spotify_track_id_1),
-                        spotify_track(&data.track_2, data.spotify_track_id_2),
+                        spotify_track(&data.track_1, &data.track_1.platform_id),
+                        spotify_track(&data.track_2, &data.track_2.platform_id),
                     ],
                     last: true,
                     req: PageRequest::new(spotify::PAGE_LIMIT_MAX, data.offset),
@@ -1564,16 +1503,12 @@ mod test {
                     add_track_to_source_1: Mock::once(|| ()),
                     add_track_to_source_2: Mock::once(|| ()),
                     create_track_2: Mock::once(|| ()),
-                    update_track_1: Mock::once(|| ()),
                     spotify_playlist_tracks: Mock::once(move || page.clone()),
-                    track_by_title_artists_album_year_1: Mock::once({
-                        let track = Track {
-                            spotify_id: None,
-                            ..data.track_1.clone()
-                        };
+                    track_by_platform_id_1: Mock::once({
+                        let track = data.track_1.clone();
                         move || Some(track.clone())
                     }),
-                    track_by_title_artists_album_year_2: Mock::once(|| None),
+                    track_by_platform_id_2: Mock::once(|| None),
                     ..Default::default()
                 };
                 let page = run(data, mocks).await.expect("faield to pull tracks");
@@ -1749,7 +1684,7 @@ mod test {
                     src: Source {
                         creation: Utc::now(),
                         id: Uuid::new_v4(),
-                        kind: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                        kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                         owner: User {
                             creation: Utc::now(),
                             creds: Default::default(),
@@ -1818,7 +1753,7 @@ mod test {
                     src: Source {
                         creation: Utc::now(),
                         id: Uuid::new_v4(),
-                        kind: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                        kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                         owner: User {
                             creation: Utc::now(),
                             creds: Default::default(),
@@ -1882,7 +1817,7 @@ mod test {
                     src: Source {
                         creation: Utc::now(),
                         id: Uuid::new_v4(),
-                        kind: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                        kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                         owner: User {
                             creation: Utc::now(),
                             creds: Default::default(),
@@ -2071,7 +2006,7 @@ mod test {
                     src: Source {
                         creation: Utc::now(),
                         id: Uuid::new_v4(),
-                        kind: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                        kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                         owner: User {
                             creation: Utc::now(),
                             creds: Default::default(),
@@ -2123,7 +2058,7 @@ mod test {
                     src: Source {
                         creation: Utc::now(),
                         id: Uuid::new_v4(),
-                        kind: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                        kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                         owner: User {
                             creation: Utc::now(),
                             creds: Credentials {
@@ -2193,7 +2128,7 @@ mod test {
                     src: Source {
                         creation: Utc::now(),
                         id: Uuid::new_v4(),
-                        kind: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                        kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                         owner: User {
                             creation: Utc::now(),
                             creds: Credentials {
@@ -2249,10 +2184,6 @@ mod test {
         async fn no_spotify_credentials_when_add_tracks() {
             let user_id = Uuid::new_v4();
             let expected_offset = 0;
-            let spotify_track_id_1 = "4xHWH1jwV5j4mBYRhxPbwZ";
-            let spotify_track_id_2 = "7ygpwy2qP3NbrxVkHvUhXY";
-            let spotify_track_id_4 = "626wlz3bovvpH06PYht5R0";
-            let spotify_track_id_5 = "4rQYDXfKFikLX4ad674jhg";
             let spotify_playlist_id = "626wlz3bovvpH06PYht5R0";
             let track_1 = Track {
                 album: Album {
@@ -2262,7 +2193,8 @@ mod test {
                 artists: BTreeSet::from_iter(["pink floyd".into()]),
                 creation: Utc::now(),
                 id: Uuid::new_v4(),
-                spotify_id: Some(spotify_track_id_1.into()),
+                platform: Platform::Spotify,
+                platform_id: "4xHWH1jwV5j4mBYRhxPbwZ".into(),
                 title: "time".into(),
                 year: 1973,
             };
@@ -2274,7 +2206,8 @@ mod test {
                 artists: BTreeSet::from_iter(["oasis".into()]),
                 creation: Utc::now(),
                 id: Uuid::new_v4(),
-                spotify_id: Some(spotify_track_id_2.into()),
+                platform: Platform::Spotify,
+                platform_id: "7ygpwy2qP3NbrxVkHvUhXY".into(),
                 title: "wonderwall".into(),
                 year: 1995,
             };
@@ -2286,7 +2219,8 @@ mod test {
                 artists: BTreeSet::from_iter(["pink floyd".into()]),
                 creation: Utc::now(),
                 id: Uuid::new_v4(),
-                spotify_id: None,
+                platform: Platform::Spotify,
+                platform_id: "2up3OPMp9Tb4dAKM2erWXQ".into(),
                 title: "money".into(),
                 year: 1973,
             };
@@ -2298,7 +2232,8 @@ mod test {
                 artists: BTreeSet::from_iter(["pink floyd".into()]),
                 creation: Utc::now(),
                 id: Uuid::new_v4(),
-                spotify_id: Some(spotify_track_id_4.into()),
+                platform: Platform::Spotify,
+                platform_id: "626wlz3bovvpH06PYht5R0".into(),
                 title: "us and them".into(),
                 year: 1973,
             };
@@ -2310,7 +2245,8 @@ mod test {
                 artists: BTreeSet::from_iter(["pink floyd".into()]),
                 creation: Utc::now(),
                 id: Uuid::new_v4(),
-                spotify_id: Some(spotify_track_id_5.into()),
+                platform: Platform::Spotify,
+                platform_id: "4rQYDXfKFikLX4ad674jhg".into(),
                 title: "speak to me".into(),
                 year: 1973,
             };
@@ -2328,7 +2264,7 @@ mod test {
                     src: Source {
                         creation: Utc::now(),
                         id: Uuid::new_v4(),
-                        kind: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                        kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                         owner: User {
                             creation: Utc::now(),
                             creds: Default::default(),
@@ -2411,10 +2347,6 @@ mod test {
         #[tokio::test]
         async fn add_tracks_0() {
             let expected_offset = 0;
-            let spotify_track_id_1 = "4xHWH1jwV5j4mBYRhxPbwZ";
-            let spotify_track_id_2 = "7ygpwy2qP3NbrxVkHvUhXY";
-            let spotify_track_id_4 = "626wlz3bovvpH06PYht5R0";
-            let spotify_track_id_5 = "4rQYDXfKFikLX4ad674jhg";
             let spotify_playlist_id = "626wlz3bovvpH06PYht5R0";
             let track_1 = Track {
                 album: Album {
@@ -2424,7 +2356,8 @@ mod test {
                 artists: BTreeSet::from_iter(["pink floyd".into()]),
                 creation: Utc::now(),
                 id: Uuid::new_v4(),
-                spotify_id: Some(spotify_track_id_1.into()),
+                platform: Platform::Spotify,
+                platform_id: "4xHWH1jwV5j4mBYRhxPbwZ".into(),
                 title: "time".into(),
                 year: 1973,
             };
@@ -2436,7 +2369,8 @@ mod test {
                 artists: BTreeSet::from_iter(["oasis".into()]),
                 creation: Utc::now(),
                 id: Uuid::new_v4(),
-                spotify_id: Some(spotify_track_id_2.into()),
+                platform: Platform::Spotify,
+                platform_id: "7ygpwy2qP3NbrxVkHvUhXY".into(),
                 title: "wonderwall".into(),
                 year: 1995,
             };
@@ -2448,7 +2382,8 @@ mod test {
                 artists: BTreeSet::from_iter(["pink floyd".into()]),
                 creation: Utc::now(),
                 id: Uuid::new_v4(),
-                spotify_id: None,
+                platform: Platform::Spotify,
+                platform_id: "2up3OPMp9Tb4dAKM2erWXQ".into(),
                 title: "money".into(),
                 year: 1973,
             };
@@ -2460,7 +2395,8 @@ mod test {
                 artists: BTreeSet::from_iter(["pink floyd".into()]),
                 creation: Utc::now(),
                 id: Uuid::new_v4(),
-                spotify_id: Some(spotify_track_id_4.into()),
+                platform: Platform::Spotify,
+                platform_id: "626wlz3bovvpH06PYht5R0".into(),
                 title: "us and them".into(),
                 year: 1973,
             };
@@ -2472,7 +2408,8 @@ mod test {
                 artists: BTreeSet::from_iter(["pink floyd".into()]),
                 creation: Utc::now(),
                 id: Uuid::new_v4(),
-                spotify_id: Some(spotify_track_id_5.into()),
+                platform: Platform::Spotify,
+                platform_id: "4rQYDXfKFikLX4ad674jhg".into(),
                 title: "speak to me".into(),
                 year: 1973,
             };
@@ -2490,7 +2427,7 @@ mod test {
                     src: Source {
                         creation: Utc::now(),
                         id: Uuid::new_v4(),
-                        kind: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                        kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                         owner: User {
                             creation: Utc::now(),
                             creds: Credentials {
@@ -2520,8 +2457,20 @@ mod test {
                 step: PlaylistSynchronizationStep::AddTracks(TRACK_PAGE_LIMIT),
             };
             let mocks = Mocks {
-                add_tracks_to_spotify_playlist: Mock::once_with_args(move |tracks| {
-                    assert_eq!(tracks, vec![spotify_track_id_1, spotify_track_id_5],);
+                add_tracks_to_spotify_playlist: Mock::once_with_args({
+                    let track_1 = track_1.clone();
+                    let track_3 = track_3.clone();
+                    let track_5 = track_5.clone();
+                    move |tracks| {
+                        assert_eq!(
+                            tracks,
+                            vec![
+                                track_1.platform_id.clone(),
+                                track_3.platform_id.clone(),
+                                track_5.platform_id.clone()
+                            ],
+                        );
+                    }
                 }),
                 playlist_contains_tracks: Mock::with(vec![
                     Box::new({
@@ -2581,10 +2530,6 @@ mod test {
         #[tokio::test]
         async fn add_tracks_100() {
             let expected_offset = 100;
-            let spotify_track_id_1 = "4xHWH1jwV5j4mBYRhxPbwZ";
-            let spotify_track_id_2 = "7ygpwy2qP3NbrxVkHvUhXY";
-            let spotify_track_id_4 = "626wlz3bovvpH06PYht5R0";
-            let spotify_track_id_5 = "4rQYDXfKFikLX4ad674jhg";
             let spotify_playlist_id = "626wlz3bovvpH06PYht5R0";
             let track_1 = Track {
                 album: Album {
@@ -2594,7 +2539,8 @@ mod test {
                 artists: BTreeSet::from_iter(["pink floyd".into()]),
                 creation: Utc::now(),
                 id: Uuid::new_v4(),
-                spotify_id: Some(spotify_track_id_1.into()),
+                platform: Platform::Spotify,
+                platform_id: "4xHWH1jwV5j4mBYRhxPbwZ".into(),
                 title: "time".into(),
                 year: 1973,
             };
@@ -2606,7 +2552,8 @@ mod test {
                 artists: BTreeSet::from_iter(["oasis".into()]),
                 creation: Utc::now(),
                 id: Uuid::new_v4(),
-                spotify_id: Some(spotify_track_id_2.into()),
+                platform: Platform::Spotify,
+                platform_id: "7ygpwy2qP3NbrxVkHvUhXY".into(),
                 title: "wonderwall".into(),
                 year: 1995,
             };
@@ -2618,7 +2565,8 @@ mod test {
                 artists: BTreeSet::from_iter(["pink floyd".into()]),
                 creation: Utc::now(),
                 id: Uuid::new_v4(),
-                spotify_id: None,
+                platform: Platform::Spotify,
+                platform_id: "2up3OPMp9Tb4dAKM2erWXQ".into(),
                 title: "money".into(),
                 year: 1973,
             };
@@ -2630,7 +2578,8 @@ mod test {
                 artists: BTreeSet::from_iter(["pink floyd".into()]),
                 creation: Utc::now(),
                 id: Uuid::new_v4(),
-                spotify_id: Some(spotify_track_id_4.into()),
+                platform: Platform::Spotify,
+                platform_id: "626wlz3bovvpH06PYht5R0".into(),
                 title: "us and them".into(),
                 year: 1973,
             };
@@ -2642,7 +2591,8 @@ mod test {
                 artists: BTreeSet::from_iter(["pink floyd".into()]),
                 creation: Utc::now(),
                 id: Uuid::new_v4(),
-                spotify_id: Some(spotify_track_id_5.into()),
+                platform: Platform::Spotify,
+                platform_id: "4rQYDXfKFikLX4ad674jhg".into(),
                 title: "speak to me".into(),
                 year: 1973,
             };
@@ -2660,7 +2610,7 @@ mod test {
                     src: Source {
                         creation: Utc::now(),
                         id: Uuid::new_v4(),
-                        kind: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                        kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                         owner: User {
                             creation: Utc::now(),
                             creds: Credentials {
@@ -2690,8 +2640,20 @@ mod test {
                 step: PlaylistSynchronizationStep::DeleteTracks(0),
             };
             let mocks = Mocks {
-                add_tracks_to_spotify_playlist: Mock::once_with_args(move |tracks| {
-                    assert_eq!(tracks, vec![spotify_track_id_1, spotify_track_id_5],);
+                add_tracks_to_spotify_playlist: Mock::once_with_args({
+                    let track_1 = track_1.clone();
+                    let track_3 = track_3.clone();
+                    let track_5 = track_5.clone();
+                    move |tracks| {
+                        assert_eq!(
+                            tracks,
+                            vec![
+                                track_1.platform_id.clone(),
+                                track_3.platform_id.clone(),
+                                track_5.platform_id.clone()
+                            ],
+                        );
+                    }
                 }),
                 playlist_contains_tracks: Mock::with(vec![
                     Box::new({
@@ -2752,10 +2714,6 @@ mod test {
         async fn no_spotify_credentials_when_delete_tracks() {
             let expected_offset = 0;
             let user_id = Uuid::new_v4();
-            let spotify_track_id_1 = "4xHWH1jwV5j4mBYRhxPbwZ";
-            let spotify_track_id_2 = "7ygpwy2qP3NbrxVkHvUhXY";
-            let spotify_track_id_4 = "626wlz3bovvpH06PYht5R0";
-            let spotify_track_id_5 = "4rQYDXfKFikLX4ad674jhg";
             let spotify_playlist_id = "626wlz3bovvpH06PYht5R0";
             let track_1 = Track {
                 album: Album {
@@ -2765,7 +2723,8 @@ mod test {
                 artists: BTreeSet::from_iter(["pink floyd".into()]),
                 creation: Utc::now(),
                 id: Uuid::new_v4(),
-                spotify_id: Some(spotify_track_id_1.into()),
+                platform: Platform::Spotify,
+                platform_id: "4xHWH1jwV5j4mBYRhxPbwZ".into(),
                 title: "time".into(),
                 year: 1973,
             };
@@ -2777,7 +2736,8 @@ mod test {
                 artists: BTreeSet::from_iter(["oasis".into()]),
                 creation: Utc::now(),
                 id: Uuid::new_v4(),
-                spotify_id: Some(spotify_track_id_2.into()),
+                platform: Platform::Spotify,
+                platform_id: "7ygpwy2qP3NbrxVkHvUhXY".into(),
                 title: "wonderwall".into(),
                 year: 1995,
             };
@@ -2789,7 +2749,8 @@ mod test {
                 artists: BTreeSet::from_iter(["pink floyd".into()]),
                 creation: Utc::now(),
                 id: Uuid::new_v4(),
-                spotify_id: None,
+                platform: Platform::Spotify,
+                platform_id: "2up3OPMp9Tb4dAKM2erWXQ".into(),
                 title: "money".into(),
                 year: 1973,
             };
@@ -2801,7 +2762,8 @@ mod test {
                 artists: BTreeSet::from_iter(["pink floyd".into()]),
                 creation: Utc::now(),
                 id: Uuid::new_v4(),
-                spotify_id: Some(spotify_track_id_4.into()),
+                platform: Platform::Spotify,
+                platform_id: "626wlz3bovvpH06PYht5R0".into(),
                 title: "us and them".into(),
                 year: 1973,
             };
@@ -2813,7 +2775,8 @@ mod test {
                 artists: BTreeSet::from_iter(["pink floyd".into()]),
                 creation: Utc::now(),
                 id: Uuid::new_v4(),
-                spotify_id: Some(spotify_track_id_5.into()),
+                platform: Platform::Spotify,
+                platform_id: "4rQYDXfKFikLX4ad674jhg".into(),
                 title: "speak to me".into(),
                 year: 1973,
             };
@@ -2831,7 +2794,7 @@ mod test {
                     src: Source {
                         creation: Utc::now(),
                         id: Uuid::new_v4(),
-                        kind: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                        kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                         owner: User {
                             creation: Utc::now(),
                             creds: Default::default(),
@@ -2914,10 +2877,6 @@ mod test {
         #[tokio::test]
         async fn delete_tracks_0() {
             let expected_offset = 0;
-            let spotify_track_id_1 = "4xHWH1jwV5j4mBYRhxPbwZ";
-            let spotify_track_id_2 = "7ygpwy2qP3NbrxVkHvUhXY";
-            let spotify_track_id_4 = "626wlz3bovvpH06PYht5R0";
-            let spotify_track_id_5 = "4rQYDXfKFikLX4ad674jhg";
             let spotify_playlist_id = "626wlz3bovvpH06PYht5R0";
             let track_1 = Track {
                 album: Album {
@@ -2927,7 +2886,8 @@ mod test {
                 artists: BTreeSet::from_iter(["pink floyd".into()]),
                 creation: Utc::now(),
                 id: Uuid::new_v4(),
-                spotify_id: Some(spotify_track_id_1.into()),
+                platform: Platform::Spotify,
+                platform_id: "4xHWH1jwV5j4mBYRhxPbwZ".into(),
                 title: "time".into(),
                 year: 1973,
             };
@@ -2939,7 +2899,8 @@ mod test {
                 artists: BTreeSet::from_iter(["oasis".into()]),
                 creation: Utc::now(),
                 id: Uuid::new_v4(),
-                spotify_id: Some(spotify_track_id_2.into()),
+                platform: Platform::Spotify,
+                platform_id: "7ygpwy2qP3NbrxVkHvUhXY".into(),
                 title: "wonderwall".into(),
                 year: 1995,
             };
@@ -2951,7 +2912,8 @@ mod test {
                 artists: BTreeSet::from_iter(["pink floyd".into()]),
                 creation: Utc::now(),
                 id: Uuid::new_v4(),
-                spotify_id: None,
+                platform: Platform::Spotify,
+                platform_id: "2up3OPMp9Tb4dAKM2erWXQ".into(),
                 title: "money".into(),
                 year: 1973,
             };
@@ -2963,7 +2925,8 @@ mod test {
                 artists: BTreeSet::from_iter(["pink floyd".into()]),
                 creation: Utc::now(),
                 id: Uuid::new_v4(),
-                spotify_id: Some(spotify_track_id_4.into()),
+                platform: Platform::Spotify,
+                platform_id: "626wlz3bovvpH06PYht5R0".into(),
                 title: "us and them".into(),
                 year: 1973,
             };
@@ -2975,7 +2938,8 @@ mod test {
                 artists: BTreeSet::from_iter(["pink floyd".into()]),
                 creation: Utc::now(),
                 id: Uuid::new_v4(),
-                spotify_id: Some(spotify_track_id_5.into()),
+                platform: Platform::Spotify,
+                platform_id: "4rQYDXfKFikLX4ad674jhg".into(),
                 title: "speak to me".into(),
                 year: 1973,
             };
@@ -2993,7 +2957,7 @@ mod test {
                     src: Source {
                         creation: Utc::now(),
                         id: Uuid::new_v4(),
-                        kind: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                        kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                         owner: User {
                             creation: Utc::now(),
                             creds: Credentials {
@@ -3023,11 +2987,22 @@ mod test {
                 step: PlaylistSynchronizationStep::DeleteTracks(TRACK_PAGE_LIMIT),
             };
             let mocks = Mocks {
-                remove_tracks_from_spotify_playlist: Mock::once_with_args(move |tracks| {
-                    assert_eq!(
-                        tracks,
-                        vec![spotify_track_id_1, spotify_track_id_2, spotify_track_id_5],
-                    );
+                remove_tracks_from_spotify_playlist: Mock::once_with_args({
+                    let track_1 = track_1.clone();
+                    let track_2 = track_2.clone();
+                    let track_3 = track_3.clone();
+                    let track_5 = track_5.clone();
+                    move |tracks| {
+                        assert_eq!(
+                            tracks,
+                            vec![
+                                track_1.platform_id.clone(),
+                                track_2.platform_id.clone(),
+                                track_3.platform_id.clone(),
+                                track_5.platform_id.clone()
+                            ],
+                        );
+                    }
                 }),
                 src_contains_tracks: Mock::with(vec![
                     Box::new({
@@ -3087,10 +3062,6 @@ mod test {
         #[tokio::test]
         async fn delete_tracks_100() {
             let expected_offset = 100;
-            let spotify_track_id_1 = "4xHWH1jwV5j4mBYRhxPbwZ";
-            let spotify_track_id_2 = "7ygpwy2qP3NbrxVkHvUhXY";
-            let spotify_track_id_4 = "626wlz3bovvpH06PYht5R0";
-            let spotify_track_id_5 = "4rQYDXfKFikLX4ad674jhg";
             let spotify_playlist_id = "626wlz3bovvpH06PYht5R0";
             let track_1 = Track {
                 album: Album {
@@ -3100,7 +3071,8 @@ mod test {
                 artists: BTreeSet::from_iter(["pink floyd".into()]),
                 creation: Utc::now(),
                 id: Uuid::new_v4(),
-                spotify_id: Some(spotify_track_id_1.into()),
+                platform: Platform::Spotify,
+                platform_id: "4xHWH1jwV5j4mBYRhxPbwZ".into(),
                 title: "time".into(),
                 year: 1973,
             };
@@ -3112,7 +3084,8 @@ mod test {
                 artists: BTreeSet::from_iter(["oasis".into()]),
                 creation: Utc::now(),
                 id: Uuid::new_v4(),
-                spotify_id: Some(spotify_track_id_2.into()),
+                platform: Platform::Spotify,
+                platform_id: "7ygpwy2qP3NbrxVkHvUhXY".into(),
                 title: "wonderwall".into(),
                 year: 1995,
             };
@@ -3124,7 +3097,8 @@ mod test {
                 artists: BTreeSet::from_iter(["pink floyd".into()]),
                 creation: Utc::now(),
                 id: Uuid::new_v4(),
-                spotify_id: None,
+                platform: Platform::Spotify,
+                platform_id: "2up3OPMp9Tb4dAKM2erWXQ".into(),
                 title: "money".into(),
                 year: 1973,
             };
@@ -3136,7 +3110,8 @@ mod test {
                 artists: BTreeSet::from_iter(["pink floyd".into()]),
                 creation: Utc::now(),
                 id: Uuid::new_v4(),
-                spotify_id: Some(spotify_track_id_4.into()),
+                platform: Platform::Spotify,
+                platform_id: "626wlz3bovvpH06PYht5R0".into(),
                 title: "us and them".into(),
                 year: 1973,
             };
@@ -3148,7 +3123,8 @@ mod test {
                 artists: BTreeSet::from_iter(["pink floyd".into()]),
                 creation: Utc::now(),
                 id: Uuid::new_v4(),
-                spotify_id: Some(spotify_track_id_5.into()),
+                platform: Platform::Spotify,
+                platform_id: "4rQYDXfKFikLX4ad674jhg".into(),
                 title: "speak to me".into(),
                 year: 1973,
             };
@@ -3166,7 +3142,7 @@ mod test {
                     src: Source {
                         creation: Utc::now(),
                         id: Uuid::new_v4(),
-                        kind: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                        kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                         owner: User {
                             creation: Utc::now(),
                             creds: Credentials {
@@ -3196,11 +3172,22 @@ mod test {
                 step: PlaylistSynchronizationStep::Finished,
             };
             let mocks = Mocks {
-                remove_tracks_from_spotify_playlist: Mock::once_with_args(move |tracks| {
-                    assert_eq!(
-                        tracks,
-                        vec![spotify_track_id_1, spotify_track_id_2, spotify_track_id_5],
-                    );
+                remove_tracks_from_spotify_playlist: Mock::once_with_args({
+                    let track_1 = track_1.clone();
+                    let track_2 = track_2.clone();
+                    let track_3 = track_3.clone();
+                    let track_5 = track_5.clone();
+                    move |tracks| {
+                        assert_eq!(
+                            tracks,
+                            vec![
+                                track_1.platform_id.clone(),
+                                track_2.platform_id.clone(),
+                                track_3.platform_id.clone(),
+                                track_5.platform_id.clone(),
+                            ],
+                        );
+                    }
                 }),
                 src_contains_tracks: Mock::with(vec![
                     Box::new({
@@ -3332,7 +3319,7 @@ mod test {
                 src: Source {
                     creation: Utc::now(),
                     id: Uuid::new_v4(),
-                    kind: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                    kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     owner: User {
                         creation: Utc::now(),
                         creds: Default::default(),
@@ -3367,7 +3354,7 @@ mod test {
                 src: Source {
                     creation: Utc::now(),
                     id: Uuid::new_v4(),
-                    kind: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                    kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     owner: User {
                         creation: Utc::now(),
                         creds: Default::default(),
@@ -3415,7 +3402,7 @@ mod test {
                 src: Source {
                     creation: Utc::now(),
                     id: Uuid::new_v4(),
-                    kind: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                    kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     owner: User {
                         creation: Utc::now(),
                         creds: Default::default(),
@@ -3465,7 +3452,7 @@ mod test {
                 src: Source {
                     creation: Utc::now(),
                     id: Uuid::new_v4(),
-                    kind: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                    kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     owner: User {
                         creation: Utc::now(),
                         creds: Default::default(),
@@ -3530,7 +3517,7 @@ mod test {
                 src: Source {
                     creation: Utc::now(),
                     id: Uuid::new_v4(),
-                    kind: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                    kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     owner: User {
                         creation: Utc::now(),
                         creds: Default::default(),

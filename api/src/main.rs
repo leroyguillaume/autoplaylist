@@ -10,9 +10,9 @@ use std::{
 use autoplaylist_common::{
     api::{
         AuthenticateViaSpotifyQueryParams, CreatePlaylistRequest, JwtResponse,
-        PageRequestQueryParams, Platform, PlaylistResponse, RedirectUriQueryParam,
-        SearchQueryParam, SourceResponse, UserResponse, PATH_ADMIN, PATH_AUTH, PATH_HEALTH,
-        PATH_PLAYLIST, PATH_SEARCH, PATH_SPOTIFY, PATH_SRC, PATH_SYNC, PATH_TOKEN, PATH_USR,
+        PageRequestQueryParams, PlaylistResponse, RedirectUriQueryParam, SearchQueryParam,
+        SourceResponse, UserResponse, PATH_ADMIN, PATH_AUTH, PATH_HEALTH, PATH_PLAYLIST,
+        PATH_SEARCH, PATH_SPOTIFY, PATH_SRC, PATH_SYNC, PATH_TOKEN, PATH_USR,
     },
     broker::{
         rabbitmq::{RabbitMqClient, RabbitMqConfig},
@@ -24,7 +24,7 @@ use autoplaylist_common::{
         DatabaseConnection, DatabaseError, DatabasePool, DatabaseTransaction, PlaylistCreation,
         SourceCreation, UserCreation,
     },
-    model::{Credentials, Playlist, Role, SpotifyCredentials, Target},
+    model::{Credentials, Platform, Playlist, Role, SpotifyCredentials, Target},
     sigs::TerminationSignalListener,
     spotify::{
         rspotify::{RSpotifyClient, RSpotifyConfig},
@@ -873,11 +873,10 @@ mod test {
     use std::io::stderr;
 
     use autoplaylist_common::{
-        api::Platform,
         broker::MockBrokerClient,
         db::{MockDatabaseConnection, MockDatabasePool, MockDatabaseTransaction},
         model::{
-            Page, PageRequest, Playlist, Predicate, Role, Source, SourceKind, SpotifyResourceKind,
+            Page, PageRequest, Playlist, Predicate, Role, Source, SourceKind, SpotifySourceKind,
             SpotifyToken, Synchronization, Target, User,
         },
         spotify::{MockSpotifyClient, SpotifyUser},
@@ -1356,7 +1355,7 @@ mod test {
                 name: "name".into(),
                 platform: Platform::Spotify,
                 predicate: Predicate::YearEquals(1993),
-                src: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
             };
             let spotify_id = "id";
             let expected = Playlist {
@@ -1597,7 +1596,7 @@ mod test {
                 src: Source {
                     creation: Utc::now(),
                     id: Uuid::new_v4(),
-                    kind: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                    kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     owner: User {
                         creation: Utc::now(),
                         creds: Default::default(),
@@ -2564,7 +2563,7 @@ mod test {
                 src: Source {
                     creation: Utc::now(),
                     id: Uuid::new_v4(),
-                    kind: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                    kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     owner: User {
                         creation: Utc::now(),
                         creds: Default::default(),
@@ -2709,7 +2708,7 @@ mod test {
             let src = Source {
                 creation: Utc::now(),
                 id: Uuid::new_v4(),
-                kind: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                 owner: User {
                     creation: Utc::now(),
                     creds: Default::default(),

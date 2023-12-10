@@ -25,7 +25,7 @@ tokio = {version = "1.33", features = ["full"]}
 uuid = {version = "1.4", features = ["v4"]}
 
 [features]
-api = ["model", "dep:enum-display"]
+api = ["model"]
 broker = ["dep:anyhow", "dep:async-trait", "dep:enum-display", "dep:futures", "dep:lapin", "dep:serde", "dep:serde_json", "dep:tokio", "dep:thiserror", "dep:uuid"]
 db = ["model", "dep:async-trait", "dep:magic-crypt", "dep:serde_json", "dep:sqlx", "dep:thiserror"]
 model = ["dep:chrono", "dep:enum-display", "dep:serde", "dep:uuid"]

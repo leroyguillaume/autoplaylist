@@ -6,6 +6,10 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp"; -- noqa: disable=RF05
 
 CREATE TYPE role AS ENUM ('admin', 'user');
 
+-- platform
+
+CREATE TYPE platform AS ENUM ('spotify');
+
 -- track
 
 CREATE TABLE track (
@@ -16,9 +20,9 @@ CREATE TABLE track (
     album VARCHAR (255) NOT NULL,
     from_compil BOOLEAN NOT NULL,
     year INT NOT NULL,
-    spotify_id VARCHAR (255),
-    UNIQUE (title, artists, album, year),
-    UNIQUE (spotify_id)
+    platform PLATFORM NOT NULL,
+    platform_id VARCHAR (255) NOT NULL,
+    UNIQUE (platform, platform_id)
 );
 
 -- user

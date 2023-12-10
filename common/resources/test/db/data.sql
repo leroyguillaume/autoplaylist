@@ -18,7 +18,7 @@ DECLARE
     usr_3 UUID := '8fc899c5-f254-4966-9b5a-e8f1c4f97f7c';
     usr_4 UUID := '83e3a7ed-9d6c-4e4f-b732-8a00cab3fcb5';
 BEGIN
-    INSERT INTO track (id, creation, title, artists, album, from_compil, year, spotify_id)
+    INSERT INTO track (id, creation, title, artists, album, from_compil, year, platform, platform_id)
     VALUES
         (
             track_1,
@@ -28,7 +28,8 @@ BEGIN
             'dusty in memphis',
             FALSE,
             1969,
-            NULL
+            'spotify',
+            'track_1'
         ),
         (
             track_2,
@@ -38,7 +39,8 @@ BEGIN
             'st. louis to liverpool',
             FALSE,
             1964,
-            NULL
+            'spotify',
+            'track_2'
         ),
         (
             track_3,
@@ -48,7 +50,8 @@ BEGIN
             'the letter/neon rainbow',
             FALSE,
             1967,
-            NULL
+            'spotify',
+            'track_3'
         );
 
     INSERT INTO "user" (id, creation, email, role, creds)

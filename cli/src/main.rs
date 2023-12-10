@@ -775,10 +775,11 @@ mod test {
     use std::collections::HashMap;
 
     use autoplaylist_common::{
-        api::{JwtResponse, Platform, PlaylistResponse, SourceResponse, UserResponse},
+        api::{JwtResponse, PlaylistResponse, SourceResponse, UserResponse},
         db::{MockDatabaseConnection, MockDatabasePool, MockDatabaseTransaction},
         model::{
-            PageRequest, Predicate, SourceKind, SpotifyResourceKind, Synchronization, Target, User,
+            PageRequest, Platform, Predicate, SourceKind, SpotifySourceKind, Synchronization,
+            Target, User,
         },
     };
     use chrono::Utc;
@@ -1117,7 +1118,7 @@ mod test {
                         name: "name".into(),
                         predicate: Predicate::YearEquals(1993),
                         platform: Platform::Spotify,
-                        src: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                        src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
                     db: DatabaseArgs {
                         host: "host".into(),
@@ -1186,7 +1187,7 @@ mod test {
                         name: "name".into(),
                         predicate: Predicate::YearEquals(1993),
                         platform: Platform::Spotify,
-                        src: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                        src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
                     db: DatabaseArgs {
                         host: "host".into(),
@@ -1248,7 +1249,7 @@ mod test {
                         name: "name".into(),
                         predicate: Predicate::YearEquals(1993),
                         platform: Platform::Spotify,
-                        src: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                        src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
                     db: DatabaseArgs {
                         host: "host".into(),
@@ -1299,7 +1300,7 @@ mod test {
                             id: Uuid::new_v4(),
                             role: Role::User,
                         },
-                        kind: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                        kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                         sync: Synchronization::Pending,
                     },
                     sync: Synchronization::Pending,
@@ -1378,7 +1379,7 @@ mod test {
                         name: "name".into(),
                         predicate: Predicate::YearEquals(1993),
                         platform: Platform::Spotify,
-                        src: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                        src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
                     db: DatabaseArgs {
                         host: "host".into(),
@@ -1427,7 +1428,7 @@ mod test {
                         name: "name".into(),
                         predicate: Predicate::YearEquals(1993),
                         platform: Platform::Spotify,
-                        src: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                        src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
                     db: DatabaseArgs {
                         host: "host".into(),
@@ -1488,7 +1489,7 @@ mod test {
                         name: "name".into(),
                         predicate: Predicate::YearEquals(1993),
                         platform: Platform::Spotify,
-                        src: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                        src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
                     db: DatabaseArgs {
                         host: "host".into(),
@@ -1552,7 +1553,7 @@ mod test {
                         name: "name".into(),
                         predicate: Predicate::YearEquals(1993),
                         platform: Platform::Spotify,
-                        src: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                        src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
                     db: DatabaseArgs {
                         host: "host".into(),
@@ -1616,7 +1617,7 @@ mod test {
                         name: "name".into(),
                         predicate: Predicate::YearEquals(1993),
                         platform: Platform::Spotify,
-                        src: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                        src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
                     db: DatabaseArgs {
                         host: "host".into(),
@@ -1679,7 +1680,7 @@ mod test {
                         name: "name".into(),
                         predicate: Predicate::YearEquals(1993),
                         platform: Platform::Spotify,
-                        src: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                        src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
                     db: DatabaseArgs {
                         host: "host".into(),
@@ -1741,7 +1742,7 @@ mod test {
                         name: "name".into(),
                         predicate: Predicate::YearEquals(1993),
                         platform: Platform::Spotify,
-                        src: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                        src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
                     db: DatabaseArgs {
                         host: "host".into(),
@@ -1795,7 +1796,7 @@ mod test {
                         name: "name".into(),
                         predicate: Predicate::YearEquals(1993),
                         platform: Platform::Spotify,
-                        src: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                        src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
                     db: DatabaseArgs {
                         host: "host".into(),
@@ -1845,7 +1846,7 @@ mod test {
                         name: "name".into(),
                         predicate: Predicate::YearEquals(1993),
                         platform: Platform::Spotify,
-                        src: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                        src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
                     db: DatabaseArgs {
                         host: "host".into(),
@@ -1900,7 +1901,7 @@ mod test {
                         name: "name".into(),
                         predicate: Predicate::YearEquals(1993),
                         platform: Platform::Spotify,
-                        src: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                        src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
                     db,
                     email,
@@ -1953,7 +1954,7 @@ mod test {
                         name: "name".into(),
                         predicate: Predicate::YearEquals(1993),
                         platform: Platform::Spotify,
-                        src: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                        src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
                     db: DatabaseArgs {
                         host: "host".into(),

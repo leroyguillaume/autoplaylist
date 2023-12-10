@@ -6,7 +6,8 @@ SELECT
     track.album AS track_album,
     track.from_compil AS track_from_compil,
     track.year AS track_year,
-    track.spotify_id AS track_spotify_id
+    track.platform AS "track_platform: Platform", -- noqa: disable=RF05,
+    track.platform_id AS track_platform_id
 FROM source_track
 INNER JOIN track
     ON track.id = source_track.track

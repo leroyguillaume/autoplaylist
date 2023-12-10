@@ -6,7 +6,8 @@ SELECT
     album AS track_album,
     from_compil AS track_from_compil,
     year AS track_year,
-    spotify_id AS track_spotify_id
+    platform AS "track_platform: Platform", -- noqa: disable=RF05,
+    platform_id AS track_platform_id
 FROM track
 ORDER BY creation ASC, id ASC
 LIMIT $1

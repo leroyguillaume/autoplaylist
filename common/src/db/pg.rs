@@ -1,5 +1,4 @@
 use std::{
-    collections::BTreeSet,
     num::{ParseIntError, TryFromIntError},
     sync::Arc,
 };
@@ -19,8 +18,8 @@ use tracing::{debug, debug_span, info, trace, Instrument};
 use uuid::Uuid;
 
 use crate::model::{
-    Album, Credentials, Page, PageRequest, Playlist, PlaylistSynchronization, Role, Source,
-    SourceKind, SourceSynchronization, Synchronization, SynchronizationStep, Track, User,
+    Album, Credentials, Page, PageRequest, Platform, Playlist, PlaylistSynchronization, Role,
+    Source, SourceKind, SourceSynchronization, Synchronization, SynchronizationStep, Track, User,
 };
 
 use super::{
@@ -234,16 +233,12 @@ macro_rules! client_impl {
                 Ok(track)
             }
 
-            async fn track_by_title_artists_album_year(
+            async fn track_by_platform_id(
                 &mut self,
-                title: &str,
-                artists: &BTreeSet<String>,
-                album: &str,
-                year: i32,
+                platform: Platform,
+                platform_id: &str,
             ) -> DatabaseResult<Option<Track>> {
-                let track =
-                    track_by_title_artists_album_year(title, artists, album, year, &mut self.conn)
-                        .await?;
+                let track = track_by_platform_id(platform, platform_id, &mut self.conn).await?;
                 Ok(track)
             }
 
@@ -259,11 +254,6 @@ macro_rules! client_impl {
 
             async fn update_source(&mut self, src: &Source) -> DatabaseResult<()> {
                 update_source(src, &mut self.conn).await?;
-                Ok(())
-            }
-
-            async fn update_track(&mut self, track: &Track) -> DatabaseResult<()> {
-                update_track(track, &mut self.conn).await?;
                 Ok(())
             }
 
@@ -629,7 +619,8 @@ struct TrackRecord {
     track_creation: DateTime<Utc>,
     track_from_compil: bool,
     track_id: Uuid,
-    track_spotify_id: Option<String>,
+    track_platform: Platform,
+    track_platform_id: String,
     track_title: String,
     track_year: i32,
 }
@@ -644,7 +635,8 @@ impl TrackRecord {
             artists: self.track_artists.into_iter().collect(),
             creation: self.track_creation,
             id: self.track_id,
-            spotify_id: self.track_spotify_id,
+            platform: self.track_platform,
+            platform_id: self.track_platform_id,
             title: self.track_title,
             year: self.track_year,
         })
@@ -876,6 +868,8 @@ async fn create_track<
         "create_track",
         track.album.name = album,
         track.artists = ?artists,
+        track.platform = %creation.platform,
+        track.platform_id = creation.platform_id,
         track.title = title,
     );
     async {
@@ -890,7 +884,8 @@ async fn create_track<
             album,
             creation.album.compil,
             creation.year,
-            creation.spotify_id,
+            creation.platform as _,
+            creation.platform_id,
         )
         .fetch_one(&mut *conn)
         .await?;
@@ -1779,30 +1774,21 @@ async fn track_by_id<'a, A: Acquire<'a, Database = Postgres, Connection = &'a mu
     .await
 }
 
-// track_by_title_artists_album_year
+// track_by_platform_id
 
 #[inline]
-async fn track_by_title_artists_album_year<
+async fn track_by_platform_id<
     'a,
     A: Acquire<'a, Database = Postgres, Connection = &'a mut PgConnection>,
 >(
-    title: &str,
-    artists: &BTreeSet<String>,
-    album: &str,
-    year: i32,
+    platform: Platform,
+    id: &str,
     conn: A,
 ) -> PostgresResult<Option<Track>> {
-    let album = album.to_lowercase();
-    let artists = artists
-        .iter()
-        .map(|artist| artist.to_lowercase())
-        .collect::<Vec<_>>();
-    let title = title.to_lowercase();
     let span = debug_span!(
-        "track_by_title_artists_album_year",
-        track.album.name = album,
-        track.artists = ?artists,
-        track.title = title,
+        "track_by_platform_id",
+        track.platform = %platform,
+        track.platform_id = id,
     );
     async {
         trace!("acquiring database connection");
@@ -1810,11 +1796,9 @@ async fn track_by_title_artists_album_year<
         debug!("fetching track");
         let record = query_file_as!(
             TrackRecord,
-            "resources/main/db/pg/queries/track-by-title-artists-album-year.sql",
-            title,
-            &artists,
-            album,
-            year,
+            "resources/main/db/pg/queries/track-by-platform-id.sql",
+            platform as _,
+            id,
         )
         .fetch_optional(&mut *conn)
         .await?;
@@ -1931,35 +1915,6 @@ async fn update_source<
             "resources/main/db/pg/queries/update-source.sql",
             src.id,
             sync,
-        )
-        .execute(&mut *conn)
-        .await?;
-        Ok(())
-    }
-    .instrument(span)
-    .await
-}
-
-#[inline]
-async fn update_track<
-    'a,
-    A: Acquire<'a, Database = Postgres, Connection = &'a mut PgConnection>,
->(
-    track: &Track,
-    conn: A,
-) -> PostgresResult<()> {
-    let span = debug_span!(
-        "update_track",
-        %track.id,
-    );
-    async {
-        trace!("acquiring database connection");
-        let conn = conn.acquire().await?;
-        debug!("updating track");
-        query_file!(
-            "resources/main/db/pg/queries/update-track.sql",
-            track.id,
-            track.spotify_id,
         )
         .execute(&mut *conn)
         .await?;
@@ -2218,14 +2173,14 @@ async fn users<'a, A: Acquire<'a, Database = Postgres, Connection = &'a mut PgCo
 
 #[cfg(test)]
 mod test {
-    use std::io::stderr;
+    use std::{collections::BTreeSet, io::stderr};
 
     use mockable::{DefaultEnv, MockEnv};
     use mockall::predicate::eq;
 
     use crate::{
         model::{
-            Credentials, Predicate, SourceKind, SpotifyCredentials, SpotifyResourceKind,
+            Credentials, Predicate, SourceKind, SpotifyCredentials, SpotifySourceKind,
             SpotifyToken, Target,
         },
         test_env_var, TracingConfig,
@@ -2254,7 +2209,8 @@ mod test {
                     .expect("failed to parse date")
                     .into(),
                 id: Uuid::from_u128(0xd16eb9f1cf4d4a419515e9a8125d7843),
-                spotify_id: None,
+                platform: Platform::Spotify,
+                platform_id: "track_1".into(),
                 title: "son of a preacher man".into(),
                 year: 1969,
             };
@@ -2268,7 +2224,8 @@ mod test {
                     .expect("failed to parse date")
                     .into(),
                 id: Uuid::from_u128(0x9095b250d4ab427fb38f32aaf45afec5),
-                spotify_id: None,
+                platform: Platform::Spotify,
+                platform_id: "track_2".into(),
                 title: "you never can tell".into(),
                 year: 1964,
             };
@@ -2282,7 +2239,8 @@ mod test {
                     .expect("failed to parse date")
                     .into(),
                 id: Uuid::from_u128(0xf747ca3a0cc74d9fb38adc506f99f5df),
-                spotify_id: None,
+                platform: Platform::Spotify,
+                platform_id: "track_3".into(),
                 title: "the letter".into(),
                 year: 1967,
             };
@@ -2338,7 +2296,7 @@ mod test {
                     .expect("failed to parse date")
                     .into(),
                 id: Uuid::from_u128(0x911ca8e748744bf4b8e11ddd1b6cee41),
-                kind: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                 owner: usr_1.clone(),
                 sync: Synchronization::Pending,
             };
@@ -2347,7 +2305,7 @@ mod test {
                     .expect("failed to parse date")
                     .into(),
                 id: Uuid::from_u128(0xf1c418db13c047a79ecb9aa4cf4995eb),
-                kind: SourceKind::Spotify(SpotifyResourceKind::Playlist("src_2".into())),
+                kind: SourceKind::Spotify(SpotifySourceKind::Playlist("src_2".into())),
                 owner: usr_1.clone(),
                 sync: Synchronization::Pending,
             };
@@ -2356,7 +2314,7 @@ mod test {
                     .expect("failed to parse date")
                     .into(),
                 id: Uuid::from_u128(0x12d423d13bc04eefb0c66748beb7d52e),
-                kind: SourceKind::Spotify(SpotifyResourceKind::Playlist("src_3".into())),
+                kind: SourceKind::Spotify(SpotifySourceKind::Playlist("src_3".into())),
                 owner: usr_1.clone(),
                 sync: Synchronization::Pending,
             };
@@ -2365,7 +2323,7 @@ mod test {
                     .expect("failed to parse date")
                     .into(),
                 id: Uuid::from_u128(0xa23c9cc92b7246db9a52922f1c09db01),
-                kind: SourceKind::Spotify(SpotifyResourceKind::Playlist("src_4".into())),
+                kind: SourceKind::Spotify(SpotifySourceKind::Playlist("src_4".into())),
                 owner: usr_2.clone(),
                 sync: Synchronization::Pending,
             };
@@ -2712,7 +2670,7 @@ mod test {
                 let db = init(db).await;
                 let mut conn = db.acquire().await.expect("failed to acquire connection");
                 let creation = SourceCreation {
-                    kind: SourceKind::Spotify(SpotifyResourceKind::SavedTracks),
+                    kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     owner: data.usrs[2].clone(),
                 };
                 let src = conn
@@ -2745,7 +2703,8 @@ mod test {
                         name: "The Dark Side of the Moon".into(),
                     },
                     artists: vec!["Pink Floyd".into()].into_iter().collect(),
-                    spotify_id: Some("id".into()),
+                    platform: Platform::Spotify,
+                    platform_id: "track_4".into(),
                     title: "Time".into(),
                     year: 1973,
                 };
@@ -2761,7 +2720,8 @@ mod test {
                     .map(|artist| artist.to_lowercase())
                     .collect();
                 assert_eq!(track.artists, artists);
-                assert_eq!(track.spotify_id, creation.spotify_id);
+                assert_eq!(track.platform, creation.platform);
+                assert_eq!(track.platform_id, creation.platform_id);
                 assert_eq!(track.title, creation.title.to_lowercase());
                 assert_eq!(track.year, creation.year);
                 let track_fetched = conn
@@ -3512,35 +3472,16 @@ mod test {
             }
         }
 
-        mod track_by_title_artists_album_year {
+        mod track_by_platform_id {
             use super::*;
-
-            // Params
-
-            struct Params {
-                album: &'static str,
-                artists: &'static [&'static str],
-                title: &'static str,
-                year: i32,
-            }
 
             // run
 
-            async fn run(params: Params, expected: Option<&Track>, db: PgPool) {
+            async fn run(platform: Platform, id: &str, expected: Option<&Track>, db: PgPool) {
                 let db = init(db).await;
                 let mut conn = db.acquire().await.expect("failed to acquire connection");
-                let artists: BTreeSet<String> = params
-                    .artists
-                    .iter()
-                    .map(|artist| (*artist).into())
-                    .collect();
                 let track = conn
-                    .track_by_title_artists_album_year(
-                        params.title,
-                        &artists,
-                        params.album,
-                        params.year,
-                    )
+                    .track_by_platform_id(platform, id)
                     .await
                     .expect("failed to fetch track");
                 assert_eq!(track, expected.cloned());
@@ -3549,79 +3490,15 @@ mod test {
             // Tests
 
             #[sqlx::test]
-            async fn none_when_title_mismatch(db: PgPool) {
-                run(
-                    Params {
-                        album: "Dusty In Memphis",
-                        artists: &["Dusty Springfield"],
-                        title: "time",
-                        year: 1969,
-                    },
-                    None,
-                    db,
-                )
-                .await;
-            }
-
-            #[sqlx::test]
-            async fn none_when_artists_mismatch(db: PgPool) {
-                run(
-                    Params {
-                        album: "Dusty In Memphis",
-                        artists: &["Dusty Springfield", "Pink Floyd"],
-                        title: "Son Of A Preacher Man",
-                        year: 1969,
-                    },
-                    None,
-                    db,
-                )
-                .await;
-            }
-
-            #[sqlx::test]
-            async fn none_when_album_mismatch(db: PgPool) {
-                run(
-                    Params {
-                        album: "The Dark Side Of The Moon",
-                        artists: &["Dusty Springfield"],
-                        title: "Son Of A Preacher Man",
-                        year: 1969,
-                    },
-                    None,
-                    db,
-                )
-                .await;
-            }
-
-            #[sqlx::test]
-            async fn none_when_year_mismatch(db: PgPool) {
-                run(
-                    Params {
-                        album: "Dusty In Memphis",
-                        artists: &["Dusty Springfield"],
-                        title: "Son Of A Preacher Man",
-                        year: 1970,
-                    },
-                    None,
-                    db,
-                )
-                .await;
+            async fn none(db: PgPool) {
+                run(Platform::Spotify, "", None, db).await;
             }
 
             #[sqlx::test]
             async fn track(db: PgPool) {
                 let data = Data::new();
-                run(
-                    Params {
-                        album: "Dusty In Memphis",
-                        artists: &["Dusty Springfield"],
-                        title: "Son Of A Preacher Man",
-                        year: 1969,
-                    },
-                    Some(&data.tracks[0]),
-                    db,
-                )
-                .await;
+                let track = &data.tracks[0];
+                run(track.platform, &track.platform_id, Some(track), db).await;
             }
         }
 
@@ -3729,7 +3606,7 @@ mod test {
                 let source_updated = Source {
                     creation: Utc::now(),
                     id: expected.id,
-                    kind: SourceKind::Spotify(SpotifyResourceKind::Playlist("id".into())),
+                    kind: SourceKind::Spotify(SpotifySourceKind::Playlist("id".into())),
                     owner: data.usrs[2].clone(),
                     sync: expected.sync.clone(),
                 };
@@ -3742,44 +3619,6 @@ mod test {
                     .expect("failed to fetch source")
                     .expect("source doesn't exist");
                 assert_eq!(src, expected);
-            }
-        }
-
-        mod update_track {
-            use super::*;
-
-            // Tests
-
-            #[sqlx::test]
-            async fn unit(db: PgPool) {
-                let data = Data::new();
-                let db = init(db).await;
-                let mut conn = db.acquire().await.expect("failed to acquire connection");
-                let expected = Track {
-                    spotify_id: Some("id".into()),
-                    ..data.tracks[0].clone()
-                };
-                let track_updated = Track {
-                    album: Album {
-                        compil: false,
-                        name: "The Dark Side of the Moon".into(),
-                    },
-                    artists: BTreeSet::from_iter(["Pink Floyd".into()]),
-                    creation: Utc::now(),
-                    id: expected.id,
-                    spotify_id: expected.spotify_id.clone(),
-                    title: "Time".into(),
-                    year: 1973,
-                };
-                conn.update_track(&track_updated)
-                    .await
-                    .expect("failed to update track");
-                let track = conn
-                    .track_by_id(expected.id)
-                    .await
-                    .expect("failed to fetch track")
-                    .expect("track doesn't exist");
-                assert_eq!(track, expected);
             }
         }
 
