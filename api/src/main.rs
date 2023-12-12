@@ -13,7 +13,7 @@ use autoplaylist_common::{
         PageRequestQueryParams, PlaylistResponse, RedirectUriQueryParam, SearchQueryParam,
         SourceResponse, UserResponse, Validate, ValidationErrorResponse, PATH_ADMIN, PATH_AUTH,
         PATH_HEALTH, PATH_ME, PATH_PLAYLIST, PATH_SEARCH, PATH_SPOTIFY, PATH_SRC, PATH_SYNC,
-        PATH_TOKEN, PATH_USR,
+        PATH_TOKEN, PATH_TRACK, PATH_USR,
     },
     broker::{
         rabbitmq::{RabbitMqClient, RabbitMqConfig},
@@ -97,6 +97,14 @@ async fn main() -> anyhow::Result<()> {
 macro_rules! ensure_user_is_admin {
     ($usr:expr) => {
         if $usr.role != Role::Admin {
+            return Err(ApiError::Forbidden);
+        }
+    };
+}
+
+macro_rules! ensure_user_is_admin_or_owner {
+    ($usr:expr, $owner:expr) => {
+        if $usr.role != Role::Admin && $usr.id != $owner.id {
             return Err(ApiError::Forbidden);
         }
     };
@@ -286,12 +294,12 @@ fn create_app<
                  Query(params): Query<SearchQueryParam>,
                  Query(req): Query<PageRequestQueryParams<25>>| async move {
                      handling_error(async {
-                         let mut db_conn = state.db.acquire().await?;
-                         let usr = state
-                         .svc
-                         .auth()
-                         .authenticate(&headers, &mut db_conn)
-                         .await?;
+                        let mut db_conn = state.db.acquire().await?;
+                        let usr = state
+                            .svc
+                            .auth()
+                            .authenticate(&headers, &mut db_conn)
+                            .await?;
                         let span = info_span!(
                             "search_playlists_by_name",
                             auth.usr.email = %usr.email,
@@ -323,12 +331,12 @@ fn create_app<
                  State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
                  Query(req): Query<PageRequestQueryParams<25>>| async move {
                      handling_error(async {
-                         let mut db_conn = state.db.acquire().await?;
-                         let usr = state
-                         .svc
-                         .auth()
-                         .authenticate(&headers, &mut db_conn)
-                         .await?;
+                        let mut db_conn = state.db.acquire().await?;
+                        let usr = state
+                            .svc
+                            .auth()
+                            .authenticate(&headers, &mut db_conn)
+                            .await?;
                         let span = info_span!(
                             "sources",
                             auth.usr.email = %usr.email,
@@ -356,12 +364,12 @@ fn create_app<
                  State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
                  Query(req): Query<PageRequestQueryParams<25>>| async move {
                      handling_error(async {
-                         let mut db_conn = state.db.acquire().await?;
-                         let usr = state
-                         .svc
-                         .auth()
-                         .authenticate(&headers, &mut db_conn)
-                         .await?;
+                        let mut db_conn = state.db.acquire().await?;
+                        let usr = state
+                            .svc
+                            .auth()
+                            .authenticate(&headers, &mut db_conn)
+                            .await?;
                         let span = info_span!(
                             "users",
                             auth.usr.email = %usr.email,
@@ -389,12 +397,12 @@ fn create_app<
                  headers: HeaderMap,
                  State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>| async move {
                      handling_error(async {
-                         let mut db_conn = state.db.acquire().await?;
-                         let usr = state
-                         .svc
-                         .auth()
-                         .authenticate(&headers, &mut db_conn)
-                         .await?;
+                        let mut db_conn = state.db.acquire().await?;
+                        let usr = state
+                            .svc
+                            .auth()
+                            .authenticate(&headers, &mut db_conn)
+                            .await?;
                         let span = info_span!(
                             "delete_user",
                             auth.usr.email = %usr.email,
@@ -426,12 +434,12 @@ fn create_app<
                  Query(params): Query<SearchQueryParam>,
                  Query(req): Query<PageRequestQueryParams<25>>| async move {
                      handling_error(async {
-                         let mut db_conn = state.db.acquire().await?;
-                         let usr = state
-                         .svc
-                         .auth()
-                         .authenticate(&headers, &mut db_conn)
-                         .await?;
+                        let mut db_conn = state.db.acquire().await?;
+                        let usr = state
+                            .svc
+                            .auth()
+                            .authenticate(&headers, &mut db_conn)
+                            .await?;
                         let span = info_span!(
                             "search_users_by_email",
                             auth.usr.email = %usr.email,
@@ -727,9 +735,7 @@ fn create_app<
                         );
                         async {
                             let playlist = db_tx.playlist_by_id(id).await?.ok_or(ApiError::NotFound(id))?;
-                            if playlist.src.owner.id != usr.id && usr.role != Role::Admin {
-                                return Err(ApiError::Forbidden);
-                            }
+                            ensure_user_is_admin_or_owner!(usr, playlist.src.owner);
                             transactional!(db_tx, async {
                                 let deleted = db_tx.delete_playlist(id).await?;
                                 let src_count = db_tx.count_source_playlists(id).await?;
@@ -774,13 +780,52 @@ fn create_app<
                         );
                         async {
                             ensure_user_is_admin!(usr);
+                            if db_conn.playlist_exists(id).await? {
+                                let msg = PlaylistMessage {
+                                    id,
+                                    kind: PlaylistMessageKind::Sync,
+                                };
+                                state.svc.broker().publish_playlist_message(&msg).await?;
+                                Ok(StatusCode::NO_CONTENT)
+                            } else {
+                                Ok(StatusCode::NOT_FOUND)
+                            }
+                        }
+                        .instrument(span)
+                        .await
+                    })
+                    .await
+                },
+            ),
+        )
+        // playlist_tracks
+        .route(
+            &format!("{PATH_PLAYLIST}/:id{PATH_TRACK}"),
+            routing::get(
+                |Path(id): Path<Uuid>,
+                 headers: HeaderMap,
+                 State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
+                 Query(req): Query<PageRequestQueryParams<25>>| async move {
+                     handling_error(async {
+                        let mut db_conn = state.db.acquire().await?;
+                        let usr = state
+                            .svc
+                            .auth()
+                            .authenticate(&headers, &mut db_conn)
+                            .await?;
+                        let span = info_span!(
+                            "playlist_tracks",
+                            auth.usr.email = %usr.email,
+                            auth.usr.id = %usr.id,
+                            params.limit = req.limit,
+                            params.offset = req.offset,
+                            playlist.id = %id,
+                        );
+                        async {
                             let playlist = db_conn.playlist_by_id(id).await?.ok_or(ApiError::NotFound(id))?;
-                            let msg = PlaylistMessage {
-                                id: playlist.id,
-                                kind: PlaylistMessageKind::Sync,
-                            };
-                            state.svc.broker().publish_playlist_message(&msg).await?;
-                            Ok(StatusCode::NO_CONTENT)
+                            ensure_user_is_admin_or_owner!(usr, playlist.src.owner);
+                            let page = db_conn.playlist_tracks(id, req.into()).await?;
+                            Ok((StatusCode::OK, Json(page)).into_response())
                         }
                         .instrument(span)
                         .await
@@ -819,6 +864,42 @@ fn create_app<
                                 .map(PlaylistResponse::from);
                             Ok((StatusCode::OK, Json(page)))
                         }.instrument(span).await
+                    })
+                    .await
+                },
+            ),
+        )
+        // source_tracks
+        .route(
+            &format!("{PATH_SRC}/:id{PATH_TRACK}"),
+            routing::get(
+                |Path(id): Path<Uuid>,
+                 headers: HeaderMap,
+                 State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
+                 Query(req): Query<PageRequestQueryParams<25>>| async move {
+                     handling_error(async {
+                        let mut db_conn = state.db.acquire().await?;
+                        let usr = state
+                            .svc
+                            .auth()
+                            .authenticate(&headers, &mut db_conn)
+                            .await?;
+                        let span = info_span!(
+                            "source_tracks",
+                            auth.usr.email = %usr.email,
+                            auth.usr.id = %usr.id,
+                            params.limit = req.limit,
+                            params.offset = req.offset,
+                            src.id = %id,
+                        );
+                        async {
+                            let src = db_conn.source_by_id(id).await?.ok_or(ApiError::NotFound(id))?;
+                            ensure_user_is_admin_or_owner!(usr, src.owner);
+                            let page = db_conn.source_tracks(id, req.into()).await?;
+                            Ok((StatusCode::OK, Json(page)).into_response())
+                        }
+                        .instrument(span)
+                        .await
                     })
                     .await
                 },
@@ -881,13 +962,49 @@ fn create_app<
                         );
                         async {
                             ensure_user_is_admin!(usr);
-                            let src = db_conn.source_by_id(id).await?.ok_or(ApiError::NotFound(id))?;
-                            let msg = SourceMessage {
-                                id: src.id,
-                                kind: SourceMessageKind::Sync,
-                            };
-                            state.svc.broker().publish_source_message(&msg).await?;
-                            Ok(StatusCode::NO_CONTENT)
+                            if db_conn.source_exists(id).await? {
+                                let msg = SourceMessage {
+                                    id,
+                                    kind: SourceMessageKind::Sync,
+                                };
+                                state.svc.broker().publish_source_message(&msg).await?;
+                                Ok(StatusCode::NO_CONTENT)
+                            } else {
+                                Ok(StatusCode::NOT_FOUND)
+                            }
+                        }
+                        .instrument(span)
+                        .await
+                    })
+                    .await
+                },
+            ),
+        )
+        // tracks
+        .route(
+            PATH_TRACK,
+            routing::get(
+                |headers: HeaderMap,
+                 State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
+                 Query(req): Query<PageRequestQueryParams<25>>| async move {
+                     handling_error(async {
+                        let mut db_conn = state.db.acquire().await?;
+                        let usr = state
+                            .svc
+                            .auth()
+                            .authenticate(&headers, &mut db_conn)
+                            .await?;
+                        let span = info_span!(
+                            "tracks",
+                            auth.usr.email = %usr.email,
+                            auth.usr.id = %usr.id,
+                            params.limit = req.limit,
+                            params.offset = req.offset,
+                        );
+                        async {
+                            ensure_user_is_admin!(usr);
+                            let page = db_conn.tracks(req.into()).await?;
+                            Ok((StatusCode::OK, Json(page)))
                         }
                         .instrument(span)
                         .await
@@ -954,7 +1071,7 @@ mod test {
         db::{MockDatabaseConnection, MockDatabasePool, MockDatabaseTransaction},
         model::{
             Page, PageRequest, Playlist, Predicate, Role, Source, SourceKind, SpotifySourceKind,
-            SpotifyToken, Synchronization, Target, User,
+            SpotifyToken, Synchronization, Target, Track, User,
         },
         spotify::{MockSpotifyClient, SpotifyUser},
     };
@@ -2210,6 +2327,182 @@ mod test {
         }
     }
 
+    mod playlist_tracks {
+        use super::*;
+
+        // Mocks
+
+        #[derive(Clone, Default)]
+        struct Mocks {
+            auth: Mock<ApiResult<User>, User>,
+            by_id: Mock<Option<Playlist>, Playlist>,
+            tracks: Mock<()>,
+        }
+
+        // Tests
+
+        async fn run(mocks: Mocks) -> (TestResponse, Page<Track>) {
+            let playlist = Playlist {
+                creation: Utc::now(),
+                id: Uuid::new_v4(),
+                name: "name".into(),
+                predicate: Predicate::YearIs(1993),
+                src: Source {
+                    creation: Utc::now(),
+                    id: Uuid::new_v4(),
+                    kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
+                    owner: User {
+                        creation: Utc::now(),
+                        creds: Default::default(),
+                        email: "user@test".into(),
+                        id: Uuid::new_v4(),
+                        role: Role::User,
+                    },
+                    sync: Synchronization::Pending,
+                },
+                sync: Synchronization::Pending,
+                tgt: Target::Spotify("id".into()),
+            };
+            let page = Page {
+                first: true,
+                items: vec![],
+                last: true,
+                req: PageRequest::new(10, 0),
+                total: 0,
+            };
+            let req = PageRequestQueryParams::<25>::from(page.req);
+            let mut auth = MockAuthenticator::new();
+            auth.expect_authenticate()
+                .times(mocks.auth.times())
+                .returning({
+                    let usr = playlist.src.owner.clone();
+                    let mock = mocks.auth.clone();
+                    move |_, _| {
+                        Box::pin({
+                            let usr = usr.clone();
+                            let mock = mock.clone();
+                            async move { mock.call_with_args(usr.clone()) }
+                        })
+                    }
+                });
+            let db = MockDatabasePool {
+                acquire: Mock::once({
+                    let playlist = playlist.clone();
+                    let page = page.clone();
+                    let mocks = mocks.clone();
+                    move || {
+                        let mut conn = MockDatabaseConnection::new();
+                        conn.0
+                            .expect_playlist_by_id()
+                            .with(eq(playlist.id))
+                            .times(mocks.by_id.times())
+                            .returning({
+                                let playlist = playlist.clone();
+                                let mock = mocks.by_id.clone();
+                                move |_| Ok(mock.call_with_args(playlist.clone()))
+                            });
+                        conn.0
+                            .expect_playlist_tracks()
+                            .with(eq(playlist.id), eq(page.req))
+                            .times(mocks.tracks.times())
+                            .returning({
+                                let page = page.clone();
+                                move |_, _| Ok(page.clone())
+                            });
+                        conn
+                    }
+                }),
+                ..Default::default()
+            };
+            let state = AppState {
+                db,
+                svc: MockServices {
+                    auth,
+                    ..Default::default()
+                },
+                _dbconn: PhantomData,
+                _dbtx: PhantomData,
+            };
+            let server = init(state);
+            let resp = server
+                .get(&format!("{PATH_PLAYLIST}/{}{PATH_TRACK}", playlist.id))
+                .add_query_params(req)
+                .await;
+            (resp, page)
+        }
+
+        // Tests
+
+        #[tokio::test]
+        async fn unauthorized() {
+            let mocks = Mocks {
+                auth: Mock::once_with_args(|_| Err(ApiError::Unauthorized)),
+                ..Default::default()
+            };
+            let (resp, _) = run(mocks).await;
+            resp.assert_status_unauthorized();
+            assert!(resp.as_bytes().is_empty());
+        }
+
+        #[tokio::test]
+        async fn forbidden() {
+            let mocks = Mocks {
+                auth: Mock::once_with_args(|usr| {
+                    Ok(User {
+                        id: Uuid::new_v4(),
+                        role: Role::User,
+                        ..usr
+                    })
+                }),
+                by_id: Mock::once_with_args(Some),
+                ..Default::default()
+            };
+            let (resp, _) = run(mocks).await;
+            resp.assert_status(StatusCode::FORBIDDEN);
+            assert!(resp.as_bytes().is_empty());
+        }
+
+        #[tokio::test]
+        async fn not_found() {
+            let mocks = Mocks {
+                auth: Mock::once_with_args(Ok),
+                by_id: Mock::once_with_args(|_| None),
+                ..Default::default()
+            };
+            let (resp, _) = run(mocks).await;
+            assert!(resp.as_bytes().is_empty());
+        }
+
+        #[tokio::test]
+        async fn ok_when_user_is_owner() {
+            let mocks = Mocks {
+                auth: Mock::once_with_args(Ok),
+                by_id: Mock::once_with_args(Some),
+                tracks: Mock::once(|| ()),
+            };
+            let (resp, expected) = run(mocks).await;
+            resp.assert_status_ok();
+            resp.assert_json(&expected);
+        }
+
+        #[tokio::test]
+        async fn ok_when_user_is_admin() {
+            let mocks = Mocks {
+                auth: Mock::once_with_args(|usr| {
+                    Ok(User {
+                        role: Role::Admin,
+                        ..usr
+                    })
+                }),
+                by_id: Mock::once_with_args(Some),
+                tracks: Mock::once(|| ()),
+            };
+            let (resp, expected) = run(mocks).await;
+            resp.assert_status_ok();
+            resp.assert_json(&expected);
+        }
+    }
+
     mod playlists {
         use super::*;
 
@@ -2688,6 +2981,174 @@ mod test {
         }
     }
 
+    mod source_tracks {
+        use super::*;
+
+        // Mocks
+
+        #[derive(Clone, Default)]
+        struct Mocks {
+            auth: Mock<ApiResult<User>, User>,
+            by_id: Mock<Option<Source>, Source>,
+            tracks: Mock<()>,
+        }
+
+        // Tests
+
+        async fn run(mocks: Mocks) -> (TestResponse, Page<Track>) {
+            let src = Source {
+                creation: Utc::now(),
+                id: Uuid::new_v4(),
+                kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
+                owner: User {
+                    creation: Utc::now(),
+                    creds: Default::default(),
+                    email: "user@test".into(),
+                    id: Uuid::new_v4(),
+                    role: Role::User,
+                },
+                sync: Synchronization::Pending,
+            };
+            let page = Page {
+                first: true,
+                items: vec![],
+                last: true,
+                req: PageRequest::new(10, 0),
+                total: 0,
+            };
+            let req = PageRequestQueryParams::<25>::from(page.req);
+            let mut auth = MockAuthenticator::new();
+            auth.expect_authenticate()
+                .times(mocks.auth.times())
+                .returning({
+                    let usr = src.owner.clone();
+                    let mock = mocks.auth.clone();
+                    move |_, _| {
+                        Box::pin({
+                            let usr = usr.clone();
+                            let mock = mock.clone();
+                            async move { mock.call_with_args(usr.clone()) }
+                        })
+                    }
+                });
+            let db = MockDatabasePool {
+                acquire: Mock::once({
+                    let src = src.clone();
+                    let page = page.clone();
+                    let mocks = mocks.clone();
+                    move || {
+                        let mut conn = MockDatabaseConnection::new();
+                        conn.0
+                            .expect_source_by_id()
+                            .with(eq(src.id))
+                            .times(mocks.by_id.times())
+                            .returning({
+                                let src = src.clone();
+                                let mock = mocks.by_id.clone();
+                                move |_| Ok(mock.call_with_args(src.clone()))
+                            });
+                        conn.0
+                            .expect_source_tracks()
+                            .with(eq(src.id), eq(page.req))
+                            .times(mocks.tracks.times())
+                            .returning({
+                                let page = page.clone();
+                                move |_, _| Ok(page.clone())
+                            });
+                        conn
+                    }
+                }),
+                ..Default::default()
+            };
+            let state = AppState {
+                db,
+                svc: MockServices {
+                    auth,
+                    ..Default::default()
+                },
+                _dbconn: PhantomData,
+                _dbtx: PhantomData,
+            };
+            let server = init(state);
+            let resp = server
+                .get(&format!("{PATH_SRC}/{}{PATH_TRACK}", src.id))
+                .add_query_params(req)
+                .await;
+            (resp, page)
+        }
+
+        // Tests
+
+        #[tokio::test]
+        async fn unauthorized() {
+            let mocks = Mocks {
+                auth: Mock::once_with_args(|_| Err(ApiError::Unauthorized)),
+                ..Default::default()
+            };
+            let (resp, _) = run(mocks).await;
+            resp.assert_status_unauthorized();
+            assert!(resp.as_bytes().is_empty());
+        }
+
+        #[tokio::test]
+        async fn forbidden() {
+            let mocks = Mocks {
+                auth: Mock::once_with_args(|usr| {
+                    Ok(User {
+                        id: Uuid::new_v4(),
+                        role: Role::User,
+                        ..usr
+                    })
+                }),
+                by_id: Mock::once_with_args(Some),
+                ..Default::default()
+            };
+            let (resp, _) = run(mocks).await;
+            resp.assert_status(StatusCode::FORBIDDEN);
+            assert!(resp.as_bytes().is_empty());
+        }
+
+        #[tokio::test]
+        async fn not_found() {
+            let mocks = Mocks {
+                auth: Mock::once_with_args(Ok),
+                by_id: Mock::once_with_args(|_| None),
+                ..Default::default()
+            };
+            let (resp, _) = run(mocks).await;
+            assert!(resp.as_bytes().is_empty());
+        }
+
+        #[tokio::test]
+        async fn ok_when_user_is_owner() {
+            let mocks = Mocks {
+                auth: Mock::once_with_args(Ok),
+                by_id: Mock::once_with_args(Some),
+                tracks: Mock::once(|| ()),
+            };
+            let (resp, expected) = run(mocks).await;
+            resp.assert_status_ok();
+            resp.assert_json(&expected);
+        }
+
+        #[tokio::test]
+        async fn ok_when_user_is_admin() {
+            let mocks = Mocks {
+                auth: Mock::once_with_args(|usr| {
+                    Ok(User {
+                        role: Role::Admin,
+                        ..usr
+                    })
+                }),
+                by_id: Mock::once_with_args(Some),
+                tracks: Mock::once(|| ()),
+            };
+            let (resp, expected) = run(mocks).await;
+            resp.assert_status_ok();
+            resp.assert_json(&expected);
+        }
+    }
+
     mod sources {
         use super::*;
 
@@ -2855,43 +3316,29 @@ mod test {
         #[derive(Clone, Default)]
         struct Mocks {
             auth: Mock<ApiResult<User>, User>,
-            playlist_by_id: Mock<Option<Playlist>, Playlist>,
+            exists: Mock<bool>,
             publish: Mock<()>,
         }
 
         // Tests
 
         async fn run(mocks: Mocks) -> TestResponse {
-            let playlist = Playlist {
+            let usr = User {
                 creation: Utc::now(),
+                creds: Default::default(),
+                email: "user@test".into(),
                 id: Uuid::new_v4(),
-                name: "name".into(),
-                predicate: Predicate::YearIs(1993),
-                src: Source {
-                    creation: Utc::now(),
-                    id: Uuid::new_v4(),
-                    kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
-                    owner: User {
-                        creation: Utc::now(),
-                        creds: Default::default(),
-                        email: "user@test".into(),
-                        id: Uuid::new_v4(),
-                        role: Role::Admin,
-                    },
-                    sync: Synchronization::Pending,
-                },
-                sync: Synchronization::Pending,
-                tgt: Target::Spotify("id".into()),
+                role: Role::Admin,
             };
             let msg = PlaylistMessage {
-                id: playlist.id,
+                id: Uuid::new_v4(),
                 kind: PlaylistMessageKind::Sync,
             };
             let mut auth = MockAuthenticator::new();
             auth.expect_authenticate()
                 .times(mocks.auth.times())
                 .returning({
-                    let usr = playlist.src.owner.clone();
+                    let usr = usr.clone();
                     let mock = mocks.auth.clone();
                     move |_, _| {
                         Box::pin({
@@ -2903,18 +3350,17 @@ mod test {
                 });
             let db = MockDatabasePool {
                 acquire: Mock::once({
-                    let playlist = playlist.clone();
+                    let msg = msg.clone();
                     let mocks = mocks.clone();
                     move || {
                         let mut conn = MockDatabaseConnection::new();
                         conn.0
-                            .expect_playlist_by_id()
-                            .with(eq(playlist.id))
-                            .times(mocks.playlist_by_id.times())
+                            .expect_playlist_exists()
+                            .with(eq(msg.id))
+                            .times(mocks.exists.times())
                             .returning({
-                                let playlist = playlist.clone();
-                                let mock = mocks.playlist_by_id.clone();
-                                move |_| Ok(mock.call_with_args(playlist.clone()))
+                                let mock = mocks.exists.clone();
+                                move |_| Ok(mock.call())
                             });
                         conn
                     }
@@ -2924,7 +3370,7 @@ mod test {
             let mut broker = MockBrokerClient::new();
             broker
                 .expect_publish_playlist_message()
-                .with(eq(msg))
+                .with(eq(msg.clone()))
                 .times(mocks.publish.times())
                 .returning(|_| Ok(()));
             let state = AppState {
@@ -2939,7 +3385,7 @@ mod test {
             };
             let server = init(state);
             server
-                .put(&format!("{PATH_PLAYLIST}/{}{PATH_SYNC}", playlist.id))
+                .put(&format!("{PATH_PLAYLIST}/{}{PATH_SYNC}", msg.id))
                 .await
         }
 
@@ -2976,7 +3422,7 @@ mod test {
         async fn not_found() {
             let mocks = Mocks {
                 auth: Mock::once_with_args(Ok),
-                playlist_by_id: Mock::once_with_args(|_| None),
+                exists: Mock::once(|| false),
                 ..Default::default()
             };
             let resp = run(mocks).await;
@@ -2988,7 +3434,7 @@ mod test {
         async fn no_content() {
             let mocks = Mocks {
                 auth: Mock::once_with_args(Ok),
-                playlist_by_id: Mock::once_with_args(Some),
+                exists: Mock::once(|| true),
                 publish: Mock::once(|| ()),
             };
             let resp = run(mocks).await;
@@ -3005,35 +3451,29 @@ mod test {
         #[derive(Clone, Default)]
         struct Mocks {
             auth: Mock<ApiResult<User>, User>,
-            src_by_id: Mock<Option<Source>, Source>,
+            exists: Mock<bool>,
             publish: Mock<()>,
         }
 
         // Tests
 
         async fn run(mocks: Mocks) -> TestResponse {
-            let src = Source {
+            let usr = User {
                 creation: Utc::now(),
+                creds: Default::default(),
+                email: "user@test".into(),
                 id: Uuid::new_v4(),
-                kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
-                owner: User {
-                    creation: Utc::now(),
-                    creds: Default::default(),
-                    email: "user@test".into(),
-                    id: Uuid::new_v4(),
-                    role: Role::Admin,
-                },
-                sync: Synchronization::Pending,
+                role: Role::Admin,
             };
             let msg = SourceMessage {
-                id: src.id,
+                id: Uuid::new_v4(),
                 kind: SourceMessageKind::Sync,
             };
             let mut auth = MockAuthenticator::new();
             auth.expect_authenticate()
                 .times(mocks.auth.times())
                 .returning({
-                    let usr = src.owner.clone();
+                    let usr = usr.clone();
                     let mock = mocks.auth.clone();
                     move |_, _| {
                         Box::pin({
@@ -3045,18 +3485,17 @@ mod test {
                 });
             let db = MockDatabasePool {
                 acquire: Mock::once({
-                    let src = src.clone();
+                    let msg = msg.clone();
                     let mocks = mocks.clone();
                     move || {
                         let mut conn = MockDatabaseConnection::new();
                         conn.0
-                            .expect_source_by_id()
-                            .with(eq(src.id))
-                            .times(mocks.src_by_id.times())
+                            .expect_source_exists()
+                            .with(eq(msg.id))
+                            .times(mocks.exists.times())
                             .returning({
-                                let src = src.clone();
-                                let mock = mocks.src_by_id.clone();
-                                move |_| Ok(mock.call_with_args(src.clone()))
+                                let mock = mocks.exists.clone();
+                                move |_| Ok(mock.call())
                             });
                         conn
                     }
@@ -3066,7 +3505,7 @@ mod test {
             let mut broker = MockBrokerClient::new();
             broker
                 .expect_publish_source_message()
-                .with(eq(msg))
+                .with(eq(msg.clone()))
                 .times(mocks.publish.times())
                 .returning(|_| Ok(()));
             let state = AppState {
@@ -3081,7 +3520,7 @@ mod test {
             };
             let server = init(state);
             server
-                .put(&format!("{PATH_SRC}/{}{PATH_SYNC}", src.id))
+                .put(&format!("{PATH_SRC}/{}{PATH_SYNC}", msg.id))
                 .await
         }
 
@@ -3118,7 +3557,7 @@ mod test {
         async fn not_found() {
             let mocks = Mocks {
                 auth: Mock::once_with_args(Ok),
-                src_by_id: Mock::once_with_args(|_| None),
+                exists: Mock::once(|| false),
                 ..Default::default()
             };
             let resp = run(mocks).await;
@@ -3130,12 +3569,129 @@ mod test {
         async fn no_content() {
             let mocks = Mocks {
                 auth: Mock::once_with_args(Ok),
-                src_by_id: Mock::once_with_args(Some),
+                exists: Mock::once(|| true),
                 publish: Mock::once(|| ()),
             };
             let resp = run(mocks).await;
             resp.assert_status(StatusCode::NO_CONTENT);
             assert!(resp.as_bytes().is_empty());
+        }
+    }
+
+    mod tracks {
+        use super::*;
+
+        // Mocks
+
+        #[derive(Clone, Default)]
+        struct Mocks {
+            auth: Mock<ApiResult<User>, User>,
+            tracks: Mock<()>,
+        }
+
+        // Tests
+
+        async fn run(mocks: Mocks) -> (TestResponse, Page<Track>) {
+            let usr = User {
+                creation: Utc::now(),
+                creds: Default::default(),
+                email: "user@test".into(),
+                id: Uuid::new_v4(),
+                role: Role::Admin,
+            };
+            let page = Page {
+                first: true,
+                items: vec![],
+                last: true,
+                req: PageRequest::new(10, 0),
+                total: 0,
+            };
+            let req = PageRequestQueryParams::<25>::from(page.req);
+            let mut auth = MockAuthenticator::new();
+            auth.expect_authenticate()
+                .times(mocks.auth.times())
+                .returning({
+                    let usr = usr.clone();
+                    let mock = mocks.auth.clone();
+                    move |_, _| {
+                        Box::pin({
+                            let usr = usr.clone();
+                            let mock = mock.clone();
+                            async move { mock.call_with_args(usr.clone()) }
+                        })
+                    }
+                });
+            let db = MockDatabasePool {
+                acquire: Mock::once({
+                    let page = page.clone();
+                    let mocks = mocks.clone();
+                    move || {
+                        let mut conn = MockDatabaseConnection::new();
+                        conn.0
+                            .expect_tracks()
+                            .with(eq(page.req))
+                            .times(mocks.tracks.times())
+                            .returning({
+                                let page = page.clone();
+                                move |_| Ok(page.clone())
+                            });
+                        conn
+                    }
+                }),
+                ..Default::default()
+            };
+            let state = AppState {
+                db,
+                svc: MockServices {
+                    auth,
+                    ..Default::default()
+                },
+                _dbconn: PhantomData,
+                _dbtx: PhantomData,
+            };
+            let server = init(state);
+            let resp = server.get(PATH_TRACK).add_query_params(req).await;
+            (resp, page)
+        }
+
+        // Tests
+
+        #[tokio::test]
+        async fn unauthorized() {
+            let mocks = Mocks {
+                auth: Mock::once_with_args(|_| Err(ApiError::Unauthorized)),
+                ..Default::default()
+            };
+            let (resp, _) = run(mocks).await;
+            resp.assert_status_unauthorized();
+            assert!(resp.as_bytes().is_empty());
+        }
+
+        #[tokio::test]
+        async fn forbidden() {
+            let mocks = Mocks {
+                auth: Mock::once_with_args(|usr| {
+                    Ok(User {
+                        role: Role::User,
+                        ..usr
+                    })
+                }),
+                ..Default::default()
+            };
+            let (resp, _) = run(mocks).await;
+            resp.assert_status(StatusCode::FORBIDDEN);
+            assert!(resp.as_bytes().is_empty());
+        }
+
+        #[tokio::test]
+        async fn ok() {
+            let mocks = Mocks {
+                auth: Mock::once_with_args(Ok),
+                tracks: Mock::once(|| ()),
+            };
+            let (resp, expected) = run(mocks).await;
+            resp.assert_status_ok();
+            resp.assert_json(&expected);
         }
     }
 

@@ -139,6 +139,11 @@ macro_rules! client_impl {
                 Ok(contains)
             }
 
+            async fn playlist_exists(&mut self, id: Uuid) -> DatabaseResult<bool> {
+                let exists = playlist_exists(id, &mut self.conn).await?;
+                Ok(exists)
+            }
+
             async fn playlist_ids_by_source(
                 &mut self,
                 src_id: Uuid,
@@ -212,6 +217,11 @@ macro_rules! client_impl {
             ) -> DatabaseResult<bool> {
                 let contains = source_contains_track(src_id, track_id, &mut self.conn).await?;
                 Ok(contains)
+            }
+
+            async fn source_exists(&mut self, id: Uuid) -> DatabaseResult<bool> {
+                let exists = source_exists(id, &mut self.conn).await?;
+                Ok(exists)
             }
 
             async fn source_tracks(
@@ -1222,6 +1232,34 @@ async fn playlist_contains_track<
     .await
 }
 
+// playlist_exists
+
+#[inline]
+async fn playlist_exists<
+    'a,
+    A: Acquire<'a, Database = Postgres, Connection = &'a mut PgConnection>,
+>(
+    id: Uuid,
+    conn: A,
+) -> PostgresResult<bool> {
+    let span = debug_span!(
+        "playlist_exists",
+        playlist.id = %id,
+    );
+    async {
+        trace!("acquiring database connection");
+        let conn = conn.acquire().await?;
+        debug!("checking if playlist exists");
+        let record = query_file!("resources/main/db/pg/queries/playlist-exists.sql", id,)
+            .fetch_one(&mut *conn)
+            .await?;
+        let exists = record.exists.unwrap_or(false);
+        Ok(exists)
+    }
+    .instrument(span)
+    .await
+}
+
 // playlist_ids_by_source
 
 #[inline]
@@ -1641,6 +1679,34 @@ async fn source_contains_track<
         .await?;
         let contains = record.contains.unwrap_or(false);
         Ok(contains)
+    }
+    .instrument(span)
+    .await
+}
+
+// source_exists
+
+#[inline]
+async fn source_exists<
+    'a,
+    A: Acquire<'a, Database = Postgres, Connection = &'a mut PgConnection>,
+>(
+    id: Uuid,
+    conn: A,
+) -> PostgresResult<bool> {
+    let span = debug_span!(
+        "source_exists",
+        src.id = %id,
+    );
+    async {
+        trace!("acquiring database connection");
+        let conn = conn.acquire().await?;
+        debug!("checking if source exists");
+        let record = query_file!("resources/main/db/pg/queries/source-exists.sql", id,)
+            .fetch_one(&mut *conn)
+            .await?;
+        let exists = record.exists.unwrap_or(false);
+        Ok(exists)
     }
     .instrument(span)
     .await
@@ -3042,6 +3108,36 @@ mod test {
             }
         }
 
+        mod playlist_exists {
+            use super::*;
+
+            // run
+
+            async fn run(id: Uuid, expected: bool, db: PgPool) {
+                let db = init(db).await;
+                let mut conn = db.acquire().await.expect("failed to acquire connection");
+                let exists = conn
+                    .playlist_exists(id)
+                    .await
+                    .expect("failed to check if playlist exists");
+                assert_eq!(exists, expected);
+            }
+
+            // Tests
+
+            #[sqlx::test]
+            async fn false_when_playlist_doesnt_exist(db: PgPool) {
+                run(Uuid::new_v4(), false, db).await;
+            }
+
+            #[sqlx::test]
+            async fn true_when_playlist_exists(db: PgPool) {
+                let data = Data::new();
+                let id = data.playlists[0].id;
+                run(id, true, db).await;
+            }
+        }
+
         mod playlist_ids_by_source {
             use super::*;
 
@@ -3390,6 +3486,36 @@ mod test {
                 let src_id = data.srcs[0].id;
                 let track_id = data.tracks[0].id;
                 run(src_id, track_id, true, db).await;
+            }
+        }
+
+        mod source_exists {
+            use super::*;
+
+            // run
+
+            async fn run(id: Uuid, expected: bool, db: PgPool) {
+                let db = init(db).await;
+                let mut conn = db.acquire().await.expect("failed to acquire connection");
+                let exists = conn
+                    .source_exists(id)
+                    .await
+                    .expect("failed to check if playlist exists");
+                assert_eq!(exists, expected);
+            }
+
+            // Tests
+
+            #[sqlx::test]
+            async fn false_when_playlist_doesnt_exist(db: PgPool) {
+                run(Uuid::new_v4(), false, db).await;
+            }
+
+            #[sqlx::test]
+            async fn true_when_playlist_exists(db: PgPool) {
+                let data = Data::new();
+                let id = data.srcs[0].id;
+                run(id, true, db).await;
             }
         }
 

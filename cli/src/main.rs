@@ -137,6 +137,8 @@ enum Command {
     Playlist(PlaylistCommand),
     #[command(subcommand, alias = "src")]
     Source(SourceCommand),
+    #[command(subcommand)]
+    Track(TrackCommand),
     #[command(subcommand, alias = "usr")]
     User(UserCommand),
 }
@@ -233,6 +235,8 @@ enum PlaylistCommand {
     List(PlaylistListCommandArgs),
     #[command(about = "Start playlist synchronization", alias = "sync")]
     Synchronize(PlaylistSynchronizeCommandArgs),
+    #[command(about = "List playlist tracks")]
+    Track(PlaylistTrackCommandArgs),
 }
 
 // PlaylistCreateCommandArgs
@@ -292,6 +296,20 @@ struct PlaylistSynchronizeCommandArgs {
     id: Uuid,
 }
 
+// PlaylistTrackCommandArgs
+
+#[derive(clap::Args, Clone, Debug, Eq, PartialEq)]
+struct PlaylistTrackCommandArgs {
+    #[command(flatten)]
+    api_base_url: ApiBaseUrlArg,
+    #[command(flatten)]
+    api_token: TokenArg,
+    #[arg(help = "Playlist ID")]
+    id: Uuid,
+    #[command(flatten)]
+    req: PageRequestArgs<25>,
+}
+
 // RoleArg
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -309,6 +327,8 @@ enum SourceCommand {
     List(SourceListCommandArgs),
     #[command(about = "Start source synchronization", alias = "sync")]
     Synchronize(SourceSynchronizeCommandArgs),
+    #[command(about = "List source tracks")]
+    Track(SourceTrackCommandArgs),
 }
 
 // SourceListCommandArgs
@@ -342,6 +362,20 @@ struct SourceSynchronizeCommandArgs {
     id: Uuid,
 }
 
+// SourceTrackCommandArgs
+
+#[derive(clap::Args, Clone, Debug, Eq, PartialEq)]
+struct SourceTrackCommandArgs {
+    #[command(flatten)]
+    api_base_url: ApiBaseUrlArg,
+    #[command(flatten)]
+    api_token: TokenArg,
+    #[arg(help = "Source ID")]
+    id: Uuid,
+    #[command(flatten)]
+    req: PageRequestArgs<25>,
+}
+
 // TokenArg
 
 #[derive(clap::Args, Clone, Debug, Eq, PartialEq)]
@@ -353,6 +387,27 @@ struct TokenArg {
         name = "TOKEN"
     )]
     value: String,
+}
+
+// TrackCommand
+
+#[derive(Clone, Debug, Eq, PartialEq, Subcommand)]
+#[command(about = "Track commands")]
+enum TrackCommand {
+    #[command(about = "List tracks", alias = "ls")]
+    List(TrackListCommandArgs),
+}
+
+// TrackListCommandArgs
+
+#[derive(clap::Args, Clone, Debug, Eq, PartialEq)]
+struct TrackListCommandArgs {
+    #[command(flatten)]
+    api_base_url: ApiBaseUrlArg,
+    #[command(flatten)]
+    api_token: TokenArg,
+    #[command(flatten)]
+    req: PageRequestArgs<25>,
 }
 
 // UserCommand
@@ -641,6 +696,28 @@ impl<
                 .instrument(span)
                 .await
             }
+            Command::Playlist(PlaylistCommand::Track(args)) => {
+                let span = info_span!(
+                    "playlist_tracks",
+                    api_base_url = %args.api_base_url.value,
+                    params.id = %args.id,
+                    params.limit = args.req.limit,
+                    params.offset = args.req.offset,
+                );
+                async {
+                    let api = self.svc.api(args.api_base_url.value);
+                    let req = PageRequestQueryParams::from(args.req);
+                    let resp = api
+                        .playlist_tracks(args.id, req, &args.api_token.value)
+                        .await?;
+                    trace!("writing response on output");
+                    serde_json::to_writer(&mut out, &resp)?;
+                    writeln!(out)?;
+                    Ok(())
+                }
+                .instrument(span)
+                .await
+            }
             Command::Source(SourceCommand::List(args)) => {
                 let span = info_span!(
                     "sources",
@@ -675,6 +752,47 @@ impl<
                     let api = self.svc.api(args.api_base_url.value);
                     api.start_source_synchronization(args.id, &args.api_token.value)
                         .await?;
+                    Ok(())
+                }
+                .instrument(span)
+                .await
+            }
+            Command::Source(SourceCommand::Track(args)) => {
+                let span = info_span!(
+                    "source_tracks",
+                    api_base_url = %args.api_base_url.value,
+                    params.id = %args.id,
+                    params.limit = args.req.limit,
+                    params.offset = args.req.offset,
+                );
+                async {
+                    let api = self.svc.api(args.api_base_url.value);
+                    let req = PageRequestQueryParams::from(args.req);
+                    let resp = api
+                        .source_tracks(args.id, req, &args.api_token.value)
+                        .await?;
+                    trace!("writing response on output");
+                    serde_json::to_writer(&mut out, &resp)?;
+                    writeln!(out)?;
+                    Ok(())
+                }
+                .instrument(span)
+                .await
+            }
+            Command::Track(TrackCommand::List(args)) => {
+                let span = info_span!(
+                    "tracks",
+                    api_base_url = %args.api_base_url.value,
+                    params.limit = args.req.limit,
+                    params.offset = args.req.offset,
+                );
+                async {
+                    let api = self.svc.api(args.api_base_url.value);
+                    let req = PageRequestQueryParams::from(args.req);
+                    let resp = api.tracks(req, &args.api_token.value).await?;
+                    trace!("writing response on output");
+                    serde_json::to_writer(&mut out, &resp)?;
+                    writeln!(out)?;
                     Ok(())
                 }
                 .instrument(span)
@@ -814,7 +932,7 @@ mod test {
         db::{MockDatabaseConnection, MockDatabasePool, MockDatabaseTransaction},
         model::{
             PageRequest, Platform, Predicate, SourceKind, SpotifySourceKind, Synchronization,
-            Target, User,
+            Target, Track, User,
         },
     };
     use chrono::Utc;
@@ -906,14 +1024,17 @@ mod test {
                 delete_usr: Mock<()>,
                 open_spotify_authorize_url: Mock<()>,
                 next_http_req: Mock<()>,
+                playlist_tracks: Mock<Page<Track>>,
                 playlists: Mock<Page<PlaylistResponse>>,
                 search_auth_usr_plalists: Mock<Page<PlaylistResponse>>,
                 search_plalists: Mock<Page<PlaylistResponse>>,
                 search_usrs: Mock<Page<UserResponse>>,
                 spotify_authorize_url: Mock<()>,
+                src_tracks: Mock<Page<Track>>,
                 srcs: Mock<Page<SourceResponse>>,
                 start_playlist_sync: Mock<()>,
                 start_src_sync: Mock<()>,
+                tracks: Mock<Page<Track>>,
                 update_usr: Mock<()>,
                 usr_by_email: Mock<User, User>,
                 usrs: Mock<Page<UserResponse>>,
@@ -1050,6 +1171,27 @@ mod test {
                             .returning({
                                 let mock = mocks.auth_usr.clone();
                                 move |_| Ok(mock.call())
+                            });
+                        api.expect_playlist_tracks()
+                            .with(eq(data.id), eq(req), eq(data.api_token))
+                            .times(mocks.playlist_tracks.times())
+                            .returning({
+                                let mock = mocks.playlist_tracks.clone();
+                                move |_, _, _| Ok(mock.call())
+                            });
+                        api.expect_source_tracks()
+                            .with(eq(data.id), eq(req), eq(data.api_token))
+                            .times(mocks.src_tracks.times())
+                            .returning({
+                                let mock = mocks.src_tracks.clone();
+                                move |_, _, _| Ok(mock.call())
+                            });
+                        api.expect_tracks()
+                            .with(eq(req), eq(data.api_token))
+                            .times(mocks.tracks.times())
+                            .returning({
+                                let mock = mocks.tracks.clone();
+                                move |_, _| Ok(mock.call())
                             });
                         api
                     }
@@ -1614,6 +1756,69 @@ mod test {
             }
 
             #[tokio::test]
+            async fn playlist_tracks() {
+                let resp = Page {
+                    first: true,
+                    items: vec![],
+                    last: true,
+                    req: PageRequest::new(25, 0),
+                    total: 0,
+                };
+                let api_base_url = "http://localhost:8000";
+                let port = 3000;
+                let req = PageRequestArgs::<25> {
+                    limit: 25,
+                    offset: 0,
+                };
+                let id = Uuid::new_v4();
+                let data = Data {
+                    api_base_url,
+                    api_token: "jwt",
+                    cmd: Command::Playlist(PlaylistCommand::Track(PlaylistTrackCommandArgs {
+                        api_base_url: ApiBaseUrlArg {
+                            value: api_base_url.into(),
+                        },
+                        api_token: TokenArg {
+                            value: "jwt".into(),
+                        },
+                        id,
+                        req,
+                    })),
+                    create_playlist_req: CreatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearIs(1993),
+                        platform: Platform::Spotify,
+                        src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
+                    },
+                    db: DatabaseArgs {
+                        host: "host".into(),
+                        name: "name".into(),
+                        password: "password".into(),
+                        port: 5432,
+                        secret: "secret".into(),
+                        user: "user".into(),
+                    },
+                    email: "user@test",
+                    id,
+                    q: "name",
+                    port,
+                    req,
+                    role: Role::Admin,
+                };
+                let mocks = Mocks {
+                    playlist_tracks: Mock::once({
+                        let resp = resp.clone();
+                        move || resp.clone()
+                    }),
+                    ..Default::default()
+                };
+                let expected = serde_json::to_string(&resp).expect("failed to serialize");
+                let expected = format!("{expected}\n");
+                let out = run(data, mocks).await;
+                assert_eq!(out, expected);
+            }
+
+            #[tokio::test]
             async fn playlists() {
                 let resp = Page {
                     first: true,
@@ -1868,6 +2073,69 @@ mod test {
             }
 
             #[tokio::test]
+            async fn source_tracks() {
+                let resp = Page {
+                    first: true,
+                    items: vec![],
+                    last: true,
+                    req: PageRequest::new(25, 0),
+                    total: 0,
+                };
+                let api_base_url = "http://localhost:8000";
+                let port = 3000;
+                let req = PageRequestArgs::<25> {
+                    limit: 25,
+                    offset: 0,
+                };
+                let id = Uuid::new_v4();
+                let data = Data {
+                    api_base_url,
+                    api_token: "jwt",
+                    cmd: Command::Source(SourceCommand::Track(SourceTrackCommandArgs {
+                        api_base_url: ApiBaseUrlArg {
+                            value: api_base_url.into(),
+                        },
+                        api_token: TokenArg {
+                            value: "jwt".into(),
+                        },
+                        id,
+                        req,
+                    })),
+                    create_playlist_req: CreatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearIs(1993),
+                        platform: Platform::Spotify,
+                        src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
+                    },
+                    db: DatabaseArgs {
+                        host: "host".into(),
+                        name: "name".into(),
+                        password: "password".into(),
+                        port: 5432,
+                        secret: "secret".into(),
+                        user: "user".into(),
+                    },
+                    email: "user@test",
+                    id,
+                    q: "name",
+                    port,
+                    req,
+                    role: Role::Admin,
+                };
+                let mocks = Mocks {
+                    src_tracks: Mock::once({
+                        let resp = resp.clone();
+                        move || resp.clone()
+                    }),
+                    ..Default::default()
+                };
+                let expected = serde_json::to_string(&resp).expect("failed to serialize");
+                let expected = format!("{expected}\n");
+                let out = run(data, mocks).await;
+                assert_eq!(out, expected);
+            }
+
+            #[tokio::test]
             async fn sources() {
                 let resp = Page {
                     first: true,
@@ -2029,6 +2297,67 @@ mod test {
                 };
                 let out = run(data, mocks).await;
                 assert!(out.is_empty());
+            }
+
+            #[tokio::test]
+            async fn tracks() {
+                let resp = Page {
+                    first: true,
+                    items: vec![],
+                    last: true,
+                    req: PageRequest::new(25, 0),
+                    total: 0,
+                };
+                let api_base_url = "http://localhost:8000";
+                let port = 3000;
+                let req = PageRequestArgs::<25> {
+                    limit: 25,
+                    offset: 0,
+                };
+                let data = Data {
+                    api_base_url,
+                    api_token: "jwt",
+                    cmd: Command::Track(TrackCommand::List(TrackListCommandArgs {
+                        api_base_url: ApiBaseUrlArg {
+                            value: api_base_url.into(),
+                        },
+                        api_token: TokenArg {
+                            value: "jwt".into(),
+                        },
+                        req,
+                    })),
+                    create_playlist_req: CreatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearIs(1993),
+                        platform: Platform::Spotify,
+                        src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
+                    },
+                    db: DatabaseArgs {
+                        host: "host".into(),
+                        name: "name".into(),
+                        password: "password".into(),
+                        port: 5432,
+                        secret: "secret".into(),
+                        user: "user".into(),
+                    },
+                    email: "user@test",
+                    id: Uuid::new_v4(),
+                    q: "name",
+                    port,
+                    req,
+                    role: Role::Admin,
+                };
+                let mocks = Mocks {
+                    tracks: Mock::once({
+                        let resp = resp.clone();
+                        move || resp.clone()
+                    }),
+                    ..Default::default()
+                };
+                let expected = serde_json::to_string(&resp).expect("failed to serialize");
+                let expected = format!("{expected}\n");
+                let out = run(data, mocks).await;
+                assert_eq!(out, expected);
             }
 
             #[tokio::test]

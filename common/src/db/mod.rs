@@ -125,6 +125,10 @@ macro_rules! mock_client_impl {
                     .await
             }
 
+            async fn playlist_exists(&mut self, id: Uuid) -> DatabaseResult<bool> {
+                self.$attr.playlist_exists(id).await
+            }
+
             async fn playlist_ids_by_source(
                 &mut self,
                 src_id: Uuid,
@@ -188,6 +192,10 @@ macro_rules! mock_client_impl {
                 track_id: Uuid,
             ) -> DatabaseResult<bool> {
                 self.$attr.source_contains_track(src_id, track_id).await
+            }
+
+            async fn source_exists(&mut self, id: Uuid) -> DatabaseResult<bool> {
+                self.$attr.source_exists(id).await
             }
 
             async fn source_tracks(
@@ -420,6 +428,8 @@ pub trait DatabaseClient: Send + Sync {
         req: PageRequest,
     ) -> DatabaseResult<Page<Uuid>>;
 
+    async fn playlist_exists(&mut self, id: Uuid) -> DatabaseResult<bool>;
+
     async fn playlist_tracks(&mut self, id: Uuid, req: PageRequest) -> DatabaseResult<Page<Track>>;
 
     async fn playlists(&mut self, req: PageRequest) -> DatabaseResult<Page<Playlist>>;
@@ -453,6 +463,8 @@ pub trait DatabaseClient: Send + Sync {
 
     async fn source_contains_track(&mut self, src_id: Uuid, track_id: Uuid)
         -> DatabaseResult<bool>;
+
+    async fn source_exists(&mut self, id: Uuid) -> DatabaseResult<bool>;
 
     async fn source_tracks(&mut self, id: Uuid, req: PageRequest) -> DatabaseResult<Page<Track>>;
 

@@ -4,9 +4,9 @@ use autoplaylist_common::{
         AuthenticateViaSpotifyQueryParams, CreatePlaylistRequest, JwtResponse,
         PageRequestQueryParams, PlaylistResponse, RedirectUriQueryParam, SearchQueryParam,
         SourceResponse, UserResponse, PATH_ADMIN, PATH_AUTH, PATH_ME, PATH_PLAYLIST, PATH_SEARCH,
-        PATH_SPOTIFY, PATH_SRC, PATH_SYNC, PATH_TOKEN, PATH_USR,
+        PATH_SPOTIFY, PATH_SRC, PATH_SYNC, PATH_TOKEN, PATH_TRACK, PATH_USR,
     },
-    model::Page,
+    model::{Page, Track},
 };
 use reqwest::{
     header::{self, HeaderName, ToStrError},
@@ -80,6 +80,13 @@ pub trait ApiClient: Send + Sync {
 
     async fn delete_user(&self, id: Uuid, token: &str) -> ApiResult<()>;
 
+    async fn playlist_tracks(
+        &self,
+        id: Uuid,
+        req: PageRequestQueryParams<25>,
+        token: &str,
+    ) -> ApiResult<Page<Track>>;
+
     async fn playlists(
         &self,
         req: PageRequestQueryParams<25>,
@@ -107,6 +114,13 @@ pub trait ApiClient: Send + Sync {
         token: &str,
     ) -> ApiResult<Page<UserResponse>>;
 
+    async fn source_tracks(
+        &self,
+        id: Uuid,
+        req: PageRequestQueryParams<25>,
+        token: &str,
+    ) -> ApiResult<Page<Track>>;
+
     async fn sources(
         &self,
         req: PageRequestQueryParams<25>,
@@ -118,6 +132,8 @@ pub trait ApiClient: Send + Sync {
     async fn start_playlist_synchronization(&self, id: Uuid, token: &str) -> ApiResult<()>;
 
     async fn start_source_synchronization(&self, id: Uuid, token: &str) -> ApiResult<()>;
+
+    async fn tracks(&self, req: PageRequestQueryParams<25>, token: &str) -> ApiResult<Page<Track>>;
 
     async fn users(
         &self,
@@ -308,6 +324,30 @@ impl ApiClient for DefaultApiClient {
         .await
     }
 
+    async fn playlist_tracks(
+        &self,
+        id: Uuid,
+        req: PageRequestQueryParams<25>,
+        token: &str,
+    ) -> ApiResult<Page<Track>> {
+        let span = debug_span!(
+            "playlist_tracks",
+            params.limit = req.limit,
+            params.offset = req.offset,
+            playlist.id = %id,
+        );
+        async {
+            let req = Client::new()
+                .get(format!("{}{PATH_PLAYLIST}/{id}{PATH_TRACK}", self.base_url))
+                .bearer_auth(token)
+                .query(&req)
+                .build()?;
+            Self::send_and_parse_json_response(req).await
+        }
+        .instrument(span)
+        .await
+    }
+
     async fn playlists(
         &self,
         req: PageRequestQueryParams<25>,
@@ -411,6 +451,30 @@ impl ApiClient for DefaultApiClient {
         .await
     }
 
+    async fn source_tracks(
+        &self,
+        id: Uuid,
+        req: PageRequestQueryParams<25>,
+        token: &str,
+    ) -> ApiResult<Page<Track>> {
+        let span = debug_span!(
+            "source_tracks",
+            params.limit = req.limit,
+            params.offset = req.offset,
+            src.id = %id,
+        );
+        async {
+            let req = Client::new()
+                .get(format!("{}{PATH_SRC}/{id}{PATH_TRACK}", self.base_url))
+                .bearer_auth(token)
+                .query(&req)
+                .build()?;
+            Self::send_and_parse_json_response(req).await
+        }
+        .instrument(span)
+        .await
+    }
+
     async fn sources(
         &self,
         req: PageRequestQueryParams<25>,
@@ -475,6 +539,24 @@ impl ApiClient for DefaultApiClient {
                 .build()?;
             Self::send(req).await?;
             Ok(())
+        }
+        .instrument(span)
+        .await
+    }
+
+    async fn tracks(&self, req: PageRequestQueryParams<25>, token: &str) -> ApiResult<Page<Track>> {
+        let span = debug_span!(
+            "tracks",
+            params.limit = req.limit,
+            params.offset = req.offset,
+        );
+        async {
+            let req = Client::new()
+                .get(format!("{}{PATH_TRACK}", self.base_url))
+                .bearer_auth(token)
+                .query(&req)
+                .build()?;
+            Self::send_and_parse_json_response(req).await
         }
         .instrument(span)
         .await
@@ -728,6 +810,31 @@ mod test {
             }
         }
 
+        mod playlist_tracks {
+            use super::*;
+
+            // Tests
+
+            #[tokio::test]
+            async fn page() {
+                let id = Uuid::from_u128(0xf28c11c3bfeb4583ba1646797f662b9a);
+                let expected = Page {
+                    first: true,
+                    items: vec![],
+                    last: true,
+                    req: PageRequest::new(10, 0),
+                    total: 0,
+                };
+                let req = PageRequestQueryParams::from(expected.req);
+                let client = init();
+                let resp = client
+                    .playlist_tracks(id, req, "jwt")
+                    .await
+                    .expect("failed to get tracks");
+                assert_eq!(resp, expected);
+            }
+        }
+
         mod playlists {
             use super::*;
 
@@ -827,6 +934,31 @@ mod test {
             }
         }
 
+        mod source_tracks {
+            use super::*;
+
+            // Tests
+
+            #[tokio::test]
+            async fn page() {
+                let id = Uuid::from_u128(0xf28c11c3bfeb4583ba1646797f662b9a);
+                let expected = Page {
+                    first: true,
+                    items: vec![],
+                    last: true,
+                    req: PageRequest::new(10, 0),
+                    total: 0,
+                };
+                let req = PageRequestQueryParams::from(expected.req);
+                let client = init();
+                let resp = client
+                    .source_tracks(id, req, "jwt")
+                    .await
+                    .expect("failed to get tracks");
+                assert_eq!(resp, expected);
+            }
+        }
+
         mod sources {
             use super::*;
 
@@ -899,6 +1031,30 @@ mod test {
                     .start_source_synchronization(id, "jwt")
                     .await
                     .expect("failed to start source synchronization");
+            }
+        }
+
+        mod tracks {
+            use super::*;
+
+            // Tests
+
+            #[tokio::test]
+            async fn page() {
+                let expected = Page {
+                    first: true,
+                    items: vec![],
+                    last: true,
+                    req: PageRequest::new(10, 0),
+                    total: 0,
+                };
+                let req = PageRequestQueryParams::from(expected.req);
+                let client = init();
+                let resp = client
+                    .tracks(req, "jwt")
+                    .await
+                    .expect("failed to get tracks");
+                assert_eq!(resp, expected);
             }
         }
 

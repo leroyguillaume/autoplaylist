@@ -22,6 +22,7 @@ pub const PATH_SPOTIFY: &str = "/spotify";
 pub const PATH_SRC: &str = "/source";
 pub const PATH_SYNC: &str = "/sync";
 pub const PATH_TOKEN: &str = "/token";
+pub const PATH_TRACK: &str = "/track";
 pub const PATH_USR: &str = "/user";
 
 // Types
