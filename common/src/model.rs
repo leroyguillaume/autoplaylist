@@ -262,6 +262,61 @@ impl Predicate {
     }
 }
 
+#[cfg(feature = "api")]
+impl crate::api::Validate for Predicate {
+    fn validate(&self) -> crate::api::ValidationResult {
+        let mut resp = crate::api::ValidationErrorResponse::new();
+        match &self {
+            Self::And(left, right) => {
+                if let Err(left_resp) = left.validate() {
+                    resp.merge_with_prefix("0.", left_resp);
+                }
+                if let Err(right_resp) = right.validate() {
+                    resp.merge_with_prefix("1.", right_resp);
+                }
+            }
+            Self::ArtistsAre(artists) => {
+                if artists.is_empty() {
+                    resp.errs.insert(
+                        "artistsAre".into(),
+                        vec![crate::api::ValidationErrorKind::Length(1, usize::MAX)],
+                    );
+                }
+            }
+            Self::ArtistsAreExactly(artists) => {
+                if artists.is_empty() {
+                    resp.errs.insert(
+                        "artistsAreExactly".into(),
+                        vec![crate::api::ValidationErrorKind::Length(1, usize::MAX)],
+                    );
+                }
+            }
+            Self::Or(left, right) => {
+                if let Err(left_resp) = left.validate() {
+                    resp.merge_with_prefix("0.", left_resp);
+                }
+                if let Err(right_resp) = right.validate() {
+                    resp.merge_with_prefix("1.", right_resp);
+                }
+            }
+            Self::YearIsBetween(start, end) => {
+                if start > end {
+                    resp.errs.insert(
+                        "yearIsBetween".into(),
+                        vec![crate::api::ValidationErrorKind::StartAfterEnd],
+                    );
+                }
+            }
+            _ => (),
+        }
+        if resp.errs.is_empty() {
+            Ok(())
+        } else {
+            Err(resp)
+        }
+    }
+}
+
 // Role
 
 #[derive(Clone, Copy, Debug, Deserialize, EnumDisplay, Eq, PartialEq, Serialize)]
@@ -941,6 +996,147 @@ mod test {
             #[test]
             fn year_is_between_false() {
                 run(|track| Predicate::YearIsBetween(1970, track.year + 1), true);
+            }
+        }
+
+        #[cfg(feature = "api")]
+        mod validate {
+            use std::collections::HashMap;
+
+            use crate::api::{Validate, ValidationErrorKind, ValidationErrorResponse};
+
+            use super::*;
+
+            // Tests
+
+            #[test]
+            fn and_unit() {
+                let predicate = Predicate::And(
+                    Box::new(Predicate::YearIs(1990)),
+                    Box::new(Predicate::YearIs(1990)),
+                );
+                predicate.validate().expect("predicate should be valid");
+            }
+
+            #[test]
+            fn and_resp() {
+                let predicate = Predicate::And(
+                    Box::new(Predicate::ArtistsAre(BTreeSet::new())),
+                    Box::new(Predicate::ArtistsAre(BTreeSet::new())),
+                );
+                let resp = predicate
+                    .validate()
+                    .expect_err("predicate should be invalid");
+                let expected = ValidationErrorResponse {
+                    errs: HashMap::from_iter(vec![
+                        (
+                            "0.artistsAre".into(),
+                            vec![ValidationErrorKind::Length(1, usize::MAX)],
+                        ),
+                        (
+                            "1.artistsAre".into(),
+                            vec![ValidationErrorKind::Length(1, usize::MAX)],
+                        ),
+                    ]),
+                };
+                assert_eq!(resp, expected);
+            }
+
+            #[test]
+            fn artists_are_unit() {
+                let predicate = Predicate::ArtistsAre(BTreeSet::from_iter(["pink floyd".into()]));
+                predicate.validate().expect("predicate should be valid");
+            }
+
+            #[test]
+            fn artists_are_resp() {
+                let predicate = Predicate::ArtistsAre(BTreeSet::new());
+                let resp = predicate
+                    .validate()
+                    .expect_err("predicate should be invalid");
+                let expected = ValidationErrorResponse {
+                    errs: HashMap::from_iter(vec![(
+                        "artistsAre".into(),
+                        vec![ValidationErrorKind::Length(1, usize::MAX)],
+                    )]),
+                };
+                assert_eq!(resp, expected);
+            }
+
+            #[test]
+            fn artists_are_exactly_unit() {
+                let predicate =
+                    Predicate::ArtistsAreExactly(BTreeSet::from_iter(["pink floyd".into()]));
+                predicate.validate().expect("predicate should be valid");
+            }
+
+            #[test]
+            fn artists_are_exactly_resp() {
+                let predicate = Predicate::ArtistsAreExactly(BTreeSet::new());
+                let resp = predicate
+                    .validate()
+                    .expect_err("predicate should be invalid");
+                let expected = ValidationErrorResponse {
+                    errs: HashMap::from_iter(vec![(
+                        "artistsAreExactly".into(),
+                        vec![ValidationErrorKind::Length(1, usize::MAX)],
+                    )]),
+                };
+                assert_eq!(resp, expected);
+            }
+
+            #[test]
+            fn or_unit() {
+                let predicate = Predicate::Or(
+                    Box::new(Predicate::YearIs(1990)),
+                    Box::new(Predicate::YearIs(1990)),
+                );
+                predicate.validate().expect("predicate should be valid");
+            }
+
+            #[test]
+            fn or_resp() {
+                let predicate = Predicate::Or(
+                    Box::new(Predicate::ArtistsAre(BTreeSet::new())),
+                    Box::new(Predicate::ArtistsAre(BTreeSet::new())),
+                );
+                let resp = predicate
+                    .validate()
+                    .expect_err("predicate should be invalid");
+                let expected = ValidationErrorResponse {
+                    errs: HashMap::from_iter(vec![
+                        (
+                            "0.artistsAre".into(),
+                            vec![ValidationErrorKind::Length(1, usize::MAX)],
+                        ),
+                        (
+                            "1.artistsAre".into(),
+                            vec![ValidationErrorKind::Length(1, usize::MAX)],
+                        ),
+                    ]),
+                };
+                assert_eq!(resp, expected);
+            }
+
+            #[test]
+            fn year_is_between_unit() {
+                let predicate = Predicate::YearIsBetween(1970, 1979);
+                predicate.validate().expect("predicate should be valid");
+            }
+
+            #[test]
+            fn year_is_between_resp() {
+                let predicate = Predicate::YearIsBetween(1980, 1979);
+                let resp = predicate
+                    .validate()
+                    .expect_err("predicate should be invalid");
+                let expected = ValidationErrorResponse {
+                    errs: HashMap::from_iter(vec![(
+                        "yearIsBetween".into(),
+                        vec![ValidationErrorKind::StartAfterEnd],
+                    )]),
+                };
+                assert_eq!(resp, expected);
             }
         }
     }

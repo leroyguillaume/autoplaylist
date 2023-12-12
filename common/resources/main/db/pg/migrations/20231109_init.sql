@@ -59,7 +59,7 @@ CREATE TABLE source_track (
 CREATE TABLE playlist (
     id UUID NOT NULL PRIMARY KEY DEFAULT uuid_generate_v4(),
     creation TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-    name VARCHAR (255) NOT NULL,
+    name VARCHAR (100) NOT NULL,
     predicate JSONB NOT NULL,
     src UUID NOT NULL REFERENCES source (id) ON DELETE CASCADE,
     tgt JSONB NOT NULL,
