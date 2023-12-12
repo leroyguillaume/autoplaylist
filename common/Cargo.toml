@@ -11,6 +11,7 @@ mockall = {version = "0.11", optional = true}
 rspotify = {version = "0.12", optional = true}
 serde = {version = "1.0", features = ["derive"], optional = true}
 serde_json = {version = "1.0", optional = true}
+serde_trim = {version = "1.0", optional = true}
 sqlx = {version = "0.7", features = ["chrono", "macros", "migrate", "postgres", "runtime-tokio", "uuid"], optional = true}
 thiserror = {version = "1.0", optional = true}
 tokio = {version = "1.33", features = ["full"], optional = true}
@@ -25,7 +26,7 @@ tokio = {version = "1.33", features = ["full"]}
 uuid = {version = "1.4", features = ["v4"]}
 
 [features]
-api = ["model"]
+api = ["model", "dep:serde_trim"]
 broker = ["dep:anyhow", "dep:async-trait", "dep:enum-display", "dep:futures", "dep:lapin", "dep:serde", "dep:serde_json", "dep:tokio", "dep:thiserror", "dep:uuid"]
 db = ["model", "dep:async-trait", "dep:magic-crypt", "dep:serde_json", "dep:sqlx", "dep:thiserror"]
 model = ["dep:chrono", "dep:enum-display", "dep:serde", "dep:uuid"]

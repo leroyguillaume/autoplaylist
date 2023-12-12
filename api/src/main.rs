@@ -11,8 +11,9 @@ use autoplaylist_common::{
     api::{
         AuthenticateViaSpotifyQueryParams, CreatePlaylistRequest, JwtResponse,
         PageRequestQueryParams, PlaylistResponse, RedirectUriQueryParam, SearchQueryParam,
-        SourceResponse, UserResponse, PATH_ADMIN, PATH_AUTH, PATH_HEALTH, PATH_ME, PATH_PLAYLIST,
-        PATH_SEARCH, PATH_SPOTIFY, PATH_SRC, PATH_SYNC, PATH_TOKEN, PATH_USR,
+        SourceResponse, UserResponse, Validate, ValidationErrorResponse, PATH_ADMIN, PATH_AUTH,
+        PATH_HEALTH, PATH_ME, PATH_PLAYLIST, PATH_SEARCH, PATH_SPOTIFY, PATH_SRC, PATH_SYNC,
+        PATH_TOKEN, PATH_USR,
     },
     broker::{
         rabbitmq::{RabbitMqClient, RabbitMqConfig},
@@ -153,6 +154,14 @@ pub enum ApiError {
     ),
     #[error("user is not authenticated")]
     Unauthorized,
+    #[error("invalid request")]
+    Validation(ValidationErrorResponse),
+}
+
+impl From<ValidationErrorResponse> for ApiError {
+    fn from(resp: ValidationErrorResponse) -> Self {
+        Self::Validation(resp)
+    }
 }
 
 // AppState
@@ -624,6 +633,7 @@ fn create_app<
                  State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
                  Json(req): Json<CreatePlaylistRequest>| async move {
                      handling_error(async {
+                        req.validate()?;
                         let mut db_tx = state.db.begin().await?;
                         let mut usr = state
                             .svc
@@ -915,6 +925,10 @@ async fn handling_error<RESP: IntoResponse, FUT: Future<Output = ApiResult<RESP>
                 debug!(details = %err, "user is not authenticated");
                 StatusCode::UNAUTHORIZED.into_response()
             }
+            ApiError::Validation(resp) => {
+                debug!("request is invalid");
+                (StatusCode::BAD_REQUEST, Json(resp)).into_response()
+            }
             _ => {
                 error!(details = %err, "unexpected error");
                 StatusCode::INTERNAL_SERVER_ERROR.into_response()
@@ -932,9 +946,10 @@ mod jwt;
 
 #[cfg(test)]
 mod test {
-    use std::io::stderr;
+    use std::{collections::HashMap, io::stderr};
 
     use autoplaylist_common::{
+        api::ValidationErrorKind,
         broker::MockBrokerClient,
         db::{MockDatabaseConnection, MockDatabasePool, MockDatabaseTransaction},
         model::{
@@ -1461,6 +1476,7 @@ mod test {
 
         struct Data {
             creds: SpotifyCredentials,
+            req: CreatePlaylistRequest,
             usr_creds: Option<SpotifyCredentials>,
         }
 
@@ -1489,22 +1505,16 @@ mod test {
                 id: Uuid::new_v4(),
                 role: Role::User,
             };
-            let req = CreatePlaylistRequest {
-                name: "name".into(),
-                platform: Platform::Spotify,
-                predicate: Predicate::YearIs(1993),
-                src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
-            };
             let spotify_id = "id";
             let expected = Playlist {
                 creation: Utc::now(),
                 id: Uuid::new_v4(),
-                name: req.name.clone(),
-                predicate: req.predicate.clone(),
+                name: data.req.name.clone(),
+                predicate: data.req.predicate.clone(),
                 src: Source {
                     creation: Utc::now(),
                     id: Uuid::new_v4(),
-                    kind: req.src.clone(),
+                    kind: data.req.src.clone(),
                     owner: usr.clone(),
                     sync: Synchronization::Pending,
                 },
@@ -1601,11 +1611,44 @@ mod test {
             };
             let expected = PlaylistResponse::from(expected);
             let server = init(state);
-            let resp = server.post(PATH_PLAYLIST).json(&req).await;
+            let resp = server.post(PATH_PLAYLIST).json(&data.req).await;
             (resp, expected)
         }
 
         // Tests
+
+        #[tokio::test]
+        async fn bad_request() {
+            let creds = SpotifyCredentials {
+                id: "id".into(),
+                token: SpotifyToken {
+                    access: "access".into(),
+                    expiration: Utc::now(),
+                    refresh: "refresh".into(),
+                },
+            };
+            let data = Data {
+                creds: creds.clone(),
+                req: CreatePlaylistRequest {
+                    name: "".into(),
+                    platform: Platform::Spotify,
+                    predicate: Predicate::YearIs(1993),
+                    src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
+                },
+                usr_creds: Some(creds),
+            };
+            let mocks = Mocks::default();
+            let (resp, _) = run(data, mocks).await;
+            resp.assert_status_bad_request();
+            let expected = ValidationErrorResponse {
+                errs: HashMap::from_iter(vec![(
+                    "name".into(),
+                    vec![ValidationErrorKind::Length(1, 100)],
+                )]),
+            };
+            let resp: ValidationErrorResponse = resp.json();
+            assert_eq!(resp, expected);
+        }
 
         #[tokio::test]
         async fn unauthorized() {
@@ -1619,6 +1662,12 @@ mod test {
             };
             let data = Data {
                 creds: creds.clone(),
+                req: CreatePlaylistRequest {
+                    name: "name".into(),
+                    platform: Platform::Spotify,
+                    predicate: Predicate::YearIs(1993),
+                    src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
+                },
                 usr_creds: Some(creds),
             };
             let mocks = Mocks {
@@ -1642,6 +1691,12 @@ mod test {
             };
             let data = Data {
                 creds,
+                req: CreatePlaylistRequest {
+                    name: "name".into(),
+                    platform: Platform::Spotify,
+                    predicate: Predicate::YearIs(1993),
+                    src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
+                },
                 usr_creds: None,
             };
             let mocks = Mocks {
@@ -1665,6 +1720,12 @@ mod test {
             };
             let data = Data {
                 creds: creds.clone(),
+                req: CreatePlaylistRequest {
+                    name: "name".into(),
+                    platform: Platform::Spotify,
+                    predicate: Predicate::YearIs(1993),
+                    src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
+                },
                 usr_creds: Some(creds),
             };
             let mocks = Mocks {
@@ -1693,6 +1754,12 @@ mod test {
             };
             let data = Data {
                 creds: creds.clone(),
+                req: CreatePlaylistRequest {
+                    name: "name".into(),
+                    platform: Platform::Spotify,
+                    predicate: Predicate::YearIs(1993),
+                    src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
+                },
                 usr_creds: Some(creds),
             };
             let mocks = Mocks {

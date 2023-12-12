@@ -1,5 +1,8 @@
+use std::collections::HashMap;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_trim::string_trim;
 use uuid::Uuid;
 
 use crate::model::{
@@ -21,6 +24,16 @@ pub const PATH_SYNC: &str = "/sync";
 pub const PATH_TOKEN: &str = "/token";
 pub const PATH_USR: &str = "/user";
 
+// Types
+
+pub type ValidationResult = Result<(), ValidationErrorResponse>;
+
+// Validate
+
+pub trait Validate {
+    fn validate(&self) -> ValidationResult;
+}
+
 // AuthenticateViaSpotifyQueryParams
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -34,10 +47,30 @@ pub struct AuthenticateViaSpotifyQueryParams {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreatePlaylistRequest {
+    #[serde(deserialize_with = "string_trim")]
     pub name: String,
     pub platform: Platform,
     pub predicate: Predicate,
     pub src: SourceKind,
+}
+
+impl Validate for CreatePlaylistRequest {
+    fn validate(&self) -> ValidationResult {
+        let mut resp = ValidationErrorResponse::new();
+        let len = self.name.len();
+        if !(1..=100).contains(&len) {
+            resp.errs
+                .insert("name".into(), vec![ValidationErrorKind::Length(1, 100)]);
+        }
+        if let Err(predicate_resp) = self.predicate.validate() {
+            resp.merge_with_prefix("predicate.", predicate_resp);
+        }
+        if resp.errs.is_empty() {
+            Ok(())
+        } else {
+            Err(resp)
+        }
+    }
 }
 
 // PageRequest
@@ -154,6 +187,37 @@ impl From<User> for UserResponse {
     }
 }
 
+// ValidationErrorKind
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ValidationErrorKind {
+    Length(usize, usize),
+    StartAfterEnd,
+}
+
+// ValidationErrorResponse
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ValidationErrorResponse {
+    pub errs: HashMap<String, Vec<ValidationErrorKind>>,
+}
+
+impl ValidationErrorResponse {
+    pub fn new() -> Self {
+        Self {
+            errs: HashMap::new(),
+        }
+    }
+
+    pub fn merge_with_prefix(&mut self, prefix: &str, resp: Self) {
+        for (k, v) in resp.errs {
+            self.errs.insert(format!("{prefix}{k}"), v);
+        }
+    }
+}
+
 // Tests
 
 #[cfg(test)]
@@ -161,6 +225,52 @@ mod test {
     use crate::model::{Role, SpotifySourceKind, Target, User};
 
     use super::*;
+
+    // Mods
+
+    mod create_playlist_request {
+        use super::*;
+
+        // Mods
+
+        mod validate {
+            use super::*;
+
+            // Tests
+
+            #[test]
+            fn unit() {
+                let req = CreatePlaylistRequest {
+                    name: "name".into(),
+                    platform: Platform::Spotify,
+                    predicate: Predicate::YearIs(1993),
+                    src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
+                };
+                req.validate().expect("request should be valid");
+            }
+
+            #[test]
+            fn resp() {
+                let req = CreatePlaylistRequest {
+                    name: "".into(),
+                    platform: Platform::Spotify,
+                    predicate: Predicate::ArtistsAre(Default::default()),
+                    src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
+                };
+                let resp = req.validate().expect_err("request should be invalid");
+                let expected = ValidationErrorResponse {
+                    errs: HashMap::from_iter([
+                        ("name".into(), vec![ValidationErrorKind::Length(1, 100)]),
+                        (
+                            "predicate.artistsAre".into(),
+                            vec![ValidationErrorKind::Length(1, usize::MAX)],
+                        ),
+                    ]),
+                };
+                assert_eq!(resp, expected);
+            }
+        }
+    }
 
     mod page_request_query_params {
         use super::*;
@@ -284,6 +394,42 @@ mod test {
                 };
                 let resp = UserResponse::from(usr);
                 assert_eq!(resp, expected);
+            }
+        }
+    }
+
+    mod validation_error_response {
+        use super::*;
+
+        // Mods
+
+        mod merge_with_prefix {
+            use super::*;
+
+            // Tests
+
+            #[test]
+            fn response() {
+                let a = ValidationErrorResponse {
+                    errs: HashMap::from_iter([(
+                        "foo".into(),
+                        vec![ValidationErrorKind::Length(1, 100)],
+                    )]),
+                };
+                let mut b = ValidationErrorResponse {
+                    errs: HashMap::from_iter([(
+                        "b.foo".into(),
+                        vec![ValidationErrorKind::Length(1, 50)],
+                    )]),
+                };
+                let expected = ValidationErrorResponse {
+                    errs: HashMap::from_iter([
+                        ("a.foo".into(), vec![ValidationErrorKind::Length(1, 100)]),
+                        ("b.foo".into(), vec![ValidationErrorKind::Length(1, 50)]),
+                    ]),
+                };
+                b.merge_with_prefix("a.", a);
+                assert_eq!(b, expected);
             }
         }
     }
