@@ -195,7 +195,7 @@ mod test {
                     creation: Utc::now(),
                     id: Uuid::new_v4(),
                     name: "name".into(),
-                    predicate: Predicate::YearEquals(1993),
+                    predicate: Predicate::YearIs(1993),
                     src: Source {
                         creation: Utc::now(),
                         id: Uuid::new_v4(),

@@ -121,7 +121,7 @@ BEGIN
             playlist_1,
             '2023-01-05T00:00:10Z',
             'playlist_1',
-            '{"yearEquals":1993}',
+            '{"yearIs":1993}',
             src_1,
             '{"spotify":"playlist_1"}'
         ),
@@ -129,7 +129,7 @@ BEGIN
             playlist_2,
             '2023-02-05T00:00:10Z',
             'playlist_2',
-            '{"yearEquals":2013}',
+            '{"yearIs":2013}',
             src_1,
             '{"spotify":"playlist_2"}'
         ),
@@ -137,7 +137,7 @@ BEGIN
             playlist_3,
             '2023-03-05T00:00:10Z',
             'playlist_3',
-            '{"yearEquals":1961}',
+            '{"yearIs":1961}',
             src_1,
             '{"spotify":"playlist_3"}'
         ),
@@ -145,7 +145,7 @@ BEGIN
             playlist_4,
             '2023-04-05T00:00:10Z',
             'playlist_4',
-            '{"yearEquals":1999}',
+            '{"yearIs":1999}',
             src_4,
             '{"spotify":"playlist_4"}'
         ),
@@ -153,7 +153,7 @@ BEGIN
             playlist_5,
             '2023-05-05T00:00:10Z',
             'test_5',
-            '{"yearEquals":1999}',
+            '{"yearIs":1999}',
             src_4,
             '{"spotify":"playlist_5"}'
         ),
@@ -161,7 +161,7 @@ BEGIN
             playlist_6,
             '2023-06-05T00:00:10Z',
             'test_6',
-            '{"yearEquals":1999}',
+            '{"yearIs":1999}',
             src_2,
             '{"spotify":"playlist_6"}'
         );

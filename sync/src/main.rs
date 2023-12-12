@@ -2002,7 +2002,7 @@ mod test {
                     creation: Utc::now(),
                     id: Uuid::new_v4(),
                     name: "playlist".into(),
-                    predicate: Predicate::YearEquals(1973),
+                    predicate: Predicate::YearIs(1973),
                     src: Source {
                         creation: Utc::now(),
                         id: Uuid::new_v4(),
@@ -2054,7 +2054,7 @@ mod test {
                     creation: Utc::now(),
                     id: Uuid::new_v4(),
                     name: "playlist".into(),
-                    predicate: Predicate::YearEquals(1973),
+                    predicate: Predicate::YearIs(1973),
                     src: Source {
                         creation: Utc::now(),
                         id: Uuid::new_v4(),
@@ -2124,7 +2124,7 @@ mod test {
                     creation: Utc::now(),
                     id: Uuid::new_v4(),
                     name: "playlist".into(),
-                    predicate: Predicate::YearEquals(1973),
+                    predicate: Predicate::YearIs(1973),
                     src: Source {
                         creation: Utc::now(),
                         id: Uuid::new_v4(),
@@ -2260,7 +2260,7 @@ mod test {
                     creation: Utc::now(),
                     id: Uuid::new_v4(),
                     name: "playlist".into(),
-                    predicate: Predicate::YearEquals(1973),
+                    predicate: Predicate::YearIs(1973),
                     src: Source {
                         creation: Utc::now(),
                         id: Uuid::new_v4(),
@@ -2423,7 +2423,7 @@ mod test {
                     creation: Utc::now(),
                     id: Uuid::new_v4(),
                     name: "playlist".into(),
-                    predicate: Predicate::YearEquals(1973),
+                    predicate: Predicate::YearIs(1973),
                     src: Source {
                         creation: Utc::now(),
                         id: Uuid::new_v4(),
@@ -2606,7 +2606,7 @@ mod test {
                     creation: Utc::now(),
                     id: Uuid::new_v4(),
                     name: "playlist".into(),
-                    predicate: Predicate::YearEquals(1973),
+                    predicate: Predicate::YearIs(1973),
                     src: Source {
                         creation: Utc::now(),
                         id: Uuid::new_v4(),
@@ -2790,7 +2790,7 @@ mod test {
                     creation: Utc::now(),
                     id: Uuid::new_v4(),
                     name: "playlist".into(),
-                    predicate: Predicate::YearEquals(1973),
+                    predicate: Predicate::YearIs(1973),
                     src: Source {
                         creation: Utc::now(),
                         id: Uuid::new_v4(),
@@ -2953,7 +2953,7 @@ mod test {
                     creation: Utc::now(),
                     id: Uuid::new_v4(),
                     name: "playlist".into(),
-                    predicate: Predicate::YearEquals(1973),
+                    predicate: Predicate::YearIs(1973),
                     src: Source {
                         creation: Utc::now(),
                         id: Uuid::new_v4(),
@@ -3138,7 +3138,7 @@ mod test {
                     creation: Utc::now(),
                     id: Uuid::new_v4(),
                     name: "playlist".into(),
-                    predicate: Predicate::YearEquals(1973),
+                    predicate: Predicate::YearIs(1973),
                     src: Source {
                         creation: Utc::now(),
                         id: Uuid::new_v4(),
