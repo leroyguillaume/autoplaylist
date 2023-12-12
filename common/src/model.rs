@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use chrono::{DateTime, Utc};
 use enum_display::EnumDisplay;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use uuid::Uuid;
 
 // Types
@@ -239,13 +239,25 @@ impl SynchronizationStep for PlaylistSynchronizationStep {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Predicate {
-    YearEquals(i32),
+    And(Box<Predicate>, Box<Predicate>),
+    ArtistsAre(#[serde(deserialize_with = "btreeset_string_trim_lowercase")] BTreeSet<String>),
+    ArtistsAreExactly(
+        #[serde(deserialize_with = "btreeset_string_trim_lowercase")] BTreeSet<String>,
+    ),
+    Or(Box<Predicate>, Box<Predicate>),
+    YearIs(i32),
+    YearIsBetween(i32, i32),
 }
 
 impl Predicate {
     pub fn apply(&self, track: &Track) -> bool {
         match self {
-            Self::YearEquals(year) => track.year == *year,
+            Self::And(left, right) => left.apply(track) && right.apply(track),
+            Self::ArtistsAre(artists) => track.artists.is_superset(artists),
+            Self::ArtistsAreExactly(artists) => track.artists == *artists,
+            Self::Or(left, right) => left.apply(track) || right.apply(track),
+            Self::YearIs(year) => track.year == *year,
+            Self::YearIsBetween(start, end) => track.year >= *start && track.year <= *end,
         }
     }
 }
@@ -445,6 +457,19 @@ pub struct User {
     pub role: Role,
 }
 
+// btreeset_string_trim_lowercase
+
+#[inline]
+fn btreeset_string_trim_lowercase<'a, D: Deserializer<'a>>(
+    deserializer: D,
+) -> Result<BTreeSet<String>, D::Error> {
+    let set = BTreeSet::deserialize(deserializer)?
+        .into_iter()
+        .map(|s: String| s.trim().to_lowercase())
+        .collect();
+    Ok(set)
+}
+
 // Tests
 
 #[cfg(test)]
@@ -460,7 +485,7 @@ mod test {
             creation: Utc::now(),
             id: Uuid::new_v4(),
             name: "name".into(),
-            predicate: Predicate::YearEquals(2020),
+            predicate: Predicate::YearIs(2020),
             src: new_source(SourceKind::Spotify(SpotifySourceKind::SavedTracks)),
             sync: Synchronization::Pending,
             tgt,
@@ -486,6 +511,30 @@ mod test {
     }
 
     // Mods
+
+    mod btreeset_string_trim_lowercase {
+        use super::*;
+
+        // Dummy
+
+        #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+        struct Dummy {
+            #[serde(deserialize_with = "btreeset_string_trim_lowercase")]
+            set: BTreeSet<String>,
+        }
+
+        // Tests
+
+        #[test]
+        fn dummy() {
+            let json = "{\"set\":[\"   fOo\",\"   BaR\"]}";
+            let expected = Dummy {
+                set: BTreeSet::from_iter(["foo".into(), "bar".into()]),
+            };
+            let dummy: Dummy = serde_json::from_str(json).expect("failed to deserialize JSON");
+            assert_eq!(dummy, expected);
+        }
+    }
 
     mod page {
         use super::*;
@@ -727,26 +776,171 @@ mod test {
         mod apply {
             use super::*;
 
-            // Tests
+            // run
 
-            #[test]
-            fn year_equals_false() {
+            fn run<F: Fn(&Track) -> Predicate>(predicate: F, expected: bool) {
                 let track = Track {
                     album: Album {
                         compil: false,
                         name: "the dark side of the moon".into(),
                     },
-                    artists: BTreeSet::from_iter(["pink floyd".into()]),
+                    artists: BTreeSet::from_iter([
+                        "pink floyd".into(),
+                        "oasis".into(),
+                        "the beatles".into(),
+                    ]),
                     creation: Utc::now(),
                     id: Uuid::new_v4(),
                     platform: Platform::Spotify,
                     platform_id: "id".into(),
                     title: "time".into(),
-                    year: 1973,
+                    year: 1974,
                 };
-                let predicate = Predicate::YearEquals(1980);
-                let res = predicate.apply(&track);
-                assert!(!res);
+                let predicate = predicate(&track);
+                assert_eq!(predicate.apply(&track), expected);
+            }
+
+            // Tests
+
+            #[test]
+            fn and_true() {
+                run(
+                    |track| {
+                        Predicate::And(
+                            Box::new(Predicate::YearIs(track.year)),
+                            Box::new(Predicate::ArtistsAreExactly(track.artists.clone())),
+                        )
+                    },
+                    true,
+                );
+            }
+
+            #[test]
+            fn and_false_left() {
+                run(
+                    |track| {
+                        Predicate::And(
+                            Box::new(Predicate::YearIs(track.year + 1)),
+                            Box::new(Predicate::ArtistsAreExactly(track.artists.clone())),
+                        )
+                    },
+                    false,
+                );
+            }
+
+            #[test]
+            fn and_false_right() {
+                run(
+                    |track| {
+                        Predicate::And(
+                            Box::new(Predicate::YearIs(track.year)),
+                            Box::new(Predicate::ArtistsAreExactly(BTreeSet::from_iter([
+                                "oasis".into()
+                            ]))),
+                        )
+                    },
+                    false,
+                );
+            }
+
+            #[test]
+            fn artists_are_true() {
+                run(
+                    |_| {
+                        Predicate::ArtistsAre(BTreeSet::from_iter([
+                            "oasis".into(),
+                            "the beatles".into(),
+                        ]))
+                    },
+                    true,
+                );
+            }
+
+            #[test]
+            fn artists_are_false() {
+                run(
+                    |_| Predicate::ArtistsAre(BTreeSet::from_iter(["genesis".into()])),
+                    false,
+                );
+            }
+
+            #[test]
+            fn artists_are_exactly_true() {
+                run(
+                    |track| Predicate::ArtistsAreExactly(track.artists.clone()),
+                    true,
+                );
+            }
+
+            #[test]
+            fn artists_are_exactly_false() {
+                run(
+                    |_| Predicate::ArtistsAreExactly(BTreeSet::from_iter(["pink floyd".into()])),
+                    false,
+                );
+            }
+
+            #[test]
+            fn or_false() {
+                run(
+                    |track| {
+                        Predicate::Or(
+                            Box::new(Predicate::YearIs(track.year + 1)),
+                            Box::new(Predicate::ArtistsAreExactly(BTreeSet::from_iter([
+                                "oasis".into()
+                            ]))),
+                        )
+                    },
+                    false,
+                );
+            }
+
+            #[test]
+            fn or_true_right() {
+                run(
+                    |track| {
+                        Predicate::Or(
+                            Box::new(Predicate::YearIs(track.year + 1)),
+                            Box::new(Predicate::ArtistsAreExactly(track.artists.clone())),
+                        )
+                    },
+                    true,
+                );
+            }
+
+            #[test]
+            fn or_true_left() {
+                run(
+                    |track| {
+                        Predicate::Or(
+                            Box::new(Predicate::YearIs(track.year)),
+                            Box::new(Predicate::ArtistsAreExactly(BTreeSet::from_iter([
+                                "oasis".into()
+                            ]))),
+                        )
+                    },
+                    true,
+                );
+            }
+
+            #[test]
+            fn year_is_true() {
+                run(|track| Predicate::YearIs(track.year), true);
+            }
+
+            #[test]
+            fn year_is_false() {
+                run(|track| Predicate::YearIs(track.year + 1), false);
+            }
+
+            #[test]
+            fn year_is_between_true() {
+                run(|_| Predicate::YearIsBetween(1970, 1979), true);
+            }
+
+            #[test]
+            fn year_is_between_false() {
+                run(|track| Predicate::YearIsBetween(1970, track.year + 1), true);
             }
         }
     }

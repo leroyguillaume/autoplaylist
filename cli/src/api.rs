@@ -643,7 +643,7 @@ mod test {
                 let req = CreatePlaylistRequest {
                     name: "name".into(),
                     platform: Platform::Spotify,
-                    predicate: Predicate::YearEquals(1993),
+                    predicate: Predicate::YearIs(1993),
                     src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                 };
                 let expected = PlaylistResponse {

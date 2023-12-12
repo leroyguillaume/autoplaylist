@@ -6,7 +6,7 @@
           "name": "name",
           "platform": "spotify",
           "predicate": {
-            "yearEquals": 1993
+            "yearIs": 1993
           },
           "src": {
             "spotify": "savedTracks"
@@ -28,7 +28,7 @@
       "id": "f28c11c3-bfeb-4583-ba16-46797f662b9a",
       "name": "name",
       "predicate": {
-        "yearEquals": 1993
+        "yearIs": 1993
       },
       "src": {
         "creation": "2023-01-02T00:00:00Z",

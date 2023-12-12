@@ -1164,7 +1164,7 @@ mod test {
                     })),
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
-                        predicate: Predicate::YearEquals(1993),
+                        predicate: Predicate::YearIs(1993),
                         platform: Platform::Spotify,
                         src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
@@ -1227,7 +1227,7 @@ mod test {
                     }),
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
-                        predicate: Predicate::YearEquals(1993),
+                        predicate: Predicate::YearIs(1993),
                         platform: Platform::Spotify,
                         src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
@@ -1293,7 +1293,7 @@ mod test {
                     })),
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
-                        predicate: Predicate::YearEquals(1993),
+                        predicate: Predicate::YearIs(1993),
                         platform: Platform::Spotify,
                         src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
@@ -1355,7 +1355,7 @@ mod test {
                     })),
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
-                        predicate: Predicate::YearEquals(1993),
+                        predicate: Predicate::YearIs(1993),
                         platform: Platform::Spotify,
                         src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
@@ -1398,7 +1398,7 @@ mod test {
                     creation: Utc::now(),
                     id: Uuid::new_v4(),
                     name: "name".into(),
-                    predicate: Predicate::YearEquals(1993),
+                    predicate: Predicate::YearIs(1993),
                     src: SourceResponse {
                         creation: Utc::now(),
                         id: Uuid::new_v4(),
@@ -1485,7 +1485,7 @@ mod test {
                     }),
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
-                        predicate: Predicate::YearEquals(1993),
+                        predicate: Predicate::YearIs(1993),
                         platform: Platform::Spotify,
                         src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
@@ -1534,7 +1534,7 @@ mod test {
                     })),
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
-                        predicate: Predicate::YearEquals(1993),
+                        predicate: Predicate::YearIs(1993),
                         platform: Platform::Spotify,
                         src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
@@ -1583,7 +1583,7 @@ mod test {
                     })),
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
-                        predicate: Predicate::YearEquals(1993),
+                        predicate: Predicate::YearIs(1993),
                         platform: Platform::Spotify,
                         src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
@@ -1644,7 +1644,7 @@ mod test {
                     })),
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
-                        predicate: Predicate::YearEquals(1993),
+                        predicate: Predicate::YearIs(1993),
                         platform: Platform::Spotify,
                         src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
@@ -1708,7 +1708,7 @@ mod test {
                     })),
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
-                        predicate: Predicate::YearEquals(1993),
+                        predicate: Predicate::YearIs(1993),
                         platform: Platform::Spotify,
                         src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
@@ -1772,7 +1772,7 @@ mod test {
                     })),
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
-                        predicate: Predicate::YearEquals(1993),
+                        predicate: Predicate::YearIs(1993),
                         platform: Platform::Spotify,
                         src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
@@ -1835,7 +1835,7 @@ mod test {
                     })),
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
-                        predicate: Predicate::YearEquals(1993),
+                        predicate: Predicate::YearIs(1993),
                         platform: Platform::Spotify,
                         src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
@@ -1897,7 +1897,7 @@ mod test {
                     })),
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
-                        predicate: Predicate::YearEquals(1993),
+                        predicate: Predicate::YearIs(1993),
                         platform: Platform::Spotify,
                         src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
@@ -1951,7 +1951,7 @@ mod test {
                     id,
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
-                        predicate: Predicate::YearEquals(1993),
+                        predicate: Predicate::YearIs(1993),
                         platform: Platform::Spotify,
                         src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
@@ -2001,7 +2001,7 @@ mod test {
                     )),
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
-                        predicate: Predicate::YearEquals(1993),
+                        predicate: Predicate::YearIs(1993),
                         platform: Platform::Spotify,
                         src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
@@ -2056,7 +2056,7 @@ mod test {
                     id: Uuid::new_v4(),
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
-                        predicate: Predicate::YearEquals(1993),
+                        predicate: Predicate::YearIs(1993),
                         platform: Platform::Spotify,
                         src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
@@ -2109,7 +2109,7 @@ mod test {
                     })),
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
-                        predicate: Predicate::YearEquals(1993),
+                        predicate: Predicate::YearIs(1993),
                         platform: Platform::Spotify,
                         src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
