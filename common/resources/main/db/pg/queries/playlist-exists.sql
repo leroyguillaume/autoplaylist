@@ -1,0 +1,1 @@
+SELECT EXISTS (SELECT 1 FROM playlist WHERE id = $1);
