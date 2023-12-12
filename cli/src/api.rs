@@ -80,6 +80,8 @@ pub trait ApiClient: Send + Sync {
 
     async fn delete_user(&self, id: Uuid, token: &str) -> ApiResult<()>;
 
+    async fn playlist_by_id(&self, id: Uuid, token: &str) -> ApiResult<PlaylistResponse>;
+
     async fn playlist_tracks(
         &self,
         id: Uuid,
@@ -114,6 +116,8 @@ pub trait ApiClient: Send + Sync {
         token: &str,
     ) -> ApiResult<Page<UserResponse>>;
 
+    async fn source_by_id(&self, id: Uuid, token: &str) -> ApiResult<SourceResponse>;
+
     async fn source_tracks(
         &self,
         id: Uuid,
@@ -133,7 +137,11 @@ pub trait ApiClient: Send + Sync {
 
     async fn start_source_synchronization(&self, id: Uuid, token: &str) -> ApiResult<()>;
 
+    async fn track_by_id(&self, id: Uuid, token: &str) -> ApiResult<Track>;
+
     async fn tracks(&self, req: PageRequestQueryParams<25>, token: &str) -> ApiResult<Page<Track>>;
+
+    async fn user_by_id(&self, id: Uuid, token: &str) -> ApiResult<UserResponse>;
 
     async fn users(
         &self,
@@ -324,6 +332,19 @@ impl ApiClient for DefaultApiClient {
         .await
     }
 
+    async fn playlist_by_id(&self, id: Uuid, token: &str) -> ApiResult<PlaylistResponse> {
+        let span = debug_span!("playlist_by_id", playlist.id = %id);
+        async {
+            let req = Client::new()
+                .get(format!("{}{PATH_PLAYLIST}/{id}", self.base_url))
+                .bearer_auth(token)
+                .build()?;
+            Self::send_and_parse_json_response(req).await
+        }
+        .instrument(span)
+        .await
+    }
+
     async fn playlist_tracks(
         &self,
         id: Uuid,
@@ -451,6 +472,19 @@ impl ApiClient for DefaultApiClient {
         .await
     }
 
+    async fn source_by_id(&self, id: Uuid, token: &str) -> ApiResult<SourceResponse> {
+        let span = debug_span!("source_by_id", src.id = %id);
+        async {
+            let req = Client::new()
+                .get(format!("{}{PATH_SRC}/{id}", self.base_url))
+                .bearer_auth(token)
+                .build()?;
+            Self::send_and_parse_json_response(req).await
+        }
+        .instrument(span)
+        .await
+    }
+
     async fn source_tracks(
         &self,
         id: Uuid,
@@ -544,6 +578,19 @@ impl ApiClient for DefaultApiClient {
         .await
     }
 
+    async fn track_by_id(&self, id: Uuid, token: &str) -> ApiResult<Track> {
+        let span = debug_span!("track_by_id", track.id = %id);
+        async {
+            let req = Client::new()
+                .get(format!("{}{PATH_TRACK}/{id}", self.base_url))
+                .bearer_auth(token)
+                .build()?;
+            Self::send_and_parse_json_response(req).await
+        }
+        .instrument(span)
+        .await
+    }
+
     async fn tracks(&self, req: PageRequestQueryParams<25>, token: &str) -> ApiResult<Page<Track>> {
         let span = debug_span!(
             "tracks",
@@ -555,6 +602,19 @@ impl ApiClient for DefaultApiClient {
                 .get(format!("{}{PATH_TRACK}", self.base_url))
                 .bearer_auth(token)
                 .query(&req)
+                .build()?;
+            Self::send_and_parse_json_response(req).await
+        }
+        .instrument(span)
+        .await
+    }
+
+    async fn user_by_id(&self, id: Uuid, token: &str) -> ApiResult<UserResponse> {
+        let span = debug_span!("user_by_id", usr.id = %id);
+        async {
+            let req = Client::new()
+                .get(format!("{}{PATH_USR}/{id}", self.base_url))
+                .bearer_auth(token)
                 .build()?;
             Self::send_and_parse_json_response(req).await
         }
@@ -594,8 +654,8 @@ mod test {
     use autoplaylist_common::{
         api::SourceResponse,
         model::{
-            PageRequest, Platform, Predicate, Role, SourceKind, SpotifySourceKind, Synchronization,
-            Target,
+            Album, PageRequest, Platform, Predicate, Role, SourceKind, SpotifySourceKind,
+            Synchronization, Target,
         },
         test_env_var, TracingConfig,
     };
@@ -810,6 +870,48 @@ mod test {
             }
         }
 
+        mod playlist_by_id {
+            use super::*;
+
+            // Tests
+
+            #[tokio::test]
+            async fn playlist() {
+                let expected = PlaylistResponse {
+                    creation: DateTime::parse_from_rfc3339("2023-01-02T00:00:10Z")
+                        .expect("failed to parse date")
+                        .into(),
+                    id: Uuid::from_u128(0xf28c11c3bfeb4583ba1646797f662b9a),
+                    name: "name".into(),
+                    predicate: Predicate::YearIs(1993),
+                    src: SourceResponse {
+                        creation: DateTime::parse_from_rfc3339("2023-01-02T00:00:00Z")
+                            .expect("failed to parse date")
+                            .into(),
+                        id: Uuid::from_u128(0x2f3f13153bb74b3189c58bdffdb5e8de),
+                        kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
+                        owner: UserResponse {
+                            creation: DateTime::parse_from_rfc3339("2022-01-02T00:00:00Z")
+                                .expect("failed to parse date")
+                                .into(),
+                            email: "user@test".into(),
+                            id: Uuid::from_u128(0x730ea2158aa44463a1379c4c71d50ed6),
+                            role: Role::User,
+                        },
+                        sync: Synchronization::Pending,
+                    },
+                    sync: Synchronization::Pending,
+                    tgt: Target::Spotify("id".into()),
+                };
+                let client = init();
+                let resp = client
+                    .playlist_by_id(expected.id, "jwt")
+                    .await
+                    .expect("failed to get playlist");
+                assert_eq!(resp, expected);
+            }
+        }
+
         mod playlist_tracks {
             use super::*;
 
@@ -934,6 +1036,38 @@ mod test {
             }
         }
 
+        mod source_by_id {
+            use super::*;
+
+            // Tests
+
+            #[tokio::test]
+            async fn source() {
+                let expected = SourceResponse {
+                    creation: DateTime::parse_from_rfc3339("2023-01-02T00:00:00Z")
+                        .expect("failed to parse date")
+                        .into(),
+                    id: Uuid::from_u128(0x2f3f13153bb74b3189c58bdffdb5e8de),
+                    kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
+                    owner: UserResponse {
+                        creation: DateTime::parse_from_rfc3339("2022-01-02T00:00:00Z")
+                            .expect("failed to parse date")
+                            .into(),
+                        email: "user@test".into(),
+                        id: Uuid::from_u128(0x730ea2158aa44463a1379c4c71d50ed6),
+                        role: Role::User,
+                    },
+                    sync: Synchronization::Pending,
+                };
+                let client = init();
+                let resp = client
+                    .source_by_id(expected.id, "jwt")
+                    .await
+                    .expect("failed to get source");
+                assert_eq!(resp, expected);
+            }
+        }
+
         mod source_tracks {
             use super::*;
 
@@ -1034,6 +1168,37 @@ mod test {
             }
         }
 
+        mod track_by_id {
+            use super::*;
+
+            // Tests
+
+            #[tokio::test]
+            async fn track() {
+                let expected = Track {
+                    album: Album {
+                        compil: false,
+                        name: "album".into(),
+                    },
+                    artists: Default::default(),
+                    creation: DateTime::parse_from_rfc3339("2022-01-02T00:00:00Z")
+                        .expect("failed to parse date")
+                        .into(),
+                    id: Uuid::from_u128(0x2f3f13153bb74b3189c58bdffdb5e8de),
+                    platform: Platform::Spotify,
+                    platform_id: "id".into(),
+                    title: "title".into(),
+                    year: 2020,
+                };
+                let client = init();
+                let resp = client
+                    .track_by_id(expected.id, "jwt")
+                    .await
+                    .expect("failed to get track");
+                assert_eq!(resp, expected);
+            }
+        }
+
         mod tracks {
             use super::*;
 
@@ -1054,6 +1219,30 @@ mod test {
                     .tracks(req, "jwt")
                     .await
                     .expect("failed to get tracks");
+                assert_eq!(resp, expected);
+            }
+        }
+
+        mod user_by_id {
+            use super::*;
+
+            // Tests
+
+            #[tokio::test]
+            async fn user() {
+                let expected = UserResponse {
+                    creation: DateTime::parse_from_rfc3339("2022-01-02T00:00:00Z")
+                        .expect("failed to parse date")
+                        .into(),
+                    email: "user@test".into(),
+                    id: Uuid::from_u128(0x730ea2158aa44463a1379c4c71d50ed6),
+                    role: Role::User,
+                };
+                let client = init();
+                let resp = client
+                    .user_by_id(expected.id, "jwt")
+                    .await
+                    .expect("failed to get user");
                 assert_eq!(resp, expected);
             }
         }

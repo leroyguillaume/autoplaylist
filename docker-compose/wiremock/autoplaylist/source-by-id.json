@@ -1,0 +1,28 @@
+{
+  "request": {
+    "headers": {
+      "Authorization": {
+        "equalTo": "Bearer jwt"
+      }
+    },
+    "method": "GET",
+    "urlPath": "/autoplaylist/source/2f3f1315-3bb7-4b31-89c5-8bdffdb5e8de"
+  },
+  "response": {
+    "jsonBody": {
+      "creation": "2023-01-02T00:00:00Z",
+      "id": "2f3f1315-3bb7-4b31-89c5-8bdffdb5e8de",
+      "kind": {
+        "spotify": "savedTracks"
+      },
+      "owner": {
+        "creation": "2022-01-02T00:00:00Z",
+        "email": "user@test",
+        "id": "730ea215-8aa4-4463-a137-9c4c71d50ed6",
+        "role": "user"
+      },
+      "sync": "pending"
+    },
+    "status": 200
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "request": {
+    "headers": {
+      "Authorization": {
+        "equalTo": "Bearer jwt"
+      }
+    },
+    "method": "GET",
+    "urlPath": "/autoplaylist/track/2f3f1315-3bb7-4b31-89c5-8bdffdb5e8de"
+  },
+  "response": {
+    "jsonBody": {
+      "album": {
+        "compil": false,
+        "name": "album"
+      },
+      "artists": [],
+      "creation": "2022-01-02T00:00:00Z",
+      "id": "2f3f1315-3bb7-4b31-89c5-8bdffdb5e8de",
+      "platform": "spotify",
+      "platformId": "id",
+      "title": "title",
+      "year": 2020
+    },
+    "status": 200
+  }
+}
