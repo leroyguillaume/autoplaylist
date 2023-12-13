@@ -1,4 +1,4 @@
-name: Quality
+name: Test (rust)
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
@@ -7,64 +7,15 @@ concurrency:
 on:
   pull_request:
     paths:
-    - .github/workflows/quality.yml
-    - docker-compose/wiremock/mappings/**/*.json
-    - .pre-commit-config.yaml
-    - '**/*.lock'
-    - '**/*.rs'
-    - '**/*.sql'
-    - '**/*.toml'
+    - .github/workflows/test-rust.yml
+    - api/**
+    - cli/**
+    - common/**
+    - sync/**
+    - Cargo.lock
+    - Cargo.toml
 
 jobs:
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-    services:
-      db:
-        image: postgres:15
-        env:
-          POSTGRES_DB: autoplaylist
-          POSTGRES_PASSWORD: autoplaylist
-          POSTGRES_USER: autoplaylist
-        ports:
-        - 5432:5432
-    steps:
-    - name: Checkout
-      uses: actions/checkout@v3
-
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: 3.x
-
-    - name: Set up Rust
-      id: rust
-      uses: actions-rs/toolchain@v1
-      with:
-        components: rustfmt,clippy
-        toolchain: stable
-
-    - name: Restore cache
-      uses: actions/cache@v3
-      with:
-        path: |
-          ~/.cargo/bin/
-          ~/.cargo/git/db/
-          ~/.cargo/registry/index/
-          ~/.cargo/registry/cache/
-          target/
-        key: build-${{ runner.os }}-${{ steps.rust.outputs.rustc_hash }}-${{ hashFiles('**/Cargo.lock') }}
-
-    - name: Install crates
-      continue-on-error: true
-      run: cargo install sqlx-cli
-
-    - name: Run migrations
-      run: sqlx migrate run -D postgres://autoplaylist:autoplaylist@localhost:5432/autoplaylist --source common/resources/main/db/pg/migrations
-
-    - name: Lint
-      uses: pre-commit/action@v3.0.0
-
   test:
     name: Test
     runs-on: ubuntu-latest

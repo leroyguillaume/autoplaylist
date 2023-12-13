@@ -1,0 +1,121 @@
+{
+  "conjunction": {
+    "and": "and"
+  },
+  "error": {
+    "config": "Configuration file is invalid.",
+    "forbidden": "You don't have enough permissions to access this page.",
+    "unauthorized": "You need to be authenticated to access this page.",
+    "unexpected": "An unexpected error occurred."
+  },
+  "info": {
+    "playlist-created": "Playlist created!",
+    "playlist-deleted": "Playlist deleted!",
+    "playlist-synchronization-started": "Playlist synchronization will start!",
+    "playlist-updated": "Playlist updated!",
+    "source-synchronization-started": "Source synchronization will start!",
+    "track-deleted": "Track deleted!",
+    "track-updated": "Track updated!",
+    "user-deleted": "User deleted!",
+    "user-updated": "User updated!"
+  },
+  "label": {
+    "actions": "Actions",
+    "admin": "Admin",
+    "album": "Album",
+    "artists": "Artists",
+    "back": "Back",
+    "cancel": "Cancel",
+    "compil": "Is compilation",
+    "create": "Create",
+    "create-playlist": "Create playlist",
+    "creating": "Creating",
+    "creds": "Credentials",
+    "delete": "Delete",
+    "deleting": "Deleting",
+    "email": "Email",
+    "filter": "Filter",
+    "logout": "Log-out",
+    "name": "Name",
+    "no-results": "No results",
+    "owner": "Owner",
+    "platform": "Platform",
+    "platform-id": "Platform ID",
+    "playlist-name": "Playlist name",
+    "playlists": "Playlists",
+    "role": "Role",
+    "searching": "Searching...",
+    "source": "Source",
+    "spotify-login": "Log-in with Spotify",
+    "spotify-playlist": "Spotify (playlist)",
+    "spotify-saved-tracks": "Spotify (saved tracks)",
+    "status": "Status",
+    "title": "Title",
+    "update": "Update",
+    "updating": "Updating",
+    "users": "Users",
+    "year": "Year"
+  },
+  "paragraph": {
+    "delete-my-account": "Are you sure you want to delete your account? All your playlists will be lost but they're will be not deleted on platform.",
+    "delete-playlist": "Are you sure you want to delete this playlist? (It will be not deleted on the platform)",
+    "delete-track": "Are you sure you want to delete this track?",
+    "delete-user": "Are you sure you want to delete this user?",
+    "description": "AutoPlaylist creates and keeps your playlists up-to-date based on your own rules."
+  },
+  "placeholder": {
+    "album": "Enter an album",
+    "artists": "Enter artists separated by commas",
+    "name": "Enter a name",
+    "playlist-name": "Enter a playlist name",
+    "search": "Search",
+    "title": "Enter a title",
+    "year": "Enter a year"
+  },
+  "predicate": {
+    "and": "and",
+    "artists-are": "Artists are",
+    "artists-are-exactly": "Artists are exactly",
+    "or": "or",
+    "year-is": "Year is",
+    "year-is-between": "Year is between"
+  },
+  "preposition": {
+    "at": "at"
+  },
+  "punctuation": {
+    "colon": ":",
+    "ellipsis": "\u2026"
+  },
+  "role": {
+    "admin": "Admin",
+    "user": "User"
+  },
+  "sync": {
+    "failed": "Failed",
+    "pending": "Waiting for first synchronization",
+    "running": "Synchronization started",
+    "succeeded": "Synchronized"
+  },
+  "title": {
+    "are-you-sure": "Are you sure?",
+    "create-playlist": "Create a new playlist",
+    "credentials": "Credentials",
+    "forbidden": "You don't have enough permissions to access this page.",
+    "my-account": "My account",
+    "my-playlists": "My playlists",
+    "not-found": "Woops! It looks like this page doesn't exist.",
+    "playlists": "Playlists",
+    "sources": "Sources",
+    "tracks": "Tracks",
+    "users": "Users"
+  },
+  "validation": {
+    "album": "Please enter an album.",
+    "artists": "Please enter at least one artist.",
+    "name": "Please enter a name.",
+    "playlist-name": "Please enter a playlist name.",
+    "title": "Please enter a title.",
+    "year": "Please enter a year."
+  }
+}

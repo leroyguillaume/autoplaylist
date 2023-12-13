@@ -1,0 +1,39 @@
+name: Test (node)
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}
+  cancel-in-progress: true
+
+on:
+  pull_request:
+    paths:
+    - .github/workflows/test-node.yml
+    - webapp/**
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+
+    - name: Set up Node.JS
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20.x
+
+    - name: Restore npm cache
+      uses: actions/cache@v3
+      with:
+        path: |
+          webapp/node_modules/
+        key: npm-${{ runner.os }}-${{ hashFiles('**/package-lock.json') }}
+
+    - name: Install node modules
+      working-directory: webapp
+      run: npm ci
+
+    - name: Build
+      working-directory: webapp
+      run: npm run build
