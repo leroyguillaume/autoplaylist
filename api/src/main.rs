@@ -35,13 +35,17 @@ use autoplaylist_common::{
 };
 use axum::{
     extract::{Path, Query, State},
-    http::{header, HeaderMap, StatusCode},
+    http::{
+        header::{self, InvalidHeaderValue},
+        HeaderMap, HeaderValue, Method, StatusCode,
+    },
     response::{IntoResponse, Response},
     routing, Json, Router, Server,
 };
 use mockable::{DefaultClock, DefaultEnv, Env};
 use thiserror::Error;
 use tower_http::{
+    cors::{self, CorsLayer},
     trace::{DefaultMakeSpan, DefaultOnFailure, DefaultOnResponse, TraceLayer},
     LatencyUnit,
 };
@@ -76,7 +80,13 @@ async fn main() -> anyhow::Result<()> {
         _dbconn: PhantomData,
         _dbtx: PhantomData,
     });
-    let app = create_app(state);
+    let origins = env
+        .strings(ENV_VAR_KEY_ALLOWED_ORIGINS, ",")
+        .unwrap_or_default()
+        .into_iter()
+        .map(|origin| origin.parse())
+        .collect::<Result<Vec<HeaderValue>, InvalidHeaderValue>>()?;
+    let app = create_app(state, origins);
     let addr = env
         .socket_addr("SERVER_ADDR")
         .unwrap_or(Ok(SocketAddr::V4(SocketAddrV4::new(
@@ -117,6 +127,10 @@ macro_rules! ensure_user_is_admin_or_owner {
         }
     };
 }
+
+// Consts - Env var keys
+
+const ENV_VAR_KEY_ALLOWED_ORIGINS: &str = "CORS_ALLOWED_ORIGINS";
 
 // Types
 
@@ -242,6 +256,7 @@ fn create_app<
     SVC: Services + 'static,
 >(
     state: Arc<AppState<DBCONN, DBTX, DB, SVC>>,
+    origins: Vec<HeaderValue>,
 ) -> Router {
     let trace_lvl = Level::INFO;
     let lat_unit = LatencyUnit::Millis;
@@ -256,6 +271,10 @@ fn create_app<
         .make_span_with(mk_span)
         .on_response(on_resp)
         .on_failure(on_fail);
+    let cors_layer = CorsLayer::new()
+        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
+        .allow_origin(origins)
+        .allow_headers(cors::Any);
     Router::new()
         // spotify_authorize_url
         .route(
@@ -1222,6 +1241,7 @@ fn create_app<
             ),
         )
         .layer(trace_layer)
+        .layer(cors_layer)
         .with_state(state)
 }
 
@@ -1331,7 +1351,7 @@ mod test {
         >,
     ) -> TestServer {
         TracingConfig::new("autoplaylist-api", stderr).init(&DefaultEnv);
-        let app = create_app(Arc::new(state));
+        let app = create_app(Arc::new(state), vec![]);
         TestServer::new(app.into_make_service()).expect("failed to initialize server")
     }
 
