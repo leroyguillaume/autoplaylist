@@ -12,7 +12,6 @@ use crate::model::{
 
 // Consts - Paths
 
-pub const PATH_ADMIN: &str = "/admin";
 pub const PATH_AUTH: &str = "/auth";
 pub const PATH_HEALTH: &str = "/health";
 pub const PATH_ME: &str = "/me";

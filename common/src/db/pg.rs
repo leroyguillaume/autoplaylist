@@ -282,6 +282,11 @@ macro_rules! client_impl {
                 Ok(user)
             }
 
+            async fn user_exists(&mut self, id: Uuid) -> DatabaseResult<bool> {
+                let exists = user_exists(id, &mut self.conn).await?;
+                Ok(exists)
+            }
+
             async fn user_playlists(
                 &mut self,
                 id: Uuid,
@@ -2082,6 +2087,31 @@ async fn user_by_id<'a, A: Acquire<'a, Database = Postgres, Connection = &'a mut
     .await
 }
 
+// user_exists
+
+#[inline]
+async fn user_exists<'a, A: Acquire<'a, Database = Postgres, Connection = &'a mut PgConnection>>(
+    id: Uuid,
+    conn: A,
+) -> PostgresResult<bool> {
+    let span = debug_span!(
+        "user_exists",
+        usr.id = %id,
+    );
+    async {
+        trace!("acquiring database connection");
+        let conn = conn.acquire().await?;
+        debug!("checking if user exists");
+        let record = query_file!("resources/main/db/pg/queries/user-exists.sql", id,)
+            .fetch_one(&mut *conn)
+            .await?;
+        let exists = record.exists.unwrap_or(false);
+        Ok(exists)
+    }
+    .instrument(span)
+    .await
+}
+
 // user_playlists
 
 #[inline]
@@ -3835,6 +3865,36 @@ mod test {
                 let data = Data::new();
                 let usr = &data.usrs[1];
                 run(usr.id, Some(usr), db).await;
+            }
+        }
+
+        mod user_exists {
+            use super::*;
+
+            // run
+
+            async fn run(id: Uuid, expected: bool, db: PgPool) {
+                let db = init(db).await;
+                let mut conn = db.acquire().await.expect("failed to acquire connection");
+                let exists = conn
+                    .user_exists(id)
+                    .await
+                    .expect("failed to check if user exists");
+                assert_eq!(exists, expected);
+            }
+
+            // Tests
+
+            #[sqlx::test]
+            async fn false_when_user_doesnt_exist(db: PgPool) {
+                run(Uuid::new_v4(), false, db).await;
+            }
+
+            #[sqlx::test]
+            async fn true_when_user_exists(db: PgPool) {
+                let data = Data::new();
+                let id = data.usrs[0].id;
+                run(id, true, db).await;
             }
         }
 

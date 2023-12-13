@@ -29,7 +29,7 @@
         ]
       }
     },
-    "urlPath": "/autoplaylist/playlist/search"
+    "urlPath": "/autoplaylist/me/playlist/search"
   },
   "response": {
     "jsonBody": {
