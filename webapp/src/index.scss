@@ -1,0 +1,42 @@
+@import "../node_modules/bootstrap/scss/functions";
+
+$danger: #d86634;
+$primary: #8fb4ab;
+$secondary: #174441;
+$success: #4b9960;
+
+$body-bg: #f2d8b2;
+$body-color: #000;
+
+$border-color: $body-color;
+
+$link-color: $secondary;
+
+$danger-bg-subtle: tint-color($danger, 50%);
+$success-bg-subtle: tint-color($success, 50%);
+
+$pagination-bg: $body-bg;
+
+
+// $input-border-color: $success;
+
+@import '~bootstrap/scss/bootstrap';
+
+body {
+    height: 100%;
+}
+
+footer {
+    position: absolute;
+    bottom: 5px;
+    width: 100%;
+    text-align: center;
+
+    a {
+        color: #000;
+    }
+}
+
+.inline-icon {
+    margin-right: 5px;
+}

@@ -2,6 +2,7 @@
 
 ## Prerequisites
 - [Docker](https://www.docker.com/)
+- [Node.JS](https://nodejs.org/en/)
 - [pre-commit](https://pre-commit.com/)
 - [Rust](https://rustup.rs/)
 - [sqlfluff](https://sqlfluff.com/)
@@ -57,6 +58,20 @@ This service is responsible for synchronizing the playlists with the music provi
 
 ```bash
 cargo run --bin autoplaylist-sync
+```
+
+## WebPapp
+
+The WebApp is a React application which allows to manage the playlists.
+
+By default, the WebApp is configured to call the API on `http://localhost:8000` but you can change it by modifying `public/config.json`.
+
+### How to run
+
+```bash
+cd webapp
+npm install
+npm start
 ```
 
 ## CLI

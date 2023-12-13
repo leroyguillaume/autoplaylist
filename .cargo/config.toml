@@ -1,4 +1,5 @@
 [env]
+CORS_ALLOWED_ORIGINS = "http://localhost:3000"
 DATABASE_PASSWORD = "autoplaylist"
 DATABASE_SECRET = "changeit"
 DATABASE_URL = "postgres://autoplaylist:autoplaylist@localhost:5432/autoplaylist"

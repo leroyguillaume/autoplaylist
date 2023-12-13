@@ -42,6 +42,16 @@ AutoPlaylist is composed of 2 services:
 - API which exposes the REST API to manage the playlists
 - Synchronizer which synchronizes the playlists
 
+## WebApp
+
+The WebApp is a React application which allows to manage the playlists.
+You can start it by running:
+```bash
+cd webapp
+npm install
+npm start
+```
+
 ## CLI
 
 The CLI can be used to interract with the API or to do administrative tasks.

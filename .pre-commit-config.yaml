@@ -30,3 +30,10 @@ repos:
   hooks:
   - id: sqlfluff-fix
     args: [--ignore, 'lexing,parsing', --show-lint-violations]
+- repo: https://github.com/pre-commit/mirrors-eslint
+  rev: v8.55.0
+  hooks:
+  - id: eslint
+    args: [--fix]
+    types: [file]
+    files: \.[jt]sx?$
