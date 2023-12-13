@@ -246,6 +246,10 @@ macro_rules! mock_client_impl {
                 self.$attr.user_by_id(id).await
             }
 
+            async fn user_exists(&mut self, id: Uuid) -> DatabaseResult<bool> {
+                self.$attr.user_exists(id).await
+            }
+
             async fn user_playlists(
                 &mut self,
                 id: Uuid,
@@ -489,6 +493,8 @@ pub trait DatabaseClient: Send + Sync {
     async fn user_by_email(&mut self, email: &str) -> DatabaseResult<Option<User>>;
 
     async fn user_by_id(&mut self, id: Uuid) -> DatabaseResult<Option<User>>;
+
+    async fn user_exists(&mut self, id: Uuid) -> DatabaseResult<bool>;
 
     async fn user_playlists(
         &mut self,

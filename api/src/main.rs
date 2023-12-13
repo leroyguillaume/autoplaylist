@@ -11,9 +11,9 @@ use autoplaylist_common::{
     api::{
         AuthenticateViaSpotifyQueryParams, CreatePlaylistRequest, JwtResponse,
         PageRequestQueryParams, PlaylistResponse, RedirectUriQueryParam, SearchQueryParam,
-        SourceResponse, UserResponse, Validate, ValidationErrorResponse, PATH_ADMIN, PATH_AUTH,
-        PATH_HEALTH, PATH_ME, PATH_PLAYLIST, PATH_SEARCH, PATH_SPOTIFY, PATH_SRC, PATH_SYNC,
-        PATH_TOKEN, PATH_TRACK, PATH_USR,
+        SourceResponse, UserResponse, Validate, ValidationErrorResponse, PATH_AUTH, PATH_HEALTH,
+        PATH_ME, PATH_PLAYLIST, PATH_SEARCH, PATH_SPOTIFY, PATH_SRC, PATH_SYNC, PATH_TOKEN,
+        PATH_TRACK, PATH_USR,
     },
     broker::{
         rabbitmq::{RabbitMqClient, RabbitMqConfig},
@@ -257,220 +257,6 @@ fn create_app<
         .on_response(on_resp)
         .on_failure(on_fail);
     Router::new()
-        // playlists
-        .route(
-            &format!("{PATH_ADMIN}{PATH_PLAYLIST}"),
-            routing::get(
-                |headers: HeaderMap,
-                 State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
-                 Query(req): Query<PageRequestQueryParams<25>>| async move {
-                    handling_error(async {
-                        let mut db_conn = state.db.acquire().await?;
-                        let usr = state
-                            .svc
-                            .auth()
-                            .authenticate(&headers, &mut db_conn)
-                            .await?;
-                        let span = info_span!(
-                            "playlists",
-                            auth.usr.email = %usr.email,
-                            auth.usr.id = %usr.id,
-                            params.limit = req.limit,
-                            params.offset = req.offset,
-                        );
-                        async {
-                            ensure_user_is_admin!(usr);
-                            let page = db_conn
-                                .playlists(req.into())
-                                .await?
-                                .map(PlaylistResponse::from);
-                            Ok((StatusCode::OK, Json(page)))
-                        }
-                        .instrument(span)
-                        .await
-                    })
-                    .await
-                },
-            ),
-        )
-        // search_playlists_by_name
-        .route(
-            &format!("{PATH_ADMIN}{PATH_PLAYLIST}{PATH_SEARCH}"),
-            routing::get(
-                |headers: HeaderMap,
-                 State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
-                 Query(params): Query<SearchQueryParam>,
-                 Query(req): Query<PageRequestQueryParams<25>>| async move {
-                     handling_error(async {
-                        let mut db_conn = state.db.acquire().await?;
-                        let usr = state
-                            .svc
-                            .auth()
-                            .authenticate(&headers, &mut db_conn)
-                            .await?;
-                        let span = info_span!(
-                            "search_playlists_by_name",
-                            auth.usr.email = %usr.email,
-                            auth.usr.id = %usr.id,
-                            params.limit = req.limit,
-                            params.offset = req.offset,
-                            params.q = params.q,
-                        );
-                        async {
-                            ensure_user_is_admin!(usr);
-                            let page = db_conn
-                                .search_playlists_by_name(&params.q, req.into())
-                                .await?
-                                .map(PlaylistResponse::from);
-                            Ok((StatusCode::OK, Json(page)))
-                        }
-                        .instrument(span)
-                        .await
-                    })
-                    .await
-                },
-            ),
-        )
-        // sources
-        .route(
-            &format!("{PATH_ADMIN}{PATH_SRC}"),
-            routing::get(
-                |headers: HeaderMap,
-                 State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
-                 Query(req): Query<PageRequestQueryParams<25>>| async move {
-                     handling_error(async {
-                        let mut db_conn = state.db.acquire().await?;
-                        let usr = state
-                            .svc
-                            .auth()
-                            .authenticate(&headers, &mut db_conn)
-                            .await?;
-                        let span = info_span!(
-                            "sources",
-                            auth.usr.email = %usr.email,
-                            auth.usr.id = %usr.id,
-                            params.limit = req.limit,
-                            params.offset = req.offset,
-                        );
-                        async {
-                            ensure_user_is_admin!(usr);
-                            let page = db_conn.sources(req.into()).await?.map(SourceResponse::from);
-                            Ok((StatusCode::OK, Json(page)))
-                        }
-                        .instrument(span)
-                        .await
-                    })
-                    .await
-                },
-            ),
-        )
-        // users
-        .route(
-            &format!("{PATH_ADMIN}{PATH_USR}"),
-            routing::get(
-                |headers: HeaderMap,
-                 State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
-                 Query(req): Query<PageRequestQueryParams<25>>| async move {
-                     handling_error(async {
-                        let mut db_conn = state.db.acquire().await?;
-                        let usr = state
-                            .svc
-                            .auth()
-                            .authenticate(&headers, &mut db_conn)
-                            .await?;
-                        let span = info_span!(
-                            "users",
-                            auth.usr.email = %usr.email,
-                            auth.usr.id = %usr.id,
-                            params.limit = req.limit,
-                            params.offset = req.offset,
-                        );
-                        async {
-                            ensure_user_is_admin!(usr);
-                            let page = db_conn.users(req.into()).await?.map(UserResponse::from);
-                            Ok((StatusCode::OK, Json(page)))
-                        }
-                        .instrument(span)
-                        .await
-                    })
-                    .await
-                },
-            ),
-        )
-        // delete_user
-        .route(
-            &format!("{PATH_ADMIN}{PATH_USR}/:id"),
-            routing::delete(
-                |Path(id): Path<Uuid>,
-                 headers: HeaderMap,
-                 State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>| async move {
-                     handling_error(async {
-                        let mut db_conn = state.db.acquire().await?;
-                        let usr = state
-                            .svc
-                            .auth()
-                            .authenticate(&headers, &mut db_conn)
-                            .await?;
-                        let span = info_span!(
-                            "delete_user",
-                            auth.usr.email = %usr.email,
-                            auth.usr.id = %usr.id,
-                            usr.id = %id,
-                        );
-                        async {
-                            ensure_user_is_admin!(usr);
-                            let deleted = db_conn.delete_user(id).await?;
-                            if deleted {
-                                Ok(StatusCode::NO_CONTENT)
-                            } else {
-                                Ok(StatusCode::NOT_FOUND)
-                            }
-                        }
-                        .instrument(span)
-                        .await
-                    })
-                    .await
-                },
-            ),
-        )
-        // search_users_by_email
-        .route(
-            &format!("{PATH_ADMIN}{PATH_USR}{PATH_SEARCH}"),
-            routing::get(
-                |headers: HeaderMap,
-                 State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
-                 Query(params): Query<SearchQueryParam>,
-                 Query(req): Query<PageRequestQueryParams<25>>| async move {
-                     handling_error(async {
-                        let mut db_conn = state.db.acquire().await?;
-                        let usr = state
-                            .svc
-                            .auth()
-                            .authenticate(&headers, &mut db_conn)
-                            .await?;
-                        let span = info_span!(
-                            "search_users_by_email",
-                            auth.usr.email = %usr.email,
-                            auth.usr.id = %usr.id,
-                            params.limit = req.limit,
-                            params.offset = req.offset,
-                            params.q = params.q,
-                        );
-                        async {
-                            ensure_user_is_admin!(usr);
-                            let page = db_conn
-                                .search_users_by_email(&params.q, req.into())
-                                .await?
-                                .map(UserResponse::from);
-                            Ok((StatusCode::OK, Json(page)))
-                        }
-                        .instrument(span)
-                        .await
-                    })
-                    .await
-                },
-            ),
-        )
         // spotify_authorize_url
         .route(
             &format!("{PATH_AUTH}{PATH_SPOTIFY}"),
@@ -608,7 +394,7 @@ fn create_app<
         )
         // auth_user_playlists
         .route(
-            PATH_PLAYLIST,
+            &format!("{PATH_ME}{PATH_PLAYLIST}"),
             routing::get(
                 |headers: HeaderMap,
                  State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
@@ -630,6 +416,112 @@ fn create_app<
                         async {
                             let page = db_conn
                                 .user_playlists(usr.id, req.into())
+                                .await?
+                                .map(PlaylistResponse::from);
+                            Ok((StatusCode::OK, Json(page)))
+                        }
+                        .instrument(span)
+                        .await
+                    })
+                    .await
+                },
+            ),
+        )
+        // search_auth_user_playlists_by_name
+        .route(
+            &format!("{PATH_ME}{PATH_PLAYLIST}{PATH_SEARCH}"),
+            routing::get(
+                |headers: HeaderMap,
+                 State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
+                 Query(params): Query<SearchQueryParam>,
+                 Query(req): Query<PageRequestQueryParams<25>>| async move {
+                     handling_error(async {
+                        let mut db_conn = state.db.acquire().await?;
+                        let usr = state
+                            .svc
+                            .auth()
+                            .authenticate(&headers, &mut db_conn)
+                            .await?;
+                        let span = info_span!(
+                            "search_auth_user_playlists_by_name",
+                            auth.usr.email = %usr.email,
+                            auth.usr.id = %usr.id,
+                            params.limit = req.limit,
+                            params.offset = req.offset,
+                            params.q = params.q,
+                        );
+                        async {
+                            let page = db_conn
+                                .search_user_playlists_by_name(usr.id, &params.q, req.into())
+                                .await?
+                                .map(PlaylistResponse::from);
+                            Ok((StatusCode::OK, Json(page)))
+                        }.instrument(span).await
+                    })
+                    .await
+                },
+            ),
+        )
+        // auth_user_sources
+        .route(
+            &format!("{PATH_ME}{PATH_SRC}"),
+            routing::get(
+                |headers: HeaderMap,
+                 State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
+                 Query(req): Query<PageRequestQueryParams<25>>| async move {
+                     handling_error(async {
+                        let mut db_conn = state.db.acquire().await?;
+                        let usr = state
+                            .svc
+                            .auth()
+                            .authenticate(&headers, &mut db_conn)
+                            .await?;
+                        let span = info_span!(
+                            "auth_user_sources",
+                            auth.usr.email = %usr.email,
+                            auth.usr.id = %usr.id,
+                            params.limit = req.limit,
+                            params.offset = req.offset,
+                        );
+                        async {
+                            let page = db_conn
+                                .user_sources(usr.id, req.into())
+                                .await?
+                                .map(SourceResponse::from);
+                            Ok((StatusCode::OK, Json(page)))
+                        }
+                        .instrument(span)
+                        .await
+                    })
+                    .await
+                },
+            ),
+        )
+        // playlists
+        .route(
+            PATH_PLAYLIST,
+            routing::get(
+                |headers: HeaderMap,
+                 State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
+                 Query(req): Query<PageRequestQueryParams<25>>| async move {
+                    handling_error(async {
+                        let mut db_conn = state.db.acquire().await?;
+                        let usr = state
+                            .svc
+                            .auth()
+                            .authenticate(&headers, &mut db_conn)
+                            .await?;
+                        let span = info_span!(
+                            "playlists",
+                            auth.usr.email = %usr.email,
+                            auth.usr.id = %usr.id,
+                            params.limit = req.limit,
+                            params.offset = req.offset,
+                        );
+                        async {
+                            ensure_user_is_admin!(usr);
+                            let page = db_conn
+                                .playlists(req.into())
                                 .await?
                                 .map(PlaylistResponse::from);
                             Ok((StatusCode::OK, Json(page)))
@@ -798,6 +690,44 @@ fn create_app<
                 },
             ),
         )
+        // search_playlists_by_name
+        .route(
+            &format!("{PATH_PLAYLIST}{PATH_SEARCH}"),
+            routing::get(
+                |headers: HeaderMap,
+                 State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
+                 Query(params): Query<SearchQueryParam>,
+                 Query(req): Query<PageRequestQueryParams<25>>| async move {
+                     handling_error(async {
+                        let mut db_conn = state.db.acquire().await?;
+                        let usr = state
+                            .svc
+                            .auth()
+                            .authenticate(&headers, &mut db_conn)
+                            .await?;
+                        let span = info_span!(
+                            "search_playlists_by_name",
+                            auth.usr.email = %usr.email,
+                            auth.usr.id = %usr.id,
+                            params.limit = req.limit,
+                            params.offset = req.offset,
+                            params.q = params.q,
+                        );
+                        async {
+                            ensure_user_is_admin!(usr);
+                            let page = db_conn
+                                .search_playlists_by_name(&params.q, req.into())
+                                .await?
+                                .map(PlaylistResponse::from);
+                            Ok((StatusCode::OK, Json(page)))
+                        }
+                        .instrument(span)
+                        .await
+                    })
+                    .await
+                },
+            ),
+        )
         // start_playlist_synchronization
         .route(
             &format!("{PATH_PLAYLIST}/:id{PATH_SYNC}"),
@@ -874,13 +804,12 @@ fn create_app<
                 },
             ),
         )
-        // search_auth_user_playlists_by_name
+        // sources
         .route(
-            &format!("{PATH_PLAYLIST}{PATH_SEARCH}"),
+            PATH_SRC,
             routing::get(
                 |headers: HeaderMap,
                  State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
-                 Query(params): Query<SearchQueryParam>,
                  Query(req): Query<PageRequestQueryParams<25>>| async move {
                      handling_error(async {
                         let mut db_conn = state.db.acquire().await?;
@@ -890,20 +819,19 @@ fn create_app<
                             .authenticate(&headers, &mut db_conn)
                             .await?;
                         let span = info_span!(
-                            "search_auth_user_playlists_by_name",
+                            "sources",
                             auth.usr.email = %usr.email,
                             auth.usr.id = %usr.id,
                             params.limit = req.limit,
                             params.offset = req.offset,
-                            params.q = params.q,
                         );
                         async {
-                            let page = db_conn
-                                .search_user_playlists_by_name(usr.id, &params.q, req.into())
-                                .await?
-                                .map(PlaylistResponse::from);
+                            ensure_user_is_admin!(usr);
+                            let page = db_conn.sources(req.into()).await?.map(SourceResponse::from);
                             Ok((StatusCode::OK, Json(page)))
-                        }.instrument(span).await
+                        }
+                        .instrument(span)
+                        .await
                     })
                     .await
                 },
@@ -937,41 +865,6 @@ fn create_app<
                             ensure_user_is_admin_or_owner!(usr, src.owner);
                             let page = db_conn.source_tracks(id, req.into()).await?;
                             Ok((StatusCode::OK, Json(page)).into_response())
-                        }
-                        .instrument(span)
-                        .await
-                    })
-                    .await
-                },
-            ),
-        )
-        // auth_user_sources
-        .route(
-            PATH_SRC,
-            routing::get(
-                |headers: HeaderMap,
-                 State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
-                 Query(req): Query<PageRequestQueryParams<25>>| async move {
-                     handling_error(async {
-                        let mut db_conn = state.db.acquire().await?;
-                        let usr = state
-                            .svc
-                            .auth()
-                            .authenticate(&headers, &mut db_conn)
-                            .await?;
-                        let span = info_span!(
-                            "auth_user_sources",
-                            auth.usr.email = %usr.email,
-                            auth.usr.id = %usr.id,
-                            params.limit = req.limit,
-                            params.offset = req.offset,
-                        );
-                        async {
-                            let page = db_conn
-                                .user_sources(usr.id, req.into())
-                                .await?
-                                .map(SourceResponse::from);
-                            Ok((StatusCode::OK, Json(page)))
                         }
                         .instrument(span)
                         .await
@@ -1115,6 +1008,39 @@ fn create_app<
                 },
             ),
         )
+        // users
+        .route(
+            PATH_USR,
+            routing::get(
+                |headers: HeaderMap,
+                 State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
+                 Query(req): Query<PageRequestQueryParams<25>>| async move {
+                     handling_error(async {
+                        let mut db_conn = state.db.acquire().await?;
+                        let usr = state
+                            .svc
+                            .auth()
+                            .authenticate(&headers, &mut db_conn)
+                            .await?;
+                        let span = info_span!(
+                            "users",
+                            auth.usr.email = %usr.email,
+                            auth.usr.id = %usr.id,
+                            params.limit = req.limit,
+                            params.offset = req.offset,
+                        );
+                        async {
+                            ensure_user_is_admin!(usr);
+                            let page = db_conn.users(req.into()).await?.map(UserResponse::from);
+                            Ok((StatusCode::OK, Json(page)))
+                        }
+                        .instrument(span)
+                        .await
+                    })
+                    .await
+                },
+            ),
+        )
         // user_by_id
         .route(
             &format!("{PATH_USR}/:id"),
@@ -1139,6 +1065,154 @@ fn create_app<
                             ensure_user_is_admin_or_itself!(usr, id);
                             let usr = db_conn.user_by_id(id).await?.ok_or(ApiError::NotFound(id))?;
                             Ok((StatusCode::OK, Json(UserResponse::from(usr))))
+                        }
+                        .instrument(span)
+                        .await
+                    })
+                    .await
+                },
+            ),
+        )
+        // delete_user
+        .route(
+            &format!("{PATH_USR}/:id"),
+            routing::delete(
+                |Path(id): Path<Uuid>,
+                 headers: HeaderMap,
+                 State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>| async move {
+                     handling_error(async {
+                        let mut db_conn = state.db.acquire().await?;
+                        let usr = state
+                            .svc
+                            .auth()
+                            .authenticate(&headers, &mut db_conn)
+                            .await?;
+                        let span = info_span!(
+                            "delete_user",
+                            auth.usr.email = %usr.email,
+                            auth.usr.id = %usr.id,
+                            usr.id = %id,
+                        );
+                        async {
+                            ensure_user_is_admin_or_itself!(usr, id);
+                            let deleted = db_conn.delete_user(id).await?;
+                            if deleted {
+                                Ok(StatusCode::NO_CONTENT)
+                            } else {
+                                Ok(StatusCode::NOT_FOUND)
+                            }
+                        }
+                        .instrument(span)
+                        .await
+                    })
+                    .await
+                },
+            ),
+        )
+        // user_playlists
+        .route(
+            &format!("{PATH_USR}/:id{PATH_PLAYLIST}"),
+            routing::get(
+                |Path(id): Path<Uuid>,
+                 headers: HeaderMap,
+                 State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
+                 Query(req): Query<PageRequestQueryParams<25>>| async move {
+                     handling_error(async {
+                        let mut db_conn = state.db.acquire().await?;
+                        let usr = state
+                            .svc
+                            .auth()
+                            .authenticate(&headers, &mut db_conn)
+                            .await?;
+                        let span = info_span!(
+                            "user_playlists",
+                            auth.usr.email = %usr.email,
+                            auth.usr.id = %usr.id,
+                            usr.id = %id,
+                        );
+                        async {
+                            ensure_user_is_admin_or_itself!(usr, id);
+                            if db_conn.user_exists(id).await? {
+                                let page = db_conn.user_playlists(id, req.into()).await?.map(PlaylistResponse::from);
+                                Ok((StatusCode::OK, Json(page)).into_response())
+                            } else {
+                                Ok(StatusCode::NOT_FOUND.into_response())
+                            }
+                        }
+                        .instrument(span)
+                        .await
+                    })
+                    .await
+                },
+            ),
+        )
+        // search_users_by_email
+        .route(
+            &format!("{PATH_USR}{PATH_SEARCH}"),
+            routing::get(
+                |headers: HeaderMap,
+                 State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
+                 Query(params): Query<SearchQueryParam>,
+                 Query(req): Query<PageRequestQueryParams<25>>| async move {
+                     handling_error(async {
+                        let mut db_conn = state.db.acquire().await?;
+                        let usr = state
+                            .svc
+                            .auth()
+                            .authenticate(&headers, &mut db_conn)
+                            .await?;
+                        let span = info_span!(
+                            "search_users_by_email",
+                            auth.usr.email = %usr.email,
+                            auth.usr.id = %usr.id,
+                            params.limit = req.limit,
+                            params.offset = req.offset,
+                            params.q = params.q,
+                        );
+                        async {
+                            ensure_user_is_admin!(usr);
+                            let page = db_conn
+                                .search_users_by_email(&params.q, req.into())
+                                .await?
+                                .map(UserResponse::from);
+                            Ok((StatusCode::OK, Json(page)))
+                        }
+                        .instrument(span)
+                        .await
+                    })
+                    .await
+                },
+            ),
+        )
+        // user_sources
+        .route(
+            &format!("{PATH_USR}/:id{PATH_SRC}"),
+            routing::get(
+                |Path(id): Path<Uuid>,
+                 headers: HeaderMap,
+                 State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
+                 Query(req): Query<PageRequestQueryParams<25>>| async move {
+                     handling_error(async {
+                        let mut db_conn = state.db.acquire().await?;
+                        let usr = state
+                            .svc
+                            .auth()
+                            .authenticate(&headers, &mut db_conn)
+                            .await?;
+                        let span = info_span!(
+                            "user_sources",
+                            auth.usr.email = %usr.email,
+                            auth.usr.id = %usr.id,
+                            usr.id = %id,
+                        );
+                        async {
+                            ensure_user_is_admin_or_itself!(usr, id);
+                            if db_conn.user_exists(id).await? {
+                                let page = db_conn.user_sources(id, req.into()).await?.map(SourceResponse::from);
+                                Ok((StatusCode::OK, Json(page)).into_response())
+                            } else {
+                                Ok(StatusCode::NOT_FOUND.into_response())
+                            }
                         }
                         .instrument(span)
                         .await
@@ -1588,7 +1662,10 @@ mod test {
                 _dbtx: PhantomData,
             };
             let server = init(state);
-            let resp = server.get(PATH_PLAYLIST).add_query_params(req).await;
+            let resp = server
+                .get(&format!("{PATH_ME}{PATH_PLAYLIST}"))
+                .add_query_params(req)
+                .await;
             (resp, expected)
         }
 
@@ -1691,7 +1768,10 @@ mod test {
                 _dbtx: PhantomData,
             };
             let server = init(state);
-            let resp = server.get(PATH_SRC).add_query_params(req).await;
+            let resp = server
+                .get(&format!("{PATH_ME}{PATH_SRC}"))
+                .add_query_params(req)
+                .await;
             (resp, expected)
         }
 
@@ -2342,13 +2422,12 @@ mod test {
         // Tests
 
         async fn run(mocks: Mocks) -> TestResponse {
-            let id = Uuid::new_v4();
             let usr = User {
                 creation: Utc::now(),
                 creds: Default::default(),
                 email: "user@test".into(),
                 id: Uuid::new_v4(),
-                role: Role::Admin,
+                role: Role::User,
             };
             let mut auth = MockAuthenticator::new();
             auth.expect_authenticate()
@@ -2366,12 +2445,13 @@ mod test {
                 });
             let db = MockDatabasePool {
                 acquire: Mock::once({
+                    let usr = usr.clone();
                     let mocks = mocks.clone();
                     move || {
                         let mut conn = MockDatabaseConnection::new();
                         conn.0
                             .expect_delete_user()
-                            .with(eq(id))
+                            .with(eq(usr.id))
                             .times(mocks.del.times())
                             .returning({
                                 let mock = mocks.del.clone();
@@ -2392,7 +2472,7 @@ mod test {
                 _dbtx: PhantomData,
             };
             let server = init(state);
-            server.delete(&format!("{PATH_ADMIN}{PATH_USR}/{id}")).await
+            server.delete(&format!("{PATH_USR}/{}", usr.id)).await
         }
 
         // Tests
@@ -2413,7 +2493,7 @@ mod test {
             let mocks = Mocks {
                 auth: Mock::once_with_args(|usr| {
                     Ok(User {
-                        role: Role::User,
+                        id: Uuid::new_v4(),
                         ..usr
                     })
                 }),
@@ -2436,9 +2516,25 @@ mod test {
         }
 
         #[tokio::test]
-        async fn no_content() {
+        async fn no_content_when_user_is_itself() {
             let mocks = Mocks {
                 auth: Mock::once_with_args(Ok),
+                del: Mock::once(|| true),
+            };
+            let resp = run(mocks).await;
+            resp.assert_status(StatusCode::NO_CONTENT);
+            assert!(resp.as_bytes().is_empty());
+        }
+
+        #[tokio::test]
+        async fn no_content_when_user_is_admin() {
+            let mocks = Mocks {
+                auth: Mock::once_with_args(|usr| {
+                    Ok(User {
+                        role: Role::Admin,
+                        ..usr
+                    })
+                }),
                 del: Mock::once(|| true),
             };
             let resp = run(mocks).await;
@@ -2867,10 +2963,7 @@ mod test {
                 _dbtx: PhantomData,
             };
             let server = init(state);
-            let resp = server
-                .get(&format!("{PATH_ADMIN}{PATH_PLAYLIST}"))
-                .add_query_params(req)
-                .await;
+            let resp = server.get(PATH_PLAYLIST).add_query_params(req).await;
             (resp, expected)
         }
 
@@ -2915,7 +3008,7 @@ mod test {
         }
     }
 
-    mod search_auth_user_playlists_by_name {
+    mod search_authenticated_user_playlists_by_name {
         use super::*;
 
         // Mocks
@@ -2992,7 +3085,7 @@ mod test {
             };
             let server = init(state);
             let resp = server
-                .get(&format!("{PATH_PLAYLIST}{PATH_SEARCH}"))
+                .get(&format!("{PATH_ME}{PATH_PLAYLIST}{PATH_SEARCH}"))
                 .add_query_params(&params)
                 .add_query_params(req)
                 .await;
@@ -3100,7 +3193,7 @@ mod test {
             };
             let server = init(state);
             let resp = server
-                .get(&format!("{PATH_ADMIN}{PATH_PLAYLIST}{PATH_SEARCH}"))
+                .get(&format!("{PATH_PLAYLIST}{PATH_SEARCH}"))
                 .add_query_params(params)
                 .add_query_params(req)
                 .await;
@@ -3224,7 +3317,7 @@ mod test {
             };
             let server = init(state);
             let resp = server
-                .get(&format!("{PATH_ADMIN}{PATH_USR}{PATH_SEARCH}"))
+                .get(&format!("{PATH_USR}{PATH_SEARCH}"))
                 .add_query_params(params)
                 .add_query_params(req)
                 .await;
@@ -3660,10 +3753,7 @@ mod test {
                 _dbtx: PhantomData,
             };
             let server = init(state);
-            let resp = server
-                .get(&format!("{PATH_ADMIN}{PATH_SRC}"))
-                .add_query_params(req)
-                .await;
+            let resp = server.get(PATH_SRC).add_query_params(req).await;
             (resp, expected)
         }
 
@@ -4376,6 +4466,328 @@ mod test {
         }
     }
 
+    mod user_playlists {
+        use super::*;
+
+        // Mocks
+
+        #[derive(Clone, Default)]
+        struct Mocks {
+            auth: Mock<ApiResult<User>, User>,
+            exists: Mock<bool>,
+            playlists: Mock<()>,
+        }
+
+        // Tests
+
+        async fn run(mocks: Mocks) -> (TestResponse, Page<PlaylistResponse>) {
+            let usr = User {
+                creation: Utc::now(),
+                creds: Default::default(),
+                email: "user@test".into(),
+                id: Uuid::new_v4(),
+                role: Role::User,
+            };
+            let page = Page {
+                first: true,
+                items: vec![],
+                last: true,
+                req: PageRequest::new(10, 0),
+                total: 0,
+            };
+            let req = PageRequestQueryParams::<25>::from(page.req);
+            let expected = page.clone().map(PlaylistResponse::from);
+            let mut auth = MockAuthenticator::new();
+            auth.expect_authenticate()
+                .times(mocks.auth.times())
+                .returning({
+                    let usr = usr.clone();
+                    let mock = mocks.auth.clone();
+                    move |_, _| {
+                        Box::pin({
+                            let usr = usr.clone();
+                            let mock = mock.clone();
+                            async move { mock.call_with_args(usr.clone()) }
+                        })
+                    }
+                });
+            let db = MockDatabasePool {
+                acquire: Mock::once({
+                    let usr = usr.clone();
+                    let page = page.clone();
+                    let mocks = mocks.clone();
+                    move || {
+                        let mut conn = MockDatabaseConnection::new();
+                        conn.0
+                            .expect_user_exists()
+                            .with(eq(usr.id))
+                            .times(mocks.exists.times())
+                            .returning({
+                                let mock = mocks.exists.clone();
+                                move |_| Ok(mock.call())
+                            });
+                        conn.0
+                            .expect_user_playlists()
+                            .with(eq(usr.id), eq(page.req))
+                            .times(mocks.playlists.times())
+                            .returning({
+                                let page = page.clone();
+                                move |_, _| Ok(page.clone())
+                            });
+                        conn
+                    }
+                }),
+                ..Default::default()
+            };
+            let state = AppState {
+                db,
+                svc: MockServices {
+                    auth,
+                    ..Default::default()
+                },
+                _dbconn: PhantomData,
+                _dbtx: PhantomData,
+            };
+            let server = init(state);
+            let resp = server
+                .get(&format!("{PATH_USR}/{}{PATH_PLAYLIST}", usr.id))
+                .add_query_params(req)
+                .await;
+            (resp, expected)
+        }
+
+        // Tests
+
+        #[tokio::test]
+        async fn unauthorized() {
+            let mocks = Mocks {
+                auth: Mock::once_with_args(|_| Err(ApiError::Unauthorized)),
+                ..Default::default()
+            };
+            let (resp, _) = run(mocks).await;
+            resp.assert_status_unauthorized();
+            assert!(resp.as_bytes().is_empty());
+        }
+
+        #[tokio::test]
+        async fn forbidden() {
+            let mocks = Mocks {
+                auth: Mock::once_with_args(|usr| {
+                    Ok(User {
+                        id: Uuid::new_v4(),
+                        ..usr
+                    })
+                }),
+                ..Default::default()
+            };
+            let (resp, _) = run(mocks).await;
+            resp.assert_status(StatusCode::FORBIDDEN);
+            assert!(resp.as_bytes().is_empty());
+        }
+
+        #[tokio::test]
+        async fn not_found() {
+            let mocks = Mocks {
+                auth: Mock::once_with_args(Ok),
+                exists: Mock::once(|| false),
+                ..Default::default()
+            };
+            let (resp, _) = run(mocks).await;
+            resp.assert_status(StatusCode::NOT_FOUND);
+            assert!(resp.as_bytes().is_empty());
+        }
+
+        #[tokio::test]
+        async fn ok_when_user_is_itself() {
+            let mocks = Mocks {
+                auth: Mock::once_with_args(Ok),
+                exists: Mock::once(|| true),
+                playlists: Mock::once(|| ()),
+            };
+            let (resp, expected) = run(mocks).await;
+            resp.assert_status_ok();
+            resp.assert_json(&expected);
+        }
+
+        #[tokio::test]
+        async fn ok_when_user_is_admin() {
+            let mocks = Mocks {
+                auth: Mock::once_with_args(|usr| {
+                    Ok(User {
+                        role: Role::Admin,
+                        ..usr
+                    })
+                }),
+                exists: Mock::once(|| true),
+                playlists: Mock::once(|| ()),
+            };
+            let (resp, expected) = run(mocks).await;
+            resp.assert_status_ok();
+            resp.assert_json(&expected);
+        }
+    }
+
+    mod user_sources {
+        use super::*;
+
+        // Mocks
+
+        #[derive(Clone, Default)]
+        struct Mocks {
+            auth: Mock<ApiResult<User>, User>,
+            exists: Mock<bool>,
+            srcs: Mock<()>,
+        }
+
+        // Tests
+
+        async fn run(mocks: Mocks) -> (TestResponse, Page<SourceResponse>) {
+            let usr = User {
+                creation: Utc::now(),
+                creds: Default::default(),
+                email: "user@test".into(),
+                id: Uuid::new_v4(),
+                role: Role::User,
+            };
+            let page = Page {
+                first: true,
+                items: vec![],
+                last: true,
+                req: PageRequest::new(10, 0),
+                total: 0,
+            };
+            let req = PageRequestQueryParams::<25>::from(page.req);
+            let expected = page.clone().map(SourceResponse::from);
+            let mut auth = MockAuthenticator::new();
+            auth.expect_authenticate()
+                .times(mocks.auth.times())
+                .returning({
+                    let usr = usr.clone();
+                    let mock = mocks.auth.clone();
+                    move |_, _| {
+                        Box::pin({
+                            let usr = usr.clone();
+                            let mock = mock.clone();
+                            async move { mock.call_with_args(usr.clone()) }
+                        })
+                    }
+                });
+            let db = MockDatabasePool {
+                acquire: Mock::once({
+                    let usr = usr.clone();
+                    let page = page.clone();
+                    let mocks = mocks.clone();
+                    move || {
+                        let mut conn = MockDatabaseConnection::new();
+                        conn.0
+                            .expect_user_exists()
+                            .with(eq(usr.id))
+                            .times(mocks.exists.times())
+                            .returning({
+                                let mock = mocks.exists.clone();
+                                move |_| Ok(mock.call())
+                            });
+                        conn.0
+                            .expect_user_sources()
+                            .with(eq(usr.id), eq(page.req))
+                            .times(mocks.srcs.times())
+                            .returning({
+                                let page = page.clone();
+                                move |_, _| Ok(page.clone())
+                            });
+                        conn
+                    }
+                }),
+                ..Default::default()
+            };
+            let state = AppState {
+                db,
+                svc: MockServices {
+                    auth,
+                    ..Default::default()
+                },
+                _dbconn: PhantomData,
+                _dbtx: PhantomData,
+            };
+            let server = init(state);
+            let resp = server
+                .get(&format!("{PATH_USR}/{}{PATH_SRC}", usr.id))
+                .add_query_params(req)
+                .await;
+            (resp, expected)
+        }
+
+        // Tests
+
+        #[tokio::test]
+        async fn unauthorized() {
+            let mocks = Mocks {
+                auth: Mock::once_with_args(|_| Err(ApiError::Unauthorized)),
+                ..Default::default()
+            };
+            let (resp, _) = run(mocks).await;
+            resp.assert_status_unauthorized();
+            assert!(resp.as_bytes().is_empty());
+        }
+
+        #[tokio::test]
+        async fn forbidden() {
+            let mocks = Mocks {
+                auth: Mock::once_with_args(|usr| {
+                    Ok(User {
+                        id: Uuid::new_v4(),
+                        ..usr
+                    })
+                }),
+                ..Default::default()
+            };
+            let (resp, _) = run(mocks).await;
+            resp.assert_status(StatusCode::FORBIDDEN);
+            assert!(resp.as_bytes().is_empty());
+        }
+
+        #[tokio::test]
+        async fn not_found() {
+            let mocks = Mocks {
+                auth: Mock::once_with_args(Ok),
+                exists: Mock::once(|| false),
+                ..Default::default()
+            };
+            let (resp, _) = run(mocks).await;
+            resp.assert_status(StatusCode::NOT_FOUND);
+            assert!(resp.as_bytes().is_empty());
+        }
+
+        #[tokio::test]
+        async fn ok_when_user_is_itself() {
+            let mocks = Mocks {
+                auth: Mock::once_with_args(Ok),
+                exists: Mock::once(|| true),
+                srcs: Mock::once(|| ()),
+            };
+            let (resp, expected) = run(mocks).await;
+            resp.assert_status_ok();
+            resp.assert_json(&expected);
+        }
+
+        #[tokio::test]
+        async fn ok_when_user_is_admin() {
+            let mocks = Mocks {
+                auth: Mock::once_with_args(|usr| {
+                    Ok(User {
+                        role: Role::Admin,
+                        ..usr
+                    })
+                }),
+                exists: Mock::once(|| true),
+                srcs: Mock::once(|| ()),
+            };
+            let (resp, expected) = run(mocks).await;
+            resp.assert_status_ok();
+            resp.assert_json(&expected);
+        }
+    }
+
     mod users {
         use super::*;
 
@@ -4384,7 +4796,7 @@ mod test {
         #[derive(Clone, Default)]
         struct Mocks {
             auth: Mock<ApiResult<User>, User>,
-            srcs: Mock<()>,
+            usrs: Mock<()>,
         }
 
         // Tests
@@ -4429,7 +4841,7 @@ mod test {
                         conn.0
                             .expect_users()
                             .with(eq(page.req))
-                            .times(mocks.srcs.times())
+                            .times(mocks.usrs.times())
                             .returning({
                                 let page = page.clone();
                                 move |_| Ok(page.clone())
@@ -4449,10 +4861,7 @@ mod test {
                 _dbtx: PhantomData,
             };
             let server = init(state);
-            let resp = server
-                .get(&format!("{PATH_ADMIN}{PATH_USR}"))
-                .add_query_params(req)
-                .await;
+            let resp = server.get(PATH_USR).add_query_params(req).await;
             (resp, expected)
         }
 
@@ -4489,7 +4898,7 @@ mod test {
         async fn ok() {
             let mocks = Mocks {
                 auth: Mock::once_with_args(Ok),
-                srcs: Mock::once(|| ()),
+                usrs: Mock::once(|| ()),
             };
             let (resp, expected) = run(mocks).await;
             resp.assert_status_ok();

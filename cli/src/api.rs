@@ -3,8 +3,8 @@ use autoplaylist_common::{
     api::{
         AuthenticateViaSpotifyQueryParams, CreatePlaylistRequest, JwtResponse,
         PageRequestQueryParams, PlaylistResponse, RedirectUriQueryParam, SearchQueryParam,
-        SourceResponse, UserResponse, PATH_ADMIN, PATH_AUTH, PATH_ME, PATH_PLAYLIST, PATH_SEARCH,
-        PATH_SPOTIFY, PATH_SRC, PATH_SYNC, PATH_TOKEN, PATH_TRACK, PATH_USR,
+        SourceResponse, UserResponse, PATH_AUTH, PATH_ME, PATH_PLAYLIST, PATH_SEARCH, PATH_SPOTIFY,
+        PATH_SRC, PATH_SYNC, PATH_TOKEN, PATH_TRACK, PATH_USR,
     },
     model::{Page, Track},
 };
@@ -143,6 +143,20 @@ pub trait ApiClient: Send + Sync {
 
     async fn user_by_id(&self, id: Uuid, token: &str) -> ApiResult<UserResponse>;
 
+    async fn user_playlists(
+        &self,
+        id: Uuid,
+        req: PageRequestQueryParams<25>,
+        token: &str,
+    ) -> ApiResult<Page<PlaylistResponse>>;
+
+    async fn user_sources(
+        &self,
+        id: Uuid,
+        req: PageRequestQueryParams<25>,
+        token: &str,
+    ) -> ApiResult<Page<SourceResponse>>;
+
     async fn users(
         &self,
         params: PageRequestQueryParams<25>,
@@ -236,7 +250,7 @@ impl ApiClient for DefaultApiClient {
         );
         async {
             let req = Client::new()
-                .get(format!("{}{PATH_PLAYLIST}", self.base_url))
+                .get(format!("{}{PATH_ME}{PATH_PLAYLIST}", self.base_url))
                 .bearer_auth(token)
                 .query(&req)
                 .build()?;
@@ -258,7 +272,7 @@ impl ApiClient for DefaultApiClient {
         );
         async {
             let req = Client::new()
-                .get(format!("{}{PATH_PLAYLIST}", self.base_url))
+                .get(format!("{}{PATH_ME}{PATH_SRC}", self.base_url))
                 .bearer_auth(token)
                 .query(&req)
                 .build()?;
@@ -322,7 +336,7 @@ impl ApiClient for DefaultApiClient {
         let span = debug_span!("delete_user", user.id = %id);
         async {
             let req = Client::new()
-                .delete(format!("{}{PATH_ADMIN}{PATH_USR}/{id}", self.base_url))
+                .delete(format!("{}{PATH_USR}/{id}", self.base_url))
                 .bearer_auth(token)
                 .build()?;
             Self::send(req).await?;
@@ -381,7 +395,7 @@ impl ApiClient for DefaultApiClient {
         );
         async {
             let req = Client::new()
-                .get(format!("{}{PATH_ADMIN}{PATH_PLAYLIST}", self.base_url))
+                .get(format!("{}{PATH_PLAYLIST}", self.base_url))
                 .bearer_auth(token)
                 .query(&req)
                 .build()?;
@@ -405,7 +419,10 @@ impl ApiClient for DefaultApiClient {
         );
         async {
             let req = Client::new()
-                .get(format!("{}{PATH_PLAYLIST}{PATH_SEARCH}", self.base_url))
+                .get(format!(
+                    "{}{PATH_ME}{PATH_PLAYLIST}{PATH_SEARCH}",
+                    self.base_url
+                ))
                 .bearer_auth(token)
                 .query(&params)
                 .query(&req)
@@ -430,10 +447,7 @@ impl ApiClient for DefaultApiClient {
         );
         async {
             let req = Client::new()
-                .get(format!(
-                    "{}{PATH_ADMIN}{PATH_PLAYLIST}{PATH_SEARCH}",
-                    self.base_url
-                ))
+                .get(format!("{}{PATH_PLAYLIST}{PATH_SEARCH}", self.base_url))
                 .bearer_auth(token)
                 .query(&params)
                 .query(&req)
@@ -458,10 +472,7 @@ impl ApiClient for DefaultApiClient {
         );
         async {
             let req = Client::new()
-                .get(format!(
-                    "{}{PATH_ADMIN}{PATH_USR}{PATH_SEARCH}",
-                    self.base_url
-                ))
+                .get(format!("{}{PATH_USR}{PATH_SEARCH}", self.base_url))
                 .bearer_auth(token)
                 .query(&params)
                 .query(&req)
@@ -521,7 +532,7 @@ impl ApiClient for DefaultApiClient {
         );
         async {
             let req = Client::new()
-                .get(format!("{}{PATH_ADMIN}{PATH_SRC}", self.base_url))
+                .get(format!("{}{PATH_SRC}", self.base_url))
                 .bearer_auth(token)
                 .query(&req)
                 .build()?;
@@ -622,6 +633,54 @@ impl ApiClient for DefaultApiClient {
         .await
     }
 
+    async fn user_playlists(
+        &self,
+        id: Uuid,
+        req: PageRequestQueryParams<25>,
+        token: &str,
+    ) -> ApiResult<Page<PlaylistResponse>> {
+        let span = debug_span!(
+            "user_playlists",
+            params.limit = req.limit,
+            params.offset = req.offset,
+            usr.id = %id,
+        );
+        async {
+            let req = Client::new()
+                .get(format!("{}{PATH_USR}/{id}{PATH_PLAYLIST}", self.base_url))
+                .bearer_auth(token)
+                .query(&req)
+                .build()?;
+            Self::send_and_parse_json_response(req).await
+        }
+        .instrument(span)
+        .await
+    }
+
+    async fn user_sources(
+        &self,
+        id: Uuid,
+        req: PageRequestQueryParams<25>,
+        token: &str,
+    ) -> ApiResult<Page<SourceResponse>> {
+        let span = debug_span!(
+            "user_sources",
+            params.limit = req.limit,
+            params.offset = req.offset,
+            usr.id = %id,
+        );
+        async {
+            let req = Client::new()
+                .get(format!("{}{PATH_USR}/{id}{PATH_SRC}", self.base_url))
+                .bearer_auth(token)
+                .query(&req)
+                .build()?;
+            Self::send_and_parse_json_response(req).await
+        }
+        .instrument(span)
+        .await
+    }
+
     async fn users(
         &self,
         req: PageRequestQueryParams<25>,
@@ -634,7 +693,7 @@ impl ApiClient for DefaultApiClient {
         );
         async {
             let req = Client::new()
-                .get(format!("{}{PATH_ADMIN}{PATH_USR}", self.base_url))
+                .get(format!("{}{PATH_USR}", self.base_url))
                 .bearer_auth(token)
                 .query(&req)
                 .build()?;
@@ -1243,6 +1302,56 @@ mod test {
                     .user_by_id(expected.id, "jwt")
                     .await
                     .expect("failed to get user");
+                assert_eq!(resp, expected);
+            }
+        }
+
+        mod user_playlists {
+            use super::*;
+
+            // Tests
+
+            #[tokio::test]
+            async fn page() {
+                let id = Uuid::from_u128(0xf28c11c3bfeb4583ba1646797f662b9a);
+                let expected = Page {
+                    first: true,
+                    items: vec![],
+                    last: true,
+                    req: PageRequest::new(10, 0),
+                    total: 0,
+                };
+                let req = PageRequestQueryParams::from(expected.req);
+                let client = init();
+                let resp = client
+                    .user_playlists(id, req, "jwt")
+                    .await
+                    .expect("failed to get playlists");
+                assert_eq!(resp, expected);
+            }
+        }
+
+        mod user_sources {
+            use super::*;
+
+            // Tests
+
+            #[tokio::test]
+            async fn page() {
+                let id = Uuid::from_u128(0xf28c11c3bfeb4583ba1646797f662b9a);
+                let expected = Page {
+                    first: true,
+                    items: vec![],
+                    last: true,
+                    req: PageRequest::new(10, 0),
+                    total: 0,
+                };
+                let req = PageRequestQueryParams::from(expected.req);
+                let client = init();
+                let resp = client
+                    .user_sources(id, req, "jwt")
+                    .await
+                    .expect("failed to get sources");
                 assert_eq!(resp, expected);
             }
         }
