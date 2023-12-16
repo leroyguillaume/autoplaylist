@@ -73,8 +73,8 @@ macro_rules! mock_client_impl {
                 self.$attr.create_track(creation).await
             }
 
-            async fn create_user(&mut self, creation: &UserCreation) -> DatabaseResult<User> {
-                self.$attr.create_user(creation).await
+            async fn create_user(&mut self, creds: &Credentials) -> DatabaseResult<User> {
+                self.$attr.create_user(creds).await
             }
 
             async fn delete_playlist(&mut self, id: Uuid) -> DatabaseResult<bool> {
@@ -238,12 +238,12 @@ macro_rules! mock_client_impl {
                 self.$attr.update_user(user).await
             }
 
-            async fn user_by_email(&mut self, email: &str) -> DatabaseResult<Option<User>> {
-                self.$attr.user_by_email(email).await
-            }
-
             async fn user_by_id(&mut self, id: Uuid) -> DatabaseResult<Option<User>> {
                 self.$attr.user_by_id(id).await
+            }
+
+            async fn user_by_spotify_id(&mut self, id: &str) -> DatabaseResult<Option<User>> {
+                self.$attr.user_by_spotify_id(id).await
             }
 
             async fn user_exists(&mut self, id: Uuid) -> DatabaseResult<bool> {
@@ -356,23 +356,6 @@ impl From<Track> for TrackCreation {
     }
 }
 
-// UserCreation
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct UserCreation {
-    pub creds: Credentials,
-    pub email: String,
-}
-
-impl From<User> for UserCreation {
-    fn from(user: User) -> Self {
-        Self {
-            creds: user.creds,
-            email: user.email,
-        }
-    }
-}
-
 // DatabaseClient
 
 #[cfg_attr(any(test, feature = "test"), mockall::automock)]
@@ -396,7 +379,7 @@ pub trait DatabaseClient: Send + Sync {
 
     async fn create_track(&mut self, creation: &TrackCreation) -> DatabaseResult<Track>;
 
-    async fn create_user(&mut self, creation: &UserCreation) -> DatabaseResult<User>;
+    async fn create_user(&mut self, creds: &Credentials) -> DatabaseResult<User>;
 
     async fn delete_playlist(&mut self, id: Uuid) -> DatabaseResult<bool>;
 
@@ -490,9 +473,9 @@ pub trait DatabaseClient: Send + Sync {
 
     async fn update_user(&mut self, user: &User) -> DatabaseResult<()>;
 
-    async fn user_by_email(&mut self, email: &str) -> DatabaseResult<Option<User>>;
-
     async fn user_by_id(&mut self, id: Uuid) -> DatabaseResult<Option<User>>;
+
+    async fn user_by_spotify_id(&mut self, id: &str) -> DatabaseResult<Option<User>>;
 
     async fn user_exists(&mut self, id: Uuid) -> DatabaseResult<bool>;
 
@@ -646,7 +629,6 @@ mod test {
                         owner: User {
                             creation: Utc::now(),
                             creds: Default::default(),
-                            email: "user@test".into(),
                             id: Uuid::new_v4(),
                             role: Role::User,
                         },
@@ -682,7 +664,6 @@ mod test {
                     owner: User {
                         creation: Utc::now(),
                         creds: Default::default(),
-                        email: "user@test".into(),
                         id: Uuid::new_v4(),
                         role: Role::User,
                     },
@@ -759,17 +740,14 @@ mod test {
 
         async fn run(mocks: Mocks) -> Result<(), MockError> {
             let mut client = MockDatabaseClient::new();
-            client
-                .expect_user_by_email()
-                .times(1)
-                .returning(|_| Ok(None));
+            client.expect_user_by_id().times(1).returning(|_| Ok(None));
             let mut tx = MockDatabaseTransaction {
                 client,
                 commit: mocks.commit.clone(),
                 rollback: mocks.rollback.clone(),
             };
             transactional!(tx, async {
-                tx.user_by_email("user@test").await?;
+                tx.user_by_id(Uuid::new_v4()).await?;
                 mocks.f.call()?;
                 Ok::<(), MockError>(())
             })
@@ -797,31 +775,6 @@ mod test {
             };
             let res = run(mocks).await;
             assert!(res.is_err());
-        }
-    }
-
-    mod user_creation {
-        use super::*;
-
-        mod from_user {
-            use super::*;
-
-            #[test]
-            fn creation() {
-                let usr = User {
-                    creation: Utc::now(),
-                    creds: Default::default(),
-                    email: "user@test".into(),
-                    id: Uuid::new_v4(),
-                    role: Role::User,
-                };
-                let expected = UserCreation {
-                    creds: usr.creds.clone(),
-                    email: usr.email.clone(),
-                };
-                let creation = UserCreation::from(usr);
-                assert_eq!(creation, expected);
-            }
         }
     }
 }

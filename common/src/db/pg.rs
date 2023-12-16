@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use magic_crypt::{new_magic_crypt, MagicCrypt256, MagicCryptError, MagicCryptTrait};
 use mockable::Env;
-use serde::de::DeserializeOwned;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::{
     migrate, migrate::MigrateError, pool::PoolConnection, query_file, query_file_as, Acquire,
@@ -19,12 +19,13 @@ use uuid::Uuid;
 
 use crate::model::{
     Album, Credentials, Page, PageRequest, Platform, Playlist, PlaylistSynchronization, Role,
-    Source, SourceKind, SourceSynchronization, Synchronization, SynchronizationStep, Track, User,
+    Source, SourceKind, SourceSynchronization, SpotifyCredentials, Synchronization,
+    SynchronizationStep, Track, User,
 };
 
 use super::{
     DatabaseClient, DatabaseConnection, DatabaseError, DatabasePool, DatabaseResult,
-    DatabaseTransaction, PlaylistCreation, SourceCreation, TrackCreation, UserCreation,
+    DatabaseTransaction, PlaylistCreation, SourceCreation, TrackCreation,
 };
 
 // Macros
@@ -78,8 +79,8 @@ macro_rules! client_impl {
                 Ok(track)
             }
 
-            async fn create_user(&mut self, creation: &UserCreation) -> DatabaseResult<User> {
-                let user = create_user(creation, &self.key, &mut self.conn).await?;
+            async fn create_user(&mut self, creds: &Credentials) -> DatabaseResult<User> {
+                let user = create_user(creds, &self.key, &mut self.conn).await?;
                 Ok(user)
             }
 
@@ -272,13 +273,13 @@ macro_rules! client_impl {
                 Ok(())
             }
 
-            async fn user_by_email(&mut self, email: &str) -> DatabaseResult<Option<User>> {
-                let user = user_by_email(email, &self.key, &mut self.conn).await?;
+            async fn user_by_id(&mut self, id: Uuid) -> DatabaseResult<Option<User>> {
+                let user = user_by_id(id, &self.key, &mut self.conn).await?;
                 Ok(user)
             }
 
-            async fn user_by_id(&mut self, id: Uuid) -> DatabaseResult<Option<User>> {
-                let user = user_by_id(id, &self.key, &mut self.conn).await?;
+            async fn user_by_spotify_id(&mut self, id: &str) -> DatabaseResult<Option<User>> {
+                let user = user_by_spotify_id(id, &self.key, &mut self.conn).await?;
                 Ok(user)
             }
 
@@ -538,7 +539,6 @@ impl From<sqlx::Error> for DatabaseError {
 struct PlaylistRecord {
     owner_creation: DateTime<Utc>,
     owner_creds: String,
-    owner_email: String,
     owner_id: Uuid,
     owner_role: Role,
     playlist_creation: DateTime<Utc>,
@@ -558,7 +558,6 @@ impl PlaylistRecord {
         let src_record = SourceRecord {
             owner_creation: self.owner_creation,
             owner_creds: self.owner_creds,
-            owner_email: self.owner_email,
             owner_id: self.owner_id,
             owner_role: self.owner_role,
             src_creation: self.src_creation,
@@ -583,7 +582,6 @@ impl PlaylistRecord {
 struct SourceRecord {
     owner_creation: DateTime<Utc>,
     owner_creds: String,
-    owner_email: String,
     owner_id: Uuid,
     owner_role: Role,
     src_creation: DateTime<Utc>,
@@ -597,7 +595,6 @@ impl SourceRecord {
         let user_record = UserRecord {
             usr_creation: self.owner_creation,
             usr_creds: self.owner_creds,
-            usr_email: self.owner_email,
             usr_id: self.owner_id,
             usr_role: self.owner_role,
         };
@@ -608,6 +605,24 @@ impl SourceRecord {
             owner: user_record.into_entity(key)?,
             sync: serde_json::from_value(self.src_sync)?,
         })
+    }
+}
+
+// SpotifyPublicCredentials
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SpotifyPublicCredentials {
+    email: String,
+    id: String,
+}
+
+impl From<SpotifyCredentials> for SpotifyPublicCredentials {
+    fn from(creds: SpotifyCredentials) -> Self {
+        Self {
+            email: creds.email,
+            id: creds.id,
+        }
     }
 }
 
@@ -663,7 +678,6 @@ impl TrackRecord {
 struct UserRecord {
     usr_creation: DateTime<Utc>,
     usr_creds: String,
-    usr_email: String,
     usr_id: Uuid,
     usr_role: Role,
 }
@@ -677,7 +691,6 @@ impl UserRecord {
         Ok(User {
             creation: self.usr_creation,
             creds,
-            email: self.usr_email,
             id: self.usr_id,
             role: self.usr_role,
         })
@@ -796,7 +809,6 @@ async fn create_playlist<
         "create_playlist",
         playlist.name = creation.name,
         playlist.src.kind = %creation.src.kind,
-        playlist.src.owner.email = creation.src.owner.email,
         playlist.src.owner.id = %creation.src.owner.id,
     );
     async {
@@ -839,7 +851,6 @@ async fn create_source<
     let span = debug_span!(
         "create_source",
         src.kind = %creation.kind,
-        src.owner.email = creation.owner.email,
         src.owner.id = %creation.owner.id,
     );
     async {
@@ -918,20 +929,26 @@ async fn create_track<
 
 #[inline]
 async fn create_user<'a, A: Acquire<'a, Database = Postgres, Connection = &'a mut PgConnection>>(
-    creation: &UserCreation,
+    creds: &Credentials,
     key: &MagicCrypt256,
     conn: A,
 ) -> PostgresResult<User> {
-    let span = debug_span!("create_user", usr.email = creation.email,);
+    let span = debug_span!("create_user");
     async {
-        let creds = encrypt_credentials(&creation.creds, key)?;
+        let spotify_creds = creds
+            .spotify
+            .as_ref()
+            .map(|creds| SpotifyPublicCredentials::from(creds.clone()));
+        trace!("serializing Spotify credentials");
+        let spotify_creds = serde_json::to_value(&spotify_creds)?;
+        let creds = encrypt_credentials(creds, key)?;
         trace!("acquiring database connection");
         let conn = conn.acquire().await?;
         debug!("creating user");
         let record = query_file_as!(
             UserRecord,
             "resources/main/db/pg/queries/create-user.sql",
-            &creation.email,
+            &spotify_creds,
             &creds,
         )
         .fetch_one(&mut *conn)
@@ -1943,7 +1960,6 @@ async fn update_playlist<
         %playlist.id,
         playlist.name,
         %playlist.src.kind,
-        playlist.src.owner.email,
         %playlist.src.owner.id,
     );
     async {
@@ -2007,10 +2023,16 @@ async fn update_user<'a, A: Acquire<'a, Database = Postgres, Connection = &'a mu
     let span = debug_span!(
         "update_user",
         %usr.id,
-        %usr.email,
         %usr.role,
     );
     async {
+        let spotify_creds = usr
+            .creds
+            .spotify
+            .as_ref()
+            .map(|creds| SpotifyPublicCredentials::from(creds.clone()));
+        trace!("serializing Spotify credentials");
+        let spotify_creds = serde_json::to_value(&spotify_creds)?;
         let creds = encrypt_credentials(&usr.creds, key)?;
         trace!("acquiring database connection");
         let conn = conn.acquire().await?;
@@ -2018,43 +2040,13 @@ async fn update_user<'a, A: Acquire<'a, Database = Postgres, Connection = &'a mu
         query_file!(
             "resources/main/db/pg/queries/update-user.sql",
             usr.id,
-            usr.email,
             usr.role as _,
+            &spotify_creds,
             creds,
         )
         .execute(&mut *conn)
         .await?;
         Ok(())
-    }
-    .instrument(span)
-    .await
-}
-
-// user_by_email
-
-#[inline]
-async fn user_by_email<
-    'a,
-    A: Acquire<'a, Database = Postgres, Connection = &'a mut PgConnection>,
->(
-    email: &str,
-    key: &MagicCrypt256,
-    conn: A,
-) -> PostgresResult<Option<User>> {
-    let span = debug_span!("user_by_email", usr.email = email,);
-    async {
-        trace!("acquiring database connection");
-        let conn = conn.acquire().await?;
-        debug!("fetching user");
-        let record = query_file_as!(
-            UserRecord,
-            "resources/main/db/pg/queries/user-by-email.sql",
-            email,
-        )
-        .fetch_optional(&mut *conn)
-        .await?;
-        let usr = record.map(|record| record.into_entity(key)).transpose()?;
-        Ok(usr)
     }
     .instrument(span)
     .await
@@ -2079,6 +2071,39 @@ async fn user_by_id<'a, A: Acquire<'a, Database = Postgres, Connection = &'a mut
         let record = query_file_as!(
             UserRecord,
             "resources/main/db/pg/queries/user-by-id.sql",
+            id,
+        )
+        .fetch_optional(&mut *conn)
+        .await?;
+        let usr = record.map(|record| record.into_entity(key)).transpose()?;
+        Ok(usr)
+    }
+    .instrument(span)
+    .await
+}
+
+// user_by_spotify_id
+
+#[inline]
+async fn user_by_spotify_id<
+    'a,
+    A: Acquire<'a, Database = Postgres, Connection = &'a mut PgConnection>,
+>(
+    id: &str,
+    key: &MagicCrypt256,
+    conn: A,
+) -> PostgresResult<Option<User>> {
+    let span = debug_span!(
+        "user_by_spotify_id",
+        usr.creds.spotify.id = %id,
+    );
+    async {
+        trace!("acquiring database connection");
+        let conn = conn.acquire().await?;
+        debug!("fetching user");
+        let record = query_file_as!(
+            UserRecord,
+            "resources/main/db/pg/queries/user-by-spotify-id.sql",
             id,
         )
         .fetch_optional(&mut *conn)
@@ -2349,6 +2374,7 @@ mod test {
                     .into(),
                 creds: Credentials {
                     spotify: Some(SpotifyCredentials {
+                        email: "user_1@test".into(),
                         id: "user_1".into(),
                         token: SpotifyToken {
                             access: "access".into(),
@@ -2359,7 +2385,6 @@ mod test {
                         },
                     }),
                 },
-                email: "user_1@test".into(),
                 id: Uuid::from_u128(0xee21186a990c42e9bcd269f9090a7736),
                 role: Role::Admin,
             };
@@ -2367,8 +2392,19 @@ mod test {
                 creation: DateTime::parse_from_rfc3339("2023-02-01T00:00:00Z")
                     .expect("failed to parse date")
                     .into(),
-                creds: Default::default(),
-                email: "user_2@test".into(),
+                creds: Credentials {
+                    spotify: Some(SpotifyCredentials {
+                        email: "user_2@test".into(),
+                        id: "user_2".into(),
+                        token: SpotifyToken {
+                            access: "access".into(),
+                            expiration: DateTime::parse_from_rfc3339("2023-01-01T03:00:00Z")
+                                .expect("failed to parse date")
+                                .into(),
+                            refresh: "refresh".into(),
+                        },
+                    }),
+                },
                 id: Uuid::from_u128(0xec1ca9f93c4744a295c7a13ff6de852d),
                 role: Role::User,
             };
@@ -2376,8 +2412,19 @@ mod test {
                 creation: DateTime::parse_from_rfc3339("2023-03-01T00:00:00Z")
                     .expect("failed to parse date")
                     .into(),
-                creds: Default::default(),
-                email: "user_3@test".into(),
+                creds: Credentials {
+                    spotify: Some(SpotifyCredentials {
+                        email: "test_3@test".into(),
+                        id: "user_3".into(),
+                        token: SpotifyToken {
+                            access: "access".into(),
+                            expiration: DateTime::parse_from_rfc3339("2023-01-01T03:00:00Z")
+                                .expect("failed to parse date")
+                                .into(),
+                            refresh: "refresh".into(),
+                        },
+                    }),
+                },
                 id: Uuid::from_u128(0x8fc899c5f25449669b5ae8f1c4f97f7c),
                 role: Role::User,
             };
@@ -2386,8 +2433,27 @@ mod test {
                     .expect("failed to parse date")
                     .into(),
                 creds: Default::default(),
-                email: "test_4@test".into(),
                 id: Uuid::from_u128(0x83e3a7ed9d6c4e4fb7328a00cab3fcb5),
+                role: Role::User,
+            };
+            let usr_5 = User {
+                creation: DateTime::parse_from_rfc3339("2023-05-01T00:00:00Z")
+                    .expect("failed to parse date")
+                    .into(),
+                creds: Credentials {
+                    spotify: Some(SpotifyCredentials {
+                        email: "user_5@test".into(),
+                        id: "user_5".into(),
+                        token: SpotifyToken {
+                            access: "access".into(),
+                            expiration: DateTime::parse_from_rfc3339("2023-01-01T03:00:00Z")
+                                .expect("failed to parse date")
+                                .into(),
+                            refresh: "refresh".into(),
+                        },
+                    }),
+                },
+                id: Uuid::from_u128(0xee187392847143f4a3cde541fd7640f4),
                 role: Role::User,
             };
             let src_1 = Source {
@@ -2497,7 +2563,7 @@ mod test {
                 ],
                 srcs: vec![src_1, src_2, src_3, src_4],
                 tracks: vec![track_1, track_2, track_3],
-                usrs: vec![usr_4, usr_1, usr_2, usr_3],
+                usrs: vec![usr_1, usr_2, usr_3, usr_4, usr_5],
             }
         }
     }
@@ -2770,7 +2836,7 @@ mod test {
                 let mut conn = db.acquire().await.expect("failed to acquire connection");
                 let creation = SourceCreation {
                     kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
-                    owner: data.usrs[2].clone(),
+                    owner: data.usrs[1].clone(),
                 };
                 let src = conn
                     .create_source(&creation)
@@ -2841,18 +2907,33 @@ mod test {
             async fn user(db: PgPool) {
                 let db = init(db).await;
                 let mut conn = db.acquire().await.expect("failed to acquire connection");
-                let creation = UserCreation {
-                    creds: Default::default(),
-                    email: "user_5@test".into(),
+                let spotify_id = "user_4";
+                let creds = Credentials {
+                    spotify: Some(SpotifyCredentials {
+                        email: "user_4@test".into(),
+                        id: spotify_id.into(),
+                        token: SpotifyToken {
+                            access: "access".into(),
+                            expiration: DateTime::parse_from_rfc3339("2023-01-01T03:00:00Z")
+                                .expect("failed to parse date")
+                                .into(),
+                            refresh: "refresh".into(),
+                        },
+                    }),
                 };
                 let usr = conn
-                    .create_user(&creation)
+                    .create_user(&creds)
                     .await
                     .expect("failed to create user");
-                assert_eq!(usr.creds, creation.creds);
-                assert_eq!(usr.email, creation.email);
+                assert_eq!(usr.creds, creds);
                 let usr_fetched = conn
                     .user_by_id(usr.id)
+                    .await
+                    .expect("failed to fetch user")
+                    .expect("user doesn't exist");
+                assert_eq!(usr, usr_fetched);
+                let usr_fetched = conn
+                    .user_by_spotify_id(spotify_id)
                     .await
                     .expect("failed to fetch user")
                     .expect("user doesn't exist");
@@ -3003,7 +3084,7 @@ mod test {
             #[sqlx::test]
             async fn yes(db: PgPool) {
                 let data = Data::new();
-                let id = data.usrs[1].id;
+                let id = data.usrs[0].id;
                 let deleted = run(id, db).await;
                 assert!(deleted);
             }
@@ -3351,7 +3432,7 @@ mod test {
                     req: PageRequest::new(100, 0),
                     total: 3,
                 };
-                run(data.usrs[1].id, "PlAyLiSt", expected, db).await;
+                run(data.usrs[0].id, "PlAyLiSt", expected, db).await;
             }
 
             #[sqlx::test]
@@ -3364,7 +3445,7 @@ mod test {
                     req: PageRequest::new(1, 1),
                     total: 3,
                 };
-                run(data.usrs[1].id, "PlAyLiSt", expected, db).await;
+                run(data.usrs[0].id, "PlAyLiSt", expected, db).await;
             }
         }
 
@@ -3391,9 +3472,9 @@ mod test {
                 let expected = Page {
                     first: true,
                     items: vec![
+                        data.usrs[0].clone(),
                         data.usrs[1].clone(),
-                        data.usrs[2].clone(),
-                        data.usrs[3].clone(),
+                        data.usrs[4].clone(),
                     ],
                     last: true,
                     req: PageRequest::new(100, 0),
@@ -3407,7 +3488,7 @@ mod test {
                 let data = Data::new();
                 let expected = Page {
                     first: false,
-                    items: vec![data.usrs[2].clone()],
+                    items: vec![data.usrs[1].clone()],
                     last: false,
                     req: PageRequest::new(1, 1),
                     total: 3,
@@ -3766,7 +3847,7 @@ mod test {
                     creation: Utc::now(),
                     id: expected.id,
                     kind: SourceKind::Spotify(SpotifySourceKind::Playlist("id".into())),
-                    owner: data.usrs[2].clone(),
+                    owner: data.usrs[1].clone(),
                     sync: expected.sync.clone(),
                 };
                 conn.update_source(&source_updated)
@@ -3791,11 +3872,21 @@ mod test {
                 let data = Data::new();
                 let db = init(db).await;
                 let mut conn = db.acquire().await.expect("failed to acquire connection");
+                let spotify_id = "user_1_2";
                 let expected = User {
-                    email: "user_1_1@test".into(),
-                    creds: Default::default(),
+                    creds: Credentials {
+                        spotify: Some(SpotifyCredentials {
+                            email: "user_1_2@test".into(),
+                            id: spotify_id.into(),
+                            token: SpotifyToken {
+                                access: "access".into(),
+                                expiration: Utc::now(),
+                                refresh: "refresh".into(),
+                            },
+                        }),
+                    },
                     role: Role::User,
-                    ..data.usrs[1].clone()
+                    ..data.usrs[0].clone()
                 };
                 let usr_updated = User {
                     creation: Utc::now(),
@@ -3811,36 +3902,12 @@ mod test {
                     .expect("failed to fetch user")
                     .expect("user doesn't exist");
                 assert_eq!(usr, expected);
-            }
-        }
-
-        mod user_by_email {
-            use super::*;
-
-            // run
-
-            async fn run(email: &str, expected: Option<&User>, db: PgPool) {
-                let db = init(db).await;
-                let mut conn = db.acquire().await.expect("failed to acquire connection");
                 let usr = conn
-                    .user_by_email(email)
+                    .user_by_spotify_id(spotify_id)
                     .await
-                    .expect("failed to fetch user");
-                assert_eq!(usr, expected.cloned());
-            }
-
-            // Tests
-
-            #[sqlx::test]
-            async fn none(db: PgPool) {
-                run("user_0@test", None, db).await;
-            }
-
-            #[sqlx::test]
-            async fn user(db: PgPool) {
-                let data = Data::new();
-                let usr = &data.usrs[1];
-                run(&usr.email, Some(usr), db).await;
+                    .expect("failed to fetch user")
+                    .expect("user doesn't exist");
+                assert_eq!(usr, expected);
             }
         }
 
@@ -3866,8 +3933,38 @@ mod test {
             #[sqlx::test]
             async fn user(db: PgPool) {
                 let data = Data::new();
-                let usr = &data.usrs[1];
+                let usr = &data.usrs[0];
                 run(usr.id, Some(usr), db).await;
+            }
+        }
+
+        mod user_by_spotify_id {
+            use super::*;
+
+            // run
+
+            async fn run(id: &str, expected: Option<&User>, db: PgPool) {
+                let db = init(db).await;
+                let mut conn = db.acquire().await.expect("failed to acquire connection");
+                let usr = conn
+                    .user_by_spotify_id(id)
+                    .await
+                    .expect("failed to fetch user");
+                assert_eq!(usr, expected.cloned());
+            }
+
+            // Tests
+
+            #[sqlx::test]
+            async fn none(db: PgPool) {
+                run("user_0", None, db).await;
+            }
+
+            #[sqlx::test]
+            async fn user(db: PgPool) {
+                let data = Data::new();
+                let usr = &data.usrs[0];
+                run("user_1", Some(usr), db).await;
             }
         }
 
@@ -3896,7 +3993,7 @@ mod test {
             #[sqlx::test]
             async fn true_when_user_exists(db: PgPool) {
                 let data = Data::new();
-                let id = data.usrs[0].id;
+                let id = data.usrs[3].id;
                 run(id, true, db).await;
             }
         }
@@ -3933,7 +4030,7 @@ mod test {
                     req: PageRequest::new(100, 0),
                     total: 4,
                 };
-                run(data.usrs[1].id, expected, db).await;
+                run(data.usrs[0].id, expected, db).await;
             }
 
             #[sqlx::test]
@@ -3946,7 +4043,7 @@ mod test {
                     req: PageRequest::new(1, 1),
                     total: 4,
                 };
-                run(data.usrs[1].id, expected, db).await;
+                run(data.usrs[0].id, expected, db).await;
             }
         }
 
@@ -3981,7 +4078,7 @@ mod test {
                     req: PageRequest::new(100, 0),
                     total: 3,
                 };
-                run(data.usrs[1].id, expected, db).await;
+                run(data.usrs[0].id, expected, db).await;
             }
 
             #[sqlx::test]
@@ -3994,7 +4091,7 @@ mod test {
                     req: PageRequest::new(1, 1),
                     total: 3,
                 };
-                run(data.usrs[1].id, expected, db).await;
+                run(data.usrs[0].id, expected, db).await;
             }
         }
 
@@ -4023,7 +4120,7 @@ mod test {
                     items: data.usrs.clone(),
                     last: true,
                     req: PageRequest::new(100, 0),
-                    total: 4,
+                    total: 5,
                 };
                 run(expected, db).await;
             }
@@ -4036,7 +4133,7 @@ mod test {
                     items: vec![data.usrs[1].clone()],
                     last: false,
                     req: PageRequest::new(1, 1),
-                    total: 4,
+                    total: 5,
                 };
                 run(expected, db).await;
             }

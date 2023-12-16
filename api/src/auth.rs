@@ -110,7 +110,6 @@ mod test {
             let expected = User {
                 creation: Utc::now(),
                 creds: Default::default(),
-                email: "user@test".into(),
                 id: Uuid::new_v4(),
                 role: Role::User,
             };

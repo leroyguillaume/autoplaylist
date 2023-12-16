@@ -1004,7 +1004,6 @@ mod test {
                     owner: User {
                         creation: Utc::now(),
                         creds: Default::default(),
-                        email: "user@test".into(),
                         id: Uuid::new_v4(),
                         role: Role::User,
                     },
@@ -1033,7 +1032,6 @@ mod test {
                     owner: User {
                         creation: Utc::now(),
                         creds: Default::default(),
-                        email: "user@test".into(),
                         id: Uuid::new_v4(),
                         role: Role::User,
                     },
@@ -1066,7 +1064,6 @@ mod test {
                     owner: User {
                         creation: Utc::now(),
                         creds: Default::default(),
-                        email: "user@test".into(),
                         id: Uuid::new_v4(),
                         role: Role::User,
                     },
@@ -1107,7 +1104,6 @@ mod test {
                     owner: User {
                         creation: Utc::now(),
                         creds: Default::default(),
-                        email: "user@test".into(),
                         id: Uuid::new_v4(),
                         role: Role::User,
                     },
@@ -1292,7 +1288,6 @@ mod test {
                         owner: User {
                             creation: Utc::now(),
                             creds: Default::default(),
-                            email: "user@test".into(),
                             id: owner_id,
                             role: Role::User,
                         },
@@ -1354,11 +1349,11 @@ mod test {
                             creation: Utc::now(),
                             creds: Credentials {
                                 spotify: Some(SpotifyCredentials {
+                                    email: "user@test".into(),
                                     id: "id".into(),
                                     token: spotify_token,
                                 }),
                             },
-                            email: "user@test".into(),
                             id: Uuid::new_v4(),
                             role: Role::User,
                         },
@@ -1446,11 +1441,11 @@ mod test {
                             creation: Utc::now(),
                             creds: Credentials {
                                 spotify: Some(SpotifyCredentials {
+                                    email: "user@test".into(),
                                     id: "id".into(),
                                     token: spotify_token,
                                 }),
                             },
-                            email: "user@test".into(),
                             id: Uuid::new_v4(),
                             role: Role::User,
                         },
@@ -1689,7 +1684,6 @@ mod test {
                         owner: User {
                             creation: Utc::now(),
                             creds: Default::default(),
-                            email: "user@test".into(),
                             id: Uuid::new_v4(),
                             role: Role::User,
                         },
@@ -1758,7 +1752,6 @@ mod test {
                         owner: User {
                             creation: Utc::now(),
                             creds: Default::default(),
-                            email: "user@test".into(),
                             id: Uuid::new_v4(),
                             role: Role::User,
                         },
@@ -1822,7 +1815,6 @@ mod test {
                         owner: User {
                             creation: Utc::now(),
                             creds: Default::default(),
-                            email: "user@test".into(),
                             id: Uuid::new_v4(),
                             role: Role::User,
                         },
@@ -2011,7 +2003,6 @@ mod test {
                         owner: User {
                             creation: Utc::now(),
                             creds: Default::default(),
-                            email: "user@test".into(),
                             id: Uuid::new_v4(),
                             role: Role::User,
                         },
@@ -2064,11 +2055,11 @@ mod test {
                             creation: Utc::now(),
                             creds: Credentials {
                                 spotify: Some(SpotifyCredentials {
+                                    email: "user@test".into(),
                                     id: "id".into(),
                                     token: spotify_token.clone(),
                                 }),
                             },
-                            email: "user@test".into(),
                             id: Uuid::new_v4(),
                             role: Role::User,
                         },
@@ -2134,11 +2125,11 @@ mod test {
                             creation: Utc::now(),
                             creds: Credentials {
                                 spotify: Some(SpotifyCredentials {
+                                    email: "user@test".into(),
                                     id: "id".into(),
                                     token: spotify_token.clone(),
                                 }),
                             },
-                            email: "user@test".into(),
                             id: Uuid::new_v4(),
                             role: Role::User,
                         },
@@ -2269,7 +2260,6 @@ mod test {
                         owner: User {
                             creation: Utc::now(),
                             creds: Default::default(),
-                            email: "user@test".into(),
                             id: user_id,
                             role: Role::User,
                         },
@@ -2433,11 +2423,11 @@ mod test {
                             creation: Utc::now(),
                             creds: Credentials {
                                 spotify: Some(SpotifyCredentials {
+                                    email: "user@test".into(),
                                     id: "id".into(),
                                     token: spotify_token.clone(),
                                 }),
                             },
-                            email: "user@test".into(),
                             id: Uuid::new_v4(),
                             role: Role::User,
                         },
@@ -2616,11 +2606,11 @@ mod test {
                             creation: Utc::now(),
                             creds: Credentials {
                                 spotify: Some(SpotifyCredentials {
+                                    email: "user@test".into(),
                                     id: "id".into(),
                                     token: spotify_token.clone(),
                                 }),
                             },
-                            email: "user@test".into(),
                             id: Uuid::new_v4(),
                             role: Role::User,
                         },
@@ -2799,7 +2789,6 @@ mod test {
                         owner: User {
                             creation: Utc::now(),
                             creds: Default::default(),
-                            email: "user@test".into(),
                             id: user_id,
                             role: Role::User,
                         },
@@ -2963,11 +2952,11 @@ mod test {
                             creation: Utc::now(),
                             creds: Credentials {
                                 spotify: Some(SpotifyCredentials {
+                                    email: "user@test".into(),
                                     id: "id".into(),
                                     token: spotify_token.clone(),
                                 }),
                             },
-                            email: "user@test".into(),
                             id: Uuid::new_v4(),
                             role: Role::User,
                         },
@@ -3148,11 +3137,11 @@ mod test {
                             creation: Utc::now(),
                             creds: Credentials {
                                 spotify: Some(SpotifyCredentials {
+                                    email: "user@test".into(),
                                     id: "id".into(),
                                     token: spotify_token.clone(),
                                 }),
                             },
-                            email: "user@test".into(),
                             id: Uuid::new_v4(),
                             role: Role::User,
                         },
@@ -3324,7 +3313,6 @@ mod test {
                     owner: User {
                         creation: Utc::now(),
                         creds: Default::default(),
-                        email: "user@test".into(),
                         id: Uuid::new_v4(),
                         role: Role::User,
                     },
@@ -3359,7 +3347,6 @@ mod test {
                     owner: User {
                         creation: Utc::now(),
                         creds: Default::default(),
-                        email: "user@test".into(),
                         id: Uuid::new_v4(),
                         role: Role::User,
                     },
@@ -3407,7 +3394,6 @@ mod test {
                     owner: User {
                         creation: Utc::now(),
                         creds: Default::default(),
-                        email: "user@test".into(),
                         id: Uuid::new_v4(),
                         role: Role::User,
                     },
@@ -3457,7 +3443,6 @@ mod test {
                     owner: User {
                         creation: Utc::now(),
                         creds: Default::default(),
-                        email: "user@test".into(),
                         id: Uuid::new_v4(),
                         role: Role::User,
                     },
@@ -3522,7 +3507,6 @@ mod test {
                     owner: User {
                         creation: Utc::now(),
                         creds: Default::default(),
-                        email: "user@test".into(),
                         id: Uuid::new_v4(),
                         role: Role::User,
                     },

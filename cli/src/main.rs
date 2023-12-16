@@ -68,8 +68,8 @@ enum AdminUserCommand {
 struct AdminUserUpdateRoleCommandArgs {
     #[command(flatten)]
     db: DatabaseArgs,
-    #[arg(help = "User email")]
-    email: String,
+    #[arg(help = "User ID")]
+    id: Uuid,
     #[arg(help = "User role")]
     role: RoleArg,
 }
@@ -613,12 +613,12 @@ impl<
                     db.name = args.db.name,
                     db.port = args.db.port,
                     db.user = args.db.user,
-                    usr.email = %args.email
+                    usr.id = %args.id
                 );
                 async {
                     let pool = self.svc.create_database_pool(args.db).await?;
                     let mut db_conn = pool.acquire().await?;
-                    let mut usr = match db_conn.user_by_email(&args.email).await? {
+                    let mut usr = match db_conn.user_by_id(args.id).await? {
                         Some(usr) => usr,
                         None => bail!("user doesn't exist"),
                     };
@@ -734,7 +734,7 @@ impl<
                 let span = info_span!(
                     "playlist_by_id",
                     api_base_url = %args.api_base_url.value,
-                    params.id = %args.id,
+                    playlist.id = %args.id,
                 );
                 async {
                     let api = self.svc.api(args.api_base_url.value);
@@ -805,9 +805,9 @@ impl<
                 let span = info_span!(
                     "playlist_tracks",
                     api_base_url = %args.api_base_url.value,
-                    params.id = %args.id,
                     params.limit = args.req.limit,
                     params.offset = args.req.offset,
+                    playlist.id = %args.id,
                 );
                 async {
                     let api = self.svc.api(args.api_base_url.value);
@@ -827,7 +827,7 @@ impl<
                 let span = info_span!(
                     "source_by_id",
                     api_base_url = %args.api_base_url.value,
-                    params.id = %args.id,
+                    src.id = %args.id,
                 );
                 async {
                     let api = self.svc.api(args.api_base_url.value);
@@ -884,9 +884,9 @@ impl<
                 let span = info_span!(
                     "source_tracks",
                     api_base_url = %args.api_base_url.value,
-                    params.id = %args.id,
                     params.limit = args.req.limit,
                     params.offset = args.req.offset,
+                    src.id = %args.id,
                 );
                 async {
                     let api = self.svc.api(args.api_base_url.value);
@@ -906,7 +906,7 @@ impl<
                 let span = info_span!(
                     "track_by_id",
                     api_base_url = %args.api_base_url.value,
-                    params.id = %args.id,
+                    track.id = %args.id,
                 );
                 async {
                     let api = self.svc.api(args.api_base_url.value);
@@ -956,7 +956,7 @@ impl<
                 let span = info_span!(
                     "user_by_id",
                     api_base_url = %args.api_base_url.value,
-                    params.id = %args.id,
+                    usr.id = %args.id,
                 );
                 async {
                     let api = self.svc.api(args.api_base_url.value);
@@ -1203,7 +1203,6 @@ mod test {
                 cmd: Command,
                 create_playlist_req: CreatePlaylistRequest,
                 db: DatabaseArgs,
-                email: &'static str,
                 id: Uuid,
                 port: u16,
                 q: &'static str,
@@ -1220,6 +1219,7 @@ mod test {
                 auth_usr_srcs: Mock<Page<SourceResponse>>,
                 auth_via_spotify: Mock<JwtResponse>,
                 create_playlist: Mock<PlaylistResponse>,
+                db_usr_by_id: Mock<User, User>,
                 delete_auth_usr: Mock<()>,
                 delete_playlist: Mock<()>,
                 delete_usr: Mock<()>,
@@ -1240,7 +1240,6 @@ mod test {
                 track_by_id: Mock<Track>,
                 tracks: Mock<Page<Track>>,
                 update_usr: Mock<()>,
-                usr_by_email: Mock<User, User>,
                 usr_by_id: Mock<UserResponse>,
                 usr_playlists: Mock<Page<PlaylistResponse>>,
                 usr_srcs: Mock<Page<SourceResponse>>,
@@ -1253,7 +1252,6 @@ mod test {
                 let usr = User {
                     creation: Utc::now(),
                     creds: Default::default(),
-                    email: data.email.into(),
                     id: Uuid::new_v4(),
                     role: Role::User,
                 };
@@ -1458,11 +1456,11 @@ mod test {
                                 move || {
                                     let mut conn = MockDatabaseConnection::new();
                                     conn.0
-                                        .expect_user_by_email()
-                                        .with(eq(data.email))
-                                        .times(mocks.usr_by_email.times())
+                                        .expect_user_by_id()
+                                        .with(eq(data.id))
+                                        .times(mocks.db_usr_by_id.times())
                                         .returning({
-                                            let mock = mocks.usr_by_email.clone();
+                                            let mock = mocks.db_usr_by_id.clone();
                                             let usr = usr.clone();
                                             move |_| Ok(Some(mock.call_with_args(usr.clone())))
                                         });
@@ -1566,7 +1564,6 @@ mod test {
                         secret: "secret".into(),
                         user: "user".into(),
                     },
-                    email: "user@test",
                     id: Uuid::new_v4(),
                     port,
                     q: "name",
@@ -1596,7 +1593,7 @@ mod test {
             async fn authenticated_user() {
                 let resp = UserResponse {
                     creation: Utc::now(),
-                    email: "user@test".into(),
+                    creds: Default::default(),
                     id: Uuid::new_v4(),
                     role: Role::User,
                 };
@@ -1628,7 +1625,6 @@ mod test {
                         secret: "secret".into(),
                         user: "user".into(),
                     },
-                    email: "user@test",
                     id: Uuid::new_v4(),
                     q: "name",
                     port,
@@ -1693,7 +1689,6 @@ mod test {
                         secret: "secret".into(),
                         user: "user".into(),
                     },
-                    email: "user@test",
                     id: Uuid::new_v4(),
                     port,
                     q: "name",
@@ -1754,7 +1749,6 @@ mod test {
                         secret: "secret".into(),
                         user: "user".into(),
                     },
-                    email: "user@test",
                     id: Uuid::new_v4(),
                     port,
                     q: "name",
@@ -1791,7 +1785,7 @@ mod test {
                         id: Uuid::new_v4(),
                         owner: UserResponse {
                             creation: Utc::now(),
-                            email: "user@test".into(),
+                            creds: Default::default(),
                             id: Uuid::new_v4(),
                             role: Role::User,
                         },
@@ -1827,7 +1821,6 @@ mod test {
                         secret: "secret".into(),
                         user: "user".into(),
                     },
-                    email: "user@test",
                     port: 8080,
                     q: "name",
                     req: PageRequestArgs::<25> {
@@ -1882,7 +1875,6 @@ mod test {
                         secret: "secret".into(),
                         user: "user".into(),
                     },
-                    email: "user@test",
                     id: Uuid::new_v4(),
                     q: "name",
                     port,
@@ -1930,7 +1922,6 @@ mod test {
                         secret: "secret".into(),
                         user: "user".into(),
                     },
-                    email: "user@test",
                     id,
                     port: 8080,
                     q: "name",
@@ -1978,7 +1969,6 @@ mod test {
                         secret: "secret".into(),
                         user: "user".into(),
                     },
-                    email: "user@test",
                     id,
                     port: 8080,
                     q: "name",
@@ -2008,7 +1998,7 @@ mod test {
                         id: Uuid::new_v4(),
                         owner: UserResponse {
                             creation: Utc::now(),
-                            email: "user@test".into(),
+                            creds: Default::default(),
                             id: Uuid::new_v4(),
                             role: Role::User,
                         },
@@ -2046,7 +2036,6 @@ mod test {
                         secret: "secret".into(),
                         user: "user".into(),
                     },
-                    email: "user@test",
                     id,
                     port: 8080,
                     q: "name",
@@ -2111,7 +2100,6 @@ mod test {
                         secret: "secret".into(),
                         user: "user".into(),
                     },
-                    email: "user@test",
                     id,
                     q: "name",
                     port,
@@ -2173,7 +2161,6 @@ mod test {
                         secret: "secret".into(),
                         user: "user".into(),
                     },
-                    email: "user@test",
                     id: Uuid::new_v4(),
                     q: "name",
                     port,
@@ -2236,7 +2223,6 @@ mod test {
                         secret: "secret".into(),
                         user: "user".into(),
                     },
-                    email: "user@test",
                     id: Uuid::new_v4(),
                     port,
                     q,
@@ -2299,7 +2285,6 @@ mod test {
                         secret: "secret".into(),
                         user: "user".into(),
                     },
-                    email: "user@test",
                     id: Uuid::new_v4(),
                     port,
                     q,
@@ -2361,7 +2346,6 @@ mod test {
                         secret: "secret".into(),
                         user: "user".into(),
                     },
-                    email: "user@test",
                     id: Uuid::new_v4(),
                     q,
                     port,
@@ -2388,7 +2372,7 @@ mod test {
                     id: Uuid::new_v4(),
                     owner: UserResponse {
                         creation: Utc::now(),
-                        email: "user@test".into(),
+                        creds: Default::default(),
                         id: Uuid::new_v4(),
                         role: Role::User,
                     },
@@ -2423,7 +2407,6 @@ mod test {
                         secret: "secret".into(),
                         user: "user".into(),
                     },
-                    email: "user@test",
                     id,
                     port: 8080,
                     q: "name",
@@ -2488,7 +2471,6 @@ mod test {
                         secret: "secret".into(),
                         user: "user".into(),
                     },
-                    email: "user@test",
                     id,
                     q: "name",
                     port,
@@ -2549,7 +2531,6 @@ mod test {
                         secret: "secret".into(),
                         user: "user".into(),
                     },
-                    email: "user@test",
                     id: Uuid::new_v4(),
                     q: "name",
                     port,
@@ -2602,7 +2583,6 @@ mod test {
                         secret: "secret".into(),
                         user: "user".into(),
                     },
-                    email: "user@test",
                     q: "name",
                     port: 8080,
                     req: PageRequestArgs::<25> {
@@ -2651,7 +2631,6 @@ mod test {
                         secret: "secret".into(),
                         user: "user".into(),
                     },
-                    email: "user@test",
                     id,
                     q: "name",
                     port: 8080,
@@ -2712,7 +2691,6 @@ mod test {
                         secret: "secret".into(),
                         user: "user".into(),
                     },
-                    email: "user@test",
                     id,
                     port: 8080,
                     q: "name",
@@ -2775,7 +2753,6 @@ mod test {
                         secret: "secret".into(),
                         user: "user".into(),
                     },
-                    email: "user@test",
                     id: Uuid::new_v4(),
                     q: "name",
                     port,
@@ -2797,7 +2774,6 @@ mod test {
 
             #[tokio::test]
             async fn update_user_role() {
-                let email = "user@test";
                 let db = DatabaseArgs {
                     host: "host".into(),
                     name: "name".into(),
@@ -2806,6 +2782,7 @@ mod test {
                     secret: "secret".into(),
                     user: "user".into(),
                 };
+                let id = Uuid::new_v4();
                 let role = RoleArg::Admin;
                 let data = Data {
                     api_base_url: "http://localhost:8000",
@@ -2813,18 +2790,17 @@ mod test {
                     cmd: Command::Admin(AdminCommand::User(AdminUserCommand::UpdateRole(
                         AdminUserUpdateRoleCommandArgs {
                             db: db.clone(),
-                            email: email.into(),
+                            id,
                             role,
                         },
                     ))),
-                    id: Uuid::new_v4(),
+                    id,
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
                         src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
                     db,
-                    email,
                     q: "name",
                     port: 8080,
                     req: PageRequestArgs::<25> {
@@ -2834,8 +2810,8 @@ mod test {
                     role: Role::from(role),
                 };
                 let mocks = Mocks {
+                    db_usr_by_id: Mock::once_with_args(|usr| usr),
                     update_usr: Mock::once(|| ()),
-                    usr_by_email: Mock::once_with_args(|usr| usr),
                     ..Default::default()
                 };
                 let out = run(data, mocks).await;
@@ -2846,7 +2822,7 @@ mod test {
             async fn user_by_id() {
                 let resp = UserResponse {
                     creation: Utc::now(),
-                    email: "user@test".into(),
+                    creds: Default::default(),
                     id: Uuid::new_v4(),
                     role: Role::User,
                 };
@@ -2878,7 +2854,6 @@ mod test {
                         secret: "secret".into(),
                         user: "user".into(),
                     },
-                    email: "user@test",
                     id,
                     port: 8080,
                     q: "name",
@@ -2943,7 +2918,6 @@ mod test {
                         secret: "secret".into(),
                         user: "user".into(),
                     },
-                    email: "user@test",
                     id,
                     q: "name",
                     port,
@@ -3005,7 +2979,6 @@ mod test {
                         secret: "secret".into(),
                         user: "user".into(),
                     },
-                    email: "user@test",
                     id,
                     q: "name",
                     port,
@@ -3066,7 +3039,6 @@ mod test {
                         secret: "secret".into(),
                         user: "user".into(),
                     },
-                    email: "user@test",
                     id: Uuid::new_v4(),
                     q: "name",
                     port,

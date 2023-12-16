@@ -15,7 +15,6 @@ SELECT
     new_src.sync AS src_sync,
     "user".id AS owner_id,
     "user".creation AS owner_creation,
-    "user".email AS owner_email,
     "user".role AS "owner_role: Role", -- noqa: disable=RF05
     "user".creds AS owner_creds
 FROM new_src

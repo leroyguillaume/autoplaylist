@@ -23,7 +23,7 @@ use autoplaylist_common::{
     db::{
         pg::{PostgresConfig, PostgresPool},
         DatabaseConnection, DatabaseError, DatabasePool, DatabaseTransaction, PlaylistCreation,
-        SourceCreation, UserCreation,
+        SourceCreation,
     },
     model::{Credentials, Playlist, Role, SourceKind, SpotifyCredentials, Target},
     sigs::TerminationSignalListener,
@@ -314,10 +314,11 @@ fn create_app<
                             .await?;
                         let spotify_usr = spotify.authenticated_user(&mut token).await?;
                         let creds = SpotifyCredentials {
+                            email: spotify_usr.email,
                             id: spotify_usr.id,
                             token,
                         };
-                        let usr = db_conn.user_by_email(&spotify_usr.email).await?;
+                        let usr = db_conn.user_by_spotify_id(&creds.id).await?;
                         let (usr, created) = match usr {
                             Some(mut usr) => {
                                 usr.creds.spotify = Some(creds);
@@ -325,14 +326,11 @@ fn create_app<
                                 (usr, false)
                             }
                             None => {
-                                let creation = UserCreation {
-                                    creds: Credentials {
-                                        spotify: Some(creds),
-                                    },
-                                    email: spotify_usr.email,
+                                let creds = Credentials {
+                                    spotify: Some(creds),
                                 };
-                                let usr = db_conn.create_user(&creation).await?;
-                                info!(usr.email, %usr.id, "user created");
+                                let usr = db_conn.create_user(&creds).await?;
+                                info!(%usr.id, "user created");
                                 (usr, true)
                             }
                         };
@@ -370,7 +368,6 @@ fn create_app<
                             .await?;
                         let span = info_span!(
                             "auth_user",
-                            auth.usr.email = %usr.email,
                             auth.usr.id = %usr.id,
                         );
                         async {
@@ -399,12 +396,11 @@ fn create_app<
                             .await?;
                         let span = info_span!(
                             "delete_auth_user",
-                            auth.usr.email = %usr.email,
                             auth.usr.id = %usr.id,
                         );
                         async {
                             if db_conn.delete_user(usr.id).await? {
-                                info!(usr.email, %usr.id, "user deleted");
+                                info!(%usr.id, "user deleted");
                                 Ok(StatusCode::NO_CONTENT)
                             } else {
                                 Ok(StatusCode::UNAUTHORIZED)
@@ -433,7 +429,6 @@ fn create_app<
                             .await?;
                         let span = info_span!(
                             "auth_user_playlists",
-                            auth.usr.email = %usr.email,
                             auth.usr.id = %usr.id,
                             params.limit = req.limit,
                             params.offset = req.offset,
@@ -469,7 +464,6 @@ fn create_app<
                             .await?;
                         let span = info_span!(
                             "search_auth_user_playlists_by_name",
-                            auth.usr.email = %usr.email,
                             auth.usr.id = %usr.id,
                             params.limit = req.limit,
                             params.offset = req.offset,
@@ -503,7 +497,6 @@ fn create_app<
                             .await?;
                         let span = info_span!(
                             "auth_user_sources",
-                            auth.usr.email = %usr.email,
                             auth.usr.id = %usr.id,
                             params.limit = req.limit,
                             params.offset = req.offset,
@@ -538,7 +531,6 @@ fn create_app<
                             .await?;
                         let span = info_span!(
                             "playlists",
-                            auth.usr.email = %usr.email,
                             auth.usr.id = %usr.id,
                             params.limit = req.limit,
                             params.offset = req.offset,
@@ -575,7 +567,6 @@ fn create_app<
                             .await?;
                         let span = info_span!(
                             "create_playlist",
-                            auth.usr.email = %usr.email,
                             auth.usr.id = %usr.id,
                             playlist.name = req.name,
                             playlist.src.kind = %req.src,
@@ -602,12 +593,7 @@ fn create_app<
                                             owner: usr,
                                         };
                                         let src = db_tx.create_source(&creation).await?;
-                                        info!(
-                                            %src.kind,
-                                            src.owner.email,
-                                            %src.owner.id,
-                                            "source created"
-                                        );
+                                        info!(%src.kind, %src.owner.id, "source created");
                                         (src, true)
                                     }
                                 };
@@ -621,7 +607,6 @@ fn create_app<
                                 info!(
                                     %playlist.id,
                                     %playlist.src.kind,
-                                    playlist.src.owner.email,
                                     %playlist.src.owner.id,
                                     "playlist created"
                                 );
@@ -665,7 +650,6 @@ fn create_app<
                             .await?;
                         let span = info_span!(
                             "delete_playlist",
-                            auth.usr.email = %usr.email,
                             auth.usr.id = %usr.id,
                             playlist.id = %id,
                         );
@@ -710,7 +694,6 @@ fn create_app<
                             .await?;
                         let span = info_span!(
                             "playlist_by_id",
-                            auth.usr.email = %usr.email,
                             auth.usr.id = %usr.id,
                             playlist.id = %id,
                         );
@@ -743,7 +726,6 @@ fn create_app<
                             .await?;
                         let span = info_span!(
                             "search_playlists_by_name",
-                            auth.usr.email = %usr.email,
                             auth.usr.id = %usr.id,
                             params.limit = req.limit,
                             params.offset = req.offset,
@@ -780,7 +762,6 @@ fn create_app<
                             .await?;
                         let span = info_span!(
                             "start_playlist_synchronization",
-                            auth.usr.email = %usr.email,
                             auth.usr.id = %usr.id,
                             playlist.id = %id,
                         );
@@ -821,7 +802,6 @@ fn create_app<
                             .await?;
                         let span = info_span!(
                             "playlist_tracks",
-                            auth.usr.email = %usr.email,
                             auth.usr.id = %usr.id,
                             params.limit = req.limit,
                             params.offset = req.offset,
@@ -856,7 +836,6 @@ fn create_app<
                             .await?;
                         let span = info_span!(
                             "sources",
-                            auth.usr.email = %usr.email,
                             auth.usr.id = %usr.id,
                             params.limit = req.limit,
                             params.offset = req.offset,
@@ -890,7 +869,6 @@ fn create_app<
                             .await?;
                         let span = info_span!(
                             "source_tracks",
-                            auth.usr.email = %usr.email,
                             auth.usr.id = %usr.id,
                             params.limit = req.limit,
                             params.offset = req.offset,
@@ -925,7 +903,6 @@ fn create_app<
                             .await?;
                         let span = info_span!(
                             "source_by_id",
-                            auth.usr.email = %usr.email,
                             auth.usr.id = %usr.id,
                             src.id = %id,
                         );
@@ -957,7 +934,6 @@ fn create_app<
                             .await?;
                         let span = info_span!(
                             "start_source_synchronization",
-                            auth.usr.email = %usr.email,
                             auth.usr.id = %usr.id,
                             src.id = %id,
                         );
@@ -997,7 +973,6 @@ fn create_app<
                             .await?;
                         let span = info_span!(
                             "tracks",
-                            auth.usr.email = %usr.email,
                             auth.usr.id = %usr.id,
                             params.limit = req.limit,
                             params.offset = req.offset,
@@ -1029,7 +1004,6 @@ fn create_app<
                             .await?;
                         let span = info_span!(
                             "track_by_id",
-                            auth.usr.email = %usr.email,
                             auth.usr.id = %usr.id,
                             track.id = %id,
                         );
@@ -1060,7 +1034,6 @@ fn create_app<
                             .await?;
                         let span = info_span!(
                             "users",
-                            auth.usr.email = %usr.email,
                             auth.usr.id = %usr.id,
                             params.limit = req.limit,
                             params.offset = req.offset,
@@ -1093,7 +1066,6 @@ fn create_app<
                             .await?;
                         let span = info_span!(
                             "user_by_id",
-                            auth.usr.email = %usr.email,
                             auth.usr.id = %usr.id,
                             usr.id = %id,
                         );
@@ -1125,7 +1097,6 @@ fn create_app<
                             .await?;
                         let span = info_span!(
                             "delete_user",
-                            auth.usr.email = %usr.email,
                             auth.usr.id = %usr.id,
                             usr.id = %id,
                         );
@@ -1162,7 +1133,6 @@ fn create_app<
                             .await?;
                         let span = info_span!(
                             "user_playlists",
-                            auth.usr.email = %usr.email,
                             auth.usr.id = %usr.id,
                             usr.id = %id,
                         );
@@ -1199,7 +1169,6 @@ fn create_app<
                             .await?;
                         let span = info_span!(
                             "search_users_by_email",
-                            auth.usr.email = %usr.email,
                             auth.usr.id = %usr.id,
                             params.limit = req.limit,
                             params.offset = req.offset,
@@ -1237,7 +1206,6 @@ fn create_app<
                             .await?;
                         let span = info_span!(
                             "user_sources",
-                            auth.usr.email = %usr.email,
                             auth.usr.id = %usr.id,
                             usr.id = %id,
                         );
@@ -1403,7 +1371,7 @@ mod test {
         struct Mocks {
             create_usr: Mock<()>,
             update_usr: Mock<()>,
-            usr_by_email: Mock<Option<User>, User>,
+            usr_by_spotify_id: Mock<Option<User>, User>,
         }
 
         // Tests
@@ -1426,28 +1394,29 @@ mod test {
                 creation: Utc::now(),
                 creds: Credentials {
                     spotify: Some(SpotifyCredentials {
+                        email: spotify_usr.email.clone(),
                         id: spotify_usr.id.clone(),
                         token: token.clone(),
                     }),
                 },
-                email: spotify_usr.email.clone(),
                 id: Uuid::new_v4(),
                 role: Role::User,
             };
             let expected = "jwt";
             let db = MockDatabasePool {
                 acquire: Mock::once({
+                    let spotify_usr = spotify_usr.clone();
                     let usr = usr.clone();
                     let mocks = mocks.clone();
                     move || {
                         let mut conn = MockDatabaseConnection::new();
                         conn.0
-                            .expect_user_by_email()
-                            .with(eq(usr.email.clone()))
-                            .times(mocks.usr_by_email.times())
+                            .expect_user_by_spotify_id()
+                            .with(eq(spotify_usr.id.clone()))
+                            .times(mocks.usr_by_spotify_id.times())
                             .returning({
                                 let usr = usr.clone();
-                                let mock = mocks.usr_by_email.clone();
+                                let mock = mocks.usr_by_spotify_id.clone();
                                 move |_| Ok(mock.call_with_args(usr.clone()))
                             });
                         conn.0
@@ -1461,10 +1430,9 @@ mod test {
                                     Ok(())
                                 }
                             });
-                        let creation: UserCreation = usr.clone().into();
                         conn.0
                             .expect_create_user()
-                            .with(eq(creation))
+                            .with(eq(usr.creds.clone()))
                             .times(mocks.create_usr.times())
                             .returning({
                                 let usr = usr.clone();
@@ -1526,7 +1494,7 @@ mod test {
         async fn ok_when_user_was_created() {
             let mocks = Mocks {
                 create_usr: Mock::once(|| ()),
-                usr_by_email: Mock::once_with_args(|_| None),
+                usr_by_spotify_id: Mock::once_with_args(|_| None),
                 ..Default::default()
             };
             let (resp, expected) = run(mocks).await;
@@ -1539,7 +1507,7 @@ mod test {
         async fn ok_when_user_didnt_exist() {
             let mocks = Mocks {
                 update_usr: Mock::once(|| ()),
-                usr_by_email: Mock::once_with_args(Some),
+                usr_by_spotify_id: Mock::once_with_args(Some),
                 ..Default::default()
             };
             let (resp, expected) = run(mocks).await;
@@ -1565,7 +1533,6 @@ mod test {
             let usr = User {
                 creation: Utc::now(),
                 creds: Default::default(),
-                email: "user@test".into(),
                 id: Uuid::new_v4(),
                 role: Role::User,
             };
@@ -1642,7 +1609,6 @@ mod test {
             let usr = User {
                 creation: Utc::now(),
                 creds: Default::default(),
-                email: "user@test".into(),
                 id: Uuid::new_v4(),
                 role: Role::User,
             };
@@ -1748,7 +1714,6 @@ mod test {
             let usr = User {
                 creation: Utc::now(),
                 creds: Default::default(),
-                email: "user@test".into(),
                 id: Uuid::new_v4(),
                 role: Role::User,
             };
@@ -1869,7 +1834,6 @@ mod test {
                 creds: Credentials {
                     spotify: data.usr_creds,
                 },
-                email: "user@test".into(),
                 id: Uuid::new_v4(),
                 role: Role::User,
             };
@@ -1988,6 +1952,7 @@ mod test {
         #[tokio::test]
         async fn bad_request() {
             let creds = SpotifyCredentials {
+                email: "user@test".into(),
                 id: "id".into(),
                 token: SpotifyToken {
                     access: "access".into(),
@@ -2020,6 +1985,7 @@ mod test {
         #[tokio::test]
         async fn unauthorized() {
             let creds = SpotifyCredentials {
+                email: "user@test".into(),
                 id: "id".into(),
                 token: SpotifyToken {
                     access: "access".into(),
@@ -2048,6 +2014,7 @@ mod test {
         #[tokio::test]
         async fn no_spotify_credentials() {
             let creds = SpotifyCredentials {
+                email: "user@test".into(),
                 id: "id".into(),
                 token: SpotifyToken {
                     access: "access".into(),
@@ -2076,6 +2043,7 @@ mod test {
         #[tokio::test]
         async fn created_when_source_didnt_exist() {
             let creds = SpotifyCredentials {
+                email: "user@test".into(),
                 id: "id".into(),
                 token: SpotifyToken {
                     access: "access".into(),
@@ -2109,6 +2077,7 @@ mod test {
         #[tokio::test]
         async fn created_when_source_was_created() {
             let creds = SpotifyCredentials {
+                email: "user@test".into(),
                 id: "id".into(),
                 token: SpotifyToken {
                     access: "access".into(),
@@ -2156,7 +2125,6 @@ mod test {
             let usr = User {
                 creation: Utc::now(),
                 creds: Default::default(),
-                email: "user@test".into(),
                 id: Uuid::new_v4(),
                 role: Role::User,
             };
@@ -2270,7 +2238,6 @@ mod test {
                     owner: User {
                         creation: Utc::now(),
                         creds: Default::default(),
-                        email: "user@test".into(),
                         id: Uuid::new_v4(),
                         role: Role::User,
                     },
@@ -2457,7 +2424,6 @@ mod test {
             let usr = User {
                 creation: Utc::now(),
                 creds: Default::default(),
-                email: "user@test".into(),
                 id: Uuid::new_v4(),
                 role: Role::User,
             };
@@ -2615,7 +2581,6 @@ mod test {
                     owner: User {
                         creation: Utc::now(),
                         creds: Default::default(),
-                        email: "user@test".into(),
                         id: Uuid::new_v4(),
                         role: Role::User,
                     },
@@ -2773,7 +2738,6 @@ mod test {
                     owner: User {
                         creation: Utc::now(),
                         creds: Default::default(),
-                        email: "user@test".into(),
                         id: Uuid::new_v4(),
                         role: Role::User,
                     },
@@ -2939,7 +2903,6 @@ mod test {
             let usr = User {
                 creation: Utc::now(),
                 creds: Default::default(),
-                email: "user@test".into(),
                 id: Uuid::new_v4(),
                 role: Role::Admin,
             };
@@ -3057,7 +3020,6 @@ mod test {
             let usr = User {
                 creation: Utc::now(),
                 creds: Default::default(),
-                email: "user@test".into(),
                 id: Uuid::new_v4(),
                 role: Role::User,
             };
@@ -3167,7 +3129,6 @@ mod test {
             let usr = User {
                 creation: Utc::now(),
                 creds: Default::default(),
-                email: "user@test".into(),
                 id: Uuid::new_v4(),
                 role: Role::Admin,
             };
@@ -3291,7 +3252,6 @@ mod test {
             let usr = User {
                 creation: Utc::now(),
                 creds: Default::default(),
-                email: "user@test".into(),
                 id: Uuid::new_v4(),
                 role: Role::Admin,
             };
@@ -3418,7 +3378,6 @@ mod test {
                 owner: User {
                     creation: Utc::now(),
                     creds: Default::default(),
-                    email: "user@test".into(),
                     id: Uuid::new_v4(),
                     role: Role::User,
                 },
@@ -3566,7 +3525,6 @@ mod test {
                 owner: User {
                     creation: Utc::now(),
                     creds: Default::default(),
-                    email: "user@test".into(),
                     id: Uuid::new_v4(),
                     role: Role::User,
                 },
@@ -3729,7 +3687,6 @@ mod test {
             let usr = User {
                 creation: Utc::now(),
                 creds: Default::default(),
-                email: "user@test".into(),
                 id: Uuid::new_v4(),
                 role: Role::Admin,
             };
@@ -3886,7 +3843,6 @@ mod test {
             let usr = User {
                 creation: Utc::now(),
                 creds: Default::default(),
-                email: "user@test".into(),
                 id: Uuid::new_v4(),
                 role: Role::Admin,
             };
@@ -4021,7 +3977,6 @@ mod test {
             let usr = User {
                 creation: Utc::now(),
                 creds: Default::default(),
-                email: "user@test".into(),
                 id: Uuid::new_v4(),
                 role: Role::Admin,
             };
@@ -4155,7 +4110,6 @@ mod test {
             let usr = User {
                 creation: Utc::now(),
                 creds: Default::default(),
-                email: "user@test".into(),
                 id: Uuid::new_v4(),
                 role: Role::User,
             };
@@ -4274,7 +4228,6 @@ mod test {
             let usr = User {
                 creation: Utc::now(),
                 creds: Default::default(),
-                email: "user@test".into(),
                 id: Uuid::new_v4(),
                 role: Role::Admin,
             };
@@ -4375,7 +4328,6 @@ mod test {
             let usr = User {
                 creation: Utc::now(),
                 creds: Default::default(),
-                email: "user@test".into(),
                 id: Uuid::new_v4(),
                 role: Role::User,
             };
@@ -4516,7 +4468,6 @@ mod test {
             let usr = User {
                 creation: Utc::now(),
                 creds: Default::default(),
-                email: "user@test".into(),
                 id: Uuid::new_v4(),
                 role: Role::User,
             };
@@ -4677,7 +4628,6 @@ mod test {
             let usr = User {
                 creation: Utc::now(),
                 creds: Default::default(),
-                email: "user@test".into(),
                 id: Uuid::new_v4(),
                 role: Role::User,
             };
@@ -4837,7 +4787,6 @@ mod test {
             let usr = User {
                 creation: Utc::now(),
                 creds: Default::default(),
-                email: "user@test".into(),
                 id: Uuid::new_v4(),
                 role: Role::Admin,
             };

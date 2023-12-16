@@ -1,6 +1,6 @@
 UPDATE "user"
 SET
-    email = $2,
-    role = $3,
+    role = $2,
+    spotify_creds = $3,
     creds = $4
 WHERE id = $1;

@@ -767,6 +767,7 @@ mod test {
             #[tokio::test]
             async fn id() {
                 let mut creds = SpotifyCredentials {
+                    email: "user@test".into(),
                     id: "216m62jtruqgd6iaqx224jiqi".into(),
                     token: token(),
                 };
