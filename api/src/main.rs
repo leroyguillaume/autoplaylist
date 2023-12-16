@@ -176,6 +176,12 @@ pub enum ApiError {
         #[source]
         regex::Error,
     ),
+    #[error("failed to serialize JSON: {0}")]
+    Serialization(
+        #[from]
+        #[source]
+        serde_json::Error,
+    ),
     #[error("Spotify error: {0}")]
     Spotify(
         #[from]
@@ -330,7 +336,7 @@ fn create_app<
                                 (usr, true)
                             }
                         };
-                        let jwt = state.svc.jwt().generate(usr.id)?;
+                        let jwt = state.svc.jwt().generate(&usr)?;
                         let resp = JwtResponse { jwt };
                         let status = if created {
                             StatusCode::CREATED
@@ -1479,7 +1485,7 @@ mod test {
             let mut jwt_prov = MockJwtProvider::new();
             jwt_prov
                 .expect_generate()
-                .with(eq(usr.id))
+                .with(eq(usr.clone()))
                 .times(1)
                 .returning(|_| Ok(expected.into()));
             let state = AppState {
