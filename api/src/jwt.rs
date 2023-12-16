@@ -1,7 +1,8 @@
-use std::num::ParseIntError;
+use std::{collections::BTreeMap, num::ParseIntError};
 
+use autoplaylist_common::model::User;
 use hmac::{digest::InvalidLength, Hmac, Mac};
-use jwt::{RegisteredClaims, SignWithKey, VerifyWithKey};
+use jwt::{Claims, RegisteredClaims, SignWithKey, VerifyWithKey};
 use mockable::{Clock, DefaultClock, Env};
 use sha2::Sha256;
 use thiserror::Error;
@@ -15,6 +16,10 @@ use crate::{ApiError, ApiResult};
 pub const ENV_VAR_KEY_JWT_ISSUER: &str = "JWT_ISSUER";
 pub const ENV_VAR_KEY_JWT_SECRET: &str = "JWT_SECRET";
 pub const ENV_VAR_KEY_JWT_VALIDITY: &str = "JWT_VALIDITY";
+
+// Consts - Claim keys
+
+pub const CLAIM_KEY_ROLE: &str = "role";
 
 // Consts - Defaults
 
@@ -65,7 +70,7 @@ impl JwtConfig {
 
 #[cfg_attr(test, mockall::automock)]
 pub trait JwtProvider: Send + Sync {
-    fn generate(&self, sub: Uuid) -> ApiResult<String>;
+    fn generate(&self, usr: &User) -> ApiResult<String>;
 
     fn verify(&self, jwt: &str) -> ApiResult<Uuid>;
 }
@@ -90,14 +95,20 @@ impl DefaultJwtProvider<DefaultClock> {
 }
 
 impl<CLOCK: Clock> JwtProvider for DefaultJwtProvider<CLOCK> {
-    fn generate(&self, sub: Uuid) -> ApiResult<String> {
+    fn generate(&self, usr: &User) -> ApiResult<String> {
+        trace!("getting current timestamp");
         let ts: u64 = self.clock.utc().timestamp().try_into()?;
-        let claims = RegisteredClaims {
-            expiration: Some(ts + self.cfg.validity),
-            issued_at: Some(ts),
-            issuer: Some(self.cfg.issuer.clone()),
-            subject: Some(sub.to_string()),
-            ..Default::default()
+        trace!("serializing role into JSON");
+        let role = serde_json::to_value(usr.role)?;
+        let claims = Claims {
+            private: BTreeMap::from_iter([(CLAIM_KEY_ROLE.into(), role)]),
+            registered: RegisteredClaims {
+                expiration: Some(ts + self.cfg.validity),
+                issued_at: Some(ts),
+                issuer: Some(self.cfg.issuer.clone()),
+                subject: Some(usr.id.to_string()),
+                ..Default::default()
+            },
         };
         trace!("generating JWT");
         let jwt = claims.sign_with_key(&self.key)?;
@@ -130,6 +141,7 @@ impl<CLOCK: Clock> JwtProvider for DefaultJwtProvider<CLOCK> {
 mod test {
     use super::*;
 
+    use autoplaylist_common::model::Role;
     use chrono::Utc;
     use jwt::VerifyWithKey;
     use mockable::{MockClock, MockEnv};
@@ -230,15 +242,31 @@ mod test {
                     .expect("failed to cast timestamp");
                 clock.expect_utc().times(1).return_const(now);
                 let provider = DefaultJwtProvider { cfg, clock, key };
-                let sub = Uuid::new_v4();
-                let jwt = provider.generate(sub).expect("failed to generate JWT");
-                let claims: RegisteredClaims = jwt
+                let usr = User {
+                    creation: Utc::now(),
+                    creds: Default::default(),
+                    email: "user@test".into(),
+                    id: Uuid::new_v4(),
+                    role: Role::Admin,
+                };
+                let jwt = provider.generate(&usr).expect("failed to generate JWT");
+                let claims: Claims = jwt
                     .verify_with_key(&provider.key)
                     .expect("failed to verify JWT");
-                assert_eq!(claims.subject, Some(sub.to_string()));
-                assert_eq!(claims.issuer, Some(provider.cfg.issuer));
-                assert_eq!(claims.issued_at, Some(ts));
-                assert_eq!(claims.expiration, Some(ts + provider.cfg.validity));
+                assert_eq!(claims.registered.subject, Some(usr.id.to_string()));
+                assert_eq!(claims.registered.issuer, Some(provider.cfg.issuer));
+                assert_eq!(claims.registered.issued_at, Some(ts));
+                assert_eq!(
+                    claims.registered.expiration,
+                    Some(ts + provider.cfg.validity)
+                );
+                let role = claims
+                    .private
+                    .get(CLAIM_KEY_ROLE)
+                    .expect("missing role")
+                    .clone();
+                let role: Role = serde_json::from_value(role).expect("failed to deserialize role");
+                assert_eq!(role, usr.role);
             }
         }
 
