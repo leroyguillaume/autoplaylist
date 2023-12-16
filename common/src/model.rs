@@ -520,7 +520,14 @@ fn btreeset_string_trim_lowercase<'a, D: Deserializer<'a>>(
 ) -> Result<BTreeSet<String>, D::Error> {
     let set = BTreeSet::deserialize(deserializer)?
         .into_iter()
-        .map(|s: String| s.trim().to_lowercase())
+        .filter_map(|s: String| {
+            let s = s.trim().to_lowercase();
+            if s.is_empty() {
+                None
+            } else {
+                Some(s)
+            }
+        })
         .collect();
     Ok(set)
 }
@@ -582,7 +589,7 @@ mod test {
 
         #[test]
         fn dummy() {
-            let json = "{\"set\":[\"   fOo\",\"   BaR\"]}";
+            let json = "{\"set\":[\"   fOo\", \"    \",\"   BaR\"]}";
             let expected = Dummy {
                 set: BTreeSet::from_iter(["foo".into(), "bar".into()]),
             };
