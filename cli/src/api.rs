@@ -290,7 +290,7 @@ impl ApiClient for DefaultApiClient {
         let span = debug_span!(
             "create_playlist",
             playlist.name = req.name,
-            playlist.platform = %req.platform
+            playlist.src.kind = %req.src,
         );
         async {
             let req = Client::new()
@@ -843,7 +843,6 @@ mod test {
             async fn playlist() {
                 let req = CreatePlaylistRequest {
                     name: "name".into(),
-                    platform: Platform::Spotify,
                     predicate: Predicate::YearIs(1993),
                     src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                 };

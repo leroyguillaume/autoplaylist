@@ -531,6 +531,7 @@ impl<
     ) -> SynchronizerResult<()> {
         let clock = svc.clock();
         let mut state = self.state_cmpter.compute(sync, clock)?;
+        info!("synchronization started");
         let res = loop {
             select! {
                 succeeded = self.state_proc.process(

@@ -4,7 +4,6 @@
       {
         "equalToJson": {
           "name": "name",
-          "platform": "spotify",
           "predicate": {
             "yearIs": 1993
           },

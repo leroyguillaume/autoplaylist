@@ -6,7 +6,7 @@ use serde_trim::string_trim;
 use uuid::Uuid;
 
 use crate::model::{
-    PageRequest, Platform, Playlist, PlaylistSynchronization, Predicate, Role, Source, SourceKind,
+    PageRequest, Playlist, PlaylistSynchronization, Predicate, Role, Source, SourceKind,
     SourceSynchronization, Target, User,
 };
 
@@ -49,7 +49,6 @@ pub struct AuthenticateViaSpotifyQueryParams {
 pub struct CreatePlaylistRequest {
     #[serde(deserialize_with = "string_trim")]
     pub name: String,
-    pub platform: Platform,
     pub predicate: Predicate,
     pub src: SourceKind,
 }
@@ -242,7 +241,6 @@ mod test {
             fn unit() {
                 let req = CreatePlaylistRequest {
                     name: "name".into(),
-                    platform: Platform::Spotify,
                     predicate: Predicate::YearIs(1993),
                     src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                 };
@@ -253,7 +251,6 @@ mod test {
             fn resp() {
                 let req = CreatePlaylistRequest {
                     name: "".into(),
-                    platform: Platform::Spotify,
                     predicate: Predicate::ArtistsAre(Default::default()),
                     src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                 };
