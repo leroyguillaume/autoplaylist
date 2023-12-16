@@ -668,7 +668,7 @@ fn create_app<
                             ensure_user_is_admin_or_owner!(usr, playlist.src.owner);
                             transactional!(db_tx, async {
                                 let deleted = db_tx.delete_playlist(id).await?;
-                                let src_count = db_tx.count_source_playlists(id).await?;
+                                let src_count = db_tx.count_source_playlists(playlist.src.id).await?;
                                 if src_count == 0 {
                                     db_tx.delete_source(playlist.src.id).await?;
                                     info!(%playlist.src.id, "source deleted");
@@ -2312,7 +2312,7 @@ mod test {
                             });
                         tx.client
                             .expect_count_source_playlists()
-                            .with(eq(playlist.id))
+                            .with(eq(playlist.src.id))
                             .times(mocks.count_srcs.times())
                             .returning({
                                 let mock = mocks.count_srcs.clone();
