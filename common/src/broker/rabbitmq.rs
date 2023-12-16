@@ -101,6 +101,18 @@ impl RabbitMqClient {
         let conn = Connection::connect(&cfg.url, Default::default()).await?;
         trace!("opening channel");
         let channel = conn.create_channel().await?;
+        let exchs = [&cfg.playlist_msg_exch, &cfg.src_msg_exch];
+        for exch in &exchs {
+            debug!(exch, "declaring exchange");
+            channel
+                .exchange_declare(
+                    exch,
+                    ExchangeKind::Fanout,
+                    Default::default(),
+                    Default::default(),
+                )
+                .await?;
+        }
         Ok(Self { cfg, channel, conn })
     }
 
@@ -295,15 +307,6 @@ impl RabbitMqConsumer {
             debug!("declaring queue");
             channel
                 .queue_declare(queue, Default::default(), Default::default())
-                .await?;
-            debug!("declaring exchange");
-            channel
-                .exchange_declare(
-                    exch,
-                    ExchangeKind::Fanout,
-                    Default::default(),
-                    Default::default(),
-                )
                 .await?;
             debug!("binding queue to exchange");
             channel
