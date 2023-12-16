@@ -25,7 +25,7 @@ use autoplaylist_common::{
         DatabaseConnection, DatabaseError, DatabasePool, DatabaseTransaction, PlaylistCreation,
         SourceCreation, UserCreation,
     },
-    model::{Credentials, Platform, Playlist, Role, SpotifyCredentials, Target},
+    model::{Credentials, Playlist, Role, SourceKind, SpotifyCredentials, Target},
     sigs::TerminationSignalListener,
     spotify::{
         rspotify::{RSpotifyClient, RSpotifyConfig},
@@ -572,11 +572,11 @@ fn create_app<
                             auth.usr.email = %usr.email,
                             auth.usr.id = %usr.id,
                             playlist.name = req.name,
-                            playlist.platform = %req.platform,
+                            playlist.src.kind = %req.src,
                         );
                         async {
-                            let tgt = match req.platform {
-                                Platform::Spotify => {
+                            let tgt = match req.src {
+                                SourceKind::Spotify(_) => {
                                     let creds = usr
                                         .creds
                                         .spotify
@@ -596,7 +596,12 @@ fn create_app<
                                             owner: usr,
                                         };
                                         let src = db_tx.create_source(&creation).await?;
-                                        info!(src.owner.email, %src.owner.id, "source created");
+                                        info!(
+                                            %src.kind,
+                                            src.owner.email,
+                                            %src.owner.id,
+                                            "source created"
+                                        );
                                         (src, true)
                                     }
                                 };
@@ -607,7 +612,13 @@ fn create_app<
                                     tgt,
                                 };
                                 let playlist = db_tx.create_playlist(&creation).await?;
-                                info!(%playlist.id, playlist.src.owner.email, %playlist.src.owner.id, "playlist created");
+                                info!(
+                                    %playlist.id,
+                                    %playlist.src.kind,
+                                    playlist.src.owner.email,
+                                    %playlist.src.owner.id,
+                                    "playlist created"
+                                );
                                 Ok::<(Playlist, bool), ApiError>((playlist, new_src))
                             })?;
                             let broker = state.svc.broker();
@@ -1298,7 +1309,7 @@ mod test {
         broker::MockBrokerClient,
         db::{MockDatabaseConnection, MockDatabasePool, MockDatabaseTransaction},
         model::{
-            Album, Page, PageRequest, Playlist, Predicate, Role, Source, SourceKind,
+            Album, Page, PageRequest, Platform, Playlist, Predicate, Role, Source, SourceKind,
             SpotifySourceKind, SpotifyToken, Synchronization, Target, Track, User,
         },
         spotify::{MockSpotifyClient, SpotifyUser},
@@ -1982,7 +1993,6 @@ mod test {
                 creds: creds.clone(),
                 req: CreatePlaylistRequest {
                     name: "".into(),
-                    platform: Platform::Spotify,
                     predicate: Predicate::YearIs(1993),
                     src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                 },
@@ -2015,7 +2025,6 @@ mod test {
                 creds: creds.clone(),
                 req: CreatePlaylistRequest {
                     name: "name".into(),
-                    platform: Platform::Spotify,
                     predicate: Predicate::YearIs(1993),
                     src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                 },
@@ -2044,7 +2053,6 @@ mod test {
                 creds,
                 req: CreatePlaylistRequest {
                     name: "name".into(),
-                    platform: Platform::Spotify,
                     predicate: Predicate::YearIs(1993),
                     src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                 },
@@ -2073,7 +2081,6 @@ mod test {
                 creds: creds.clone(),
                 req: CreatePlaylistRequest {
                     name: "name".into(),
-                    platform: Platform::Spotify,
                     predicate: Predicate::YearIs(1993),
                     src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                 },
@@ -2107,7 +2114,6 @@ mod test {
                 creds: creds.clone(),
                 req: CreatePlaylistRequest {
                     name: "name".into(),
-                    platform: Platform::Spotify,
                     predicate: Predicate::YearIs(1993),
                     src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                 },

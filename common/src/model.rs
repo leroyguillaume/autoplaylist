@@ -1,4 +1,7 @@
-use std::collections::BTreeSet;
+use std::{
+    collections::BTreeSet,
+    fmt::{self, Display, Formatter},
+};
 
 use chrono::{DateTime, Utc};
 use enum_display::EnumDisplay;
@@ -403,6 +406,15 @@ impl Synchronizable<SourceSynchronizationStep> for Source {
 #[serde(rename_all = "camelCase")]
 pub enum SourceKind {
     Spotify(SpotifySourceKind),
+}
+
+impl Display for SourceKind {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match &self {
+            Self::Spotify(SpotifySourceKind::Playlist(id)) => write!(f, "Spotify playlist ({id})"),
+            Self::Spotify(SpotifySourceKind::SavedTracks) => write!(f, "Spotify saved tracks"),
+        }
+    }
 }
 
 // SourceSynchronizationStep

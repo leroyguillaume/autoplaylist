@@ -1556,7 +1556,6 @@ mod test {
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
-                        platform: Platform::Spotify,
                         src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
                     db: DatabaseArgs {
@@ -1619,7 +1618,6 @@ mod test {
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
-                        platform: Platform::Spotify,
                         src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
                     db: DatabaseArgs {
@@ -1685,7 +1683,6 @@ mod test {
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
-                        platform: Platform::Spotify,
                         src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
                     db: DatabaseArgs {
@@ -1747,7 +1744,6 @@ mod test {
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
-                        platform: Platform::Spotify,
                         src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
                     db: DatabaseArgs {
@@ -1821,7 +1817,6 @@ mod test {
                     create_playlist_req: CreatePlaylistRequest {
                         name: resp.name.clone(),
                         predicate: resp.predicate.clone(),
-                        platform: Platform::Spotify,
                         src: resp.src.kind.clone(),
                     },
                     db: DatabaseArgs {
@@ -1877,7 +1872,6 @@ mod test {
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
-                        platform: Platform::Spotify,
                         src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
                     db: DatabaseArgs {
@@ -1926,7 +1920,6 @@ mod test {
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
-                        platform: Platform::Spotify,
                         src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
                     db: DatabaseArgs {
@@ -1975,7 +1968,6 @@ mod test {
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
-                        platform: Platform::Spotify,
                         src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
                     db: DatabaseArgs {
@@ -2044,7 +2036,6 @@ mod test {
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
-                        platform: Platform::Spotify,
                         src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
                     db: DatabaseArgs {
@@ -2110,7 +2101,6 @@ mod test {
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
-                        platform: Platform::Spotify,
                         src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
                     db: DatabaseArgs {
@@ -2173,7 +2163,6 @@ mod test {
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
-                        platform: Platform::Spotify,
                         src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
                     db: DatabaseArgs {
@@ -2237,7 +2226,6 @@ mod test {
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
-                        platform: Platform::Spotify,
                         src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
                     db: DatabaseArgs {
@@ -2301,7 +2289,6 @@ mod test {
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
-                        platform: Platform::Spotify,
                         src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
                     db: DatabaseArgs {
@@ -2364,7 +2351,6 @@ mod test {
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
-                        platform: Platform::Spotify,
                         src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
                     db: DatabaseArgs {
@@ -2427,7 +2413,6 @@ mod test {
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
-                        platform: Platform::Spotify,
                         src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
                     db: DatabaseArgs {
@@ -2493,7 +2478,6 @@ mod test {
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
-                        platform: Platform::Spotify,
                         src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
                     db: DatabaseArgs {
@@ -2555,7 +2539,6 @@ mod test {
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
-                        platform: Platform::Spotify,
                         src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
                     db: DatabaseArgs {
@@ -2609,7 +2592,6 @@ mod test {
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
-                        platform: Platform::Spotify,
                         src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
                     db: DatabaseArgs {
@@ -2659,7 +2641,6 @@ mod test {
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
-                        platform: Platform::Spotify,
                         src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
                     db: DatabaseArgs {
@@ -2721,7 +2702,6 @@ mod test {
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
-                        platform: Platform::Spotify,
                         src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
                     db: DatabaseArgs {
@@ -2785,7 +2765,6 @@ mod test {
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
-                        platform: Platform::Spotify,
                         src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
                     db: DatabaseArgs {
@@ -2842,7 +2821,6 @@ mod test {
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
-                        platform: Platform::Spotify,
                         src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
                     db,
@@ -2890,7 +2868,6 @@ mod test {
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
-                        platform: Platform::Spotify,
                         src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
                     db: DatabaseArgs {
@@ -2956,7 +2933,6 @@ mod test {
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
-                        platform: Platform::Spotify,
                         src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
                     db: DatabaseArgs {
@@ -3019,7 +2995,6 @@ mod test {
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
-                        platform: Platform::Spotify,
                         src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
                     db: DatabaseArgs {
@@ -3081,7 +3056,6 @@ mod test {
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
-                        platform: Platform::Spotify,
                         src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                     },
                     db: DatabaseArgs {

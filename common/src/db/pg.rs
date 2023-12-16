@@ -795,6 +795,7 @@ async fn create_playlist<
     let span = debug_span!(
         "create_playlist",
         playlist.name = creation.name,
+        playlist.src.kind = %creation.src.kind,
         playlist.src.owner.email = creation.src.owner.email,
         playlist.src.owner.id = %creation.src.owner.id,
     );
@@ -837,6 +838,7 @@ async fn create_source<
 ) -> PostgresResult<Source> {
     let span = debug_span!(
         "create_source",
+        src.kind = %creation.kind,
         src.owner.email = creation.owner.email,
         src.owner.id = %creation.owner.id,
     );
@@ -1940,6 +1942,7 @@ async fn update_playlist<
         "update_playlist",
         %playlist.id,
         playlist.name,
+        %playlist.src.kind,
         playlist.src.owner.email,
         %playlist.src.owner.id,
     );
