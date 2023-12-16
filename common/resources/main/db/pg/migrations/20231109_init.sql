@@ -30,10 +30,12 @@ CREATE TABLE track (
 CREATE TABLE "user" (
     id UUID NOT NULL PRIMARY KEY DEFAULT uuid_generate_v4(),
     creation TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-    email VARCHAR (255) NOT NULL UNIQUE,
     role ROLE NOT NULL DEFAULT 'user',
+    spotify_creds JSONB DEFAULT NULL,
     creds TEXT NOT NULL
 );
+
+CREATE UNIQUE INDEX user_spotify_id_unique ON "user" ((spotify_creds ->> 'id'));
 
 -- source
 

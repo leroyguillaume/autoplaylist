@@ -773,7 +773,7 @@ mod test {
                     creation: DateTime::parse_from_rfc3339("2022-01-02T00:00:00Z")
                         .expect("failed to parse date")
                         .into(),
-                    email: "user@test".into(),
+                    creds: Default::default(),
                     id: Uuid::from_u128(0x730ea2158aa44463a1379c4c71d50ed6),
                     role: Role::User,
                 };
@@ -863,7 +863,7 @@ mod test {
                             creation: DateTime::parse_from_rfc3339("2022-01-02T00:00:00Z")
                                 .expect("failed to parse date")
                                 .into(),
-                            email: "user@test".into(),
+                            creds: Default::default(),
                             id: Uuid::from_u128(0x730ea2158aa44463a1379c4c71d50ed6),
                             role: Role::User,
                         },
@@ -952,7 +952,7 @@ mod test {
                             creation: DateTime::parse_from_rfc3339("2022-01-02T00:00:00Z")
                                 .expect("failed to parse date")
                                 .into(),
-                            email: "user@test".into(),
+                            creds: Default::default(),
                             id: Uuid::from_u128(0x730ea2158aa44463a1379c4c71d50ed6),
                             role: Role::User,
                         },
@@ -1111,7 +1111,7 @@ mod test {
                         creation: DateTime::parse_from_rfc3339("2022-01-02T00:00:00Z")
                             .expect("failed to parse date")
                             .into(),
-                        email: "user@test".into(),
+                        creds: Default::default(),
                         id: Uuid::from_u128(0x730ea2158aa44463a1379c4c71d50ed6),
                         role: Role::User,
                     },
@@ -1292,7 +1292,7 @@ mod test {
                     creation: DateTime::parse_from_rfc3339("2022-01-02T00:00:00Z")
                         .expect("failed to parse date")
                         .into(),
-                    email: "user@test".into(),
+                    creds: Default::default(),
                     id: Uuid::from_u128(0x730ea2158aa44463a1379c4c71d50ed6),
                     role: Role::User,
                 };

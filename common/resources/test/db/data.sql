@@ -17,6 +17,7 @@ DECLARE
     usr_2 UUID := 'ec1ca9f9-3c47-44a2-95c7-a13ff6de852d';
     usr_3 UUID := '8fc899c5-f254-4966-9b5a-e8f1c4f97f7c';
     usr_4 UUID := '83e3a7ed-9d6c-4e4f-b732-8a00cab3fcb5';
+    usr_5 UUID := 'ee187392-8471-43f4-a3cd-e541fd7640f4';
 BEGIN
     INSERT INTO track (id, creation, title, artists, album, from_compil, year, platform, platform_id)
     VALUES
@@ -54,35 +55,42 @@ BEGIN
             'track_3'
         );
 
-    INSERT INTO "user" (id, creation, email, role, creds)
+    INSERT INTO "user" (id, creation, role, spotify_creds, creds)
     VALUES
         (
             usr_1,
             '2023-01-01T00:00:00Z',
-            'user_1@test',
             'admin',
-            'aWgc5xavoR/8BEWvI9ujW8deLtjje1RNSULt49LXXNE6SLGqUNAcO1e4yLlX/46zbVFkoT0hV8jwtKncfbIfegrBB11gZUiPPhJedg4ywQwJB0HBOWTCoqrW4XWglA9FA9eBnyZ6x/dEI+m4zvphfg=='
+            '{"id":"user_1","email":"user_1@test"}',
+            'NumtB/0HwFNYAEVUoRI6/K9nYyUw5XfJT4HX6LDrtZtjEmGL+yeI5FKjvnknSxz/hgSlxfRj3T2Eh8+JY/xmkMgbU443Qt7OPLn/9tnUjrcCGkSk6nxtsV3Zyvecmg3GptMPWqV/j5GJQIz67lQ/hjoHs6zR5Cdiym97dq7AL/UgxDlw1lYTVMTvx4+qqXUS'
         ),
         (
             usr_2,
             '2023-02-01T00:00:00Z',
-            'user_2@test',
             'user',
-            'KsuJ6o6TS4XOOztpV10hd07zrgU73tIriUpsMgqsXPM='
+            '{"id":"user_2","email":"user_2@test"}',
+            'NumtB/0HwFNYAEVUoRI6/I8ArpJqKJjjHMXDxA5NvgGH10lsbLtvAKjwePIUk1Qd/SYXNHc7Lad/6CRXQ/848JF5WTi2FYAJ7/TeY0UHf5v0DlmIjFj/hwpiO9FjBL5LVNEV/l6PtxceLynyp6FwDUhh5Ft93QsMDLNQAs8Q1eoYFe79p0JEPLy35c7YWWVg'
         ),
         (
             usr_3,
             '2023-03-01T00:00:00Z',
-            'user_3@test',
             'user',
-            'KsuJ6o6TS4XOOztpV10hd07zrgU73tIriUpsMgqsXPM='
+            '{"id":"user_3","email":"test_3@test"}',
+            'NumtB/0HwFNYAEVUoRI6/N4gu2ADVSVC21T7w1h3gvlFzXlFw0Oauj5T2mSPl/hCKKQTAPw/y7AuXkQdJC98N5IHuva2WvzWMyNSOTodhFboM8r9PkUECi+VbP0SHx0jDwFchjH5LP5pvXc/V8CTbz8vdYqJYclFlUxTxq3S8/YhdodJ34yP1+TjUIrsBdGl'
         ),
         (
             usr_4,
             '2023-04-01T00:00:00Z',
-            'test_4@test',
             'user',
+            NULL,
             'KsuJ6o6TS4XOOztpV10hd07zrgU73tIriUpsMgqsXPM='
+        ),
+        (
+            usr_5,
+            '2023-05-01T00:00:00Z',
+            'user',
+            '{"id":"user_5","email":"user_5@test"}',
+            'NumtB/0HwFNYAEVUoRI6/NDtmfpPvXEA7vrJeiDZqeNvkvR3eudGriwtbqmmCLBPvapEoaM73cSC9CpA48ApXibqS9y3bZ9f9KXECzfm97InoK5gNuPcokkv2oDtJPH8A4tP03BPfHADOHoig1BU41UtYw4UpC7mC6X0SrYcHZ3+MEPeDOFGrqmcmSpuwx4D'
         );
 
     INSERT INTO source (id, creation, owner, kind)

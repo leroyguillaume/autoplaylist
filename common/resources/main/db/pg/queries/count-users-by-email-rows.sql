@@ -1,3 +1,3 @@
 SELECT COUNT(id)
 FROM "user"
-WHERE LOWER(email) LIKE CONCAT('%', LOWER($1), '%');
+WHERE LOWER(spotify_creds ->> 'email') LIKE CONCAT('%', LOWER($1), '%');

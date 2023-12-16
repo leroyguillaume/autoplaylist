@@ -439,6 +439,7 @@ impl SynchronizationStep for SourceSynchronizationStep {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SpotifyCredentials {
+    pub email: String,
     pub id: String,
     pub token: SpotifyToken,
 }
@@ -519,7 +520,6 @@ pub struct Track {
 pub struct User {
     pub creation: DateTime<Utc>,
     pub creds: Credentials,
-    pub email: String,
     pub id: Uuid,
     pub role: Role,
 }
@@ -576,7 +576,6 @@ mod test {
             owner: User {
                 creation: Utc::now(),
                 creds: Default::default(),
-                email: "user@test".into(),
                 id: Uuid::new_v4(),
                 role: Role::User,
             },
