@@ -3,8 +3,8 @@ use autoplaylist_common::{
     api::{
         AuthenticateViaSpotifyQueryParams, CreatePlaylistRequest, JwtResponse,
         PageRequestQueryParams, PlaylistResponse, RedirectUriQueryParam, SearchQueryParam,
-        SourceResponse, UserResponse, PATH_AUTH, PATH_ME, PATH_PLAYLIST, PATH_SEARCH, PATH_SPOTIFY,
-        PATH_SRC, PATH_SYNC, PATH_TOKEN, PATH_TRACK, PATH_USR,
+        SourceResponse, UpdateUserRequest, UserResponse, PATH_AUTH, PATH_ME, PATH_PLAYLIST,
+        PATH_SEARCH, PATH_SPOTIFY, PATH_SRC, PATH_SYNC, PATH_TOKEN, PATH_TRACK, PATH_USR,
     },
     model::{Page, Track},
 };
@@ -140,6 +140,13 @@ pub trait ApiClient: Send + Sync {
     async fn track_by_id(&self, id: Uuid, token: &str) -> ApiResult<Track>;
 
     async fn tracks(&self, req: PageRequestQueryParams<25>, token: &str) -> ApiResult<Page<Track>>;
+
+    async fn update_user(
+        &self,
+        id: Uuid,
+        req: &UpdateUserRequest,
+        token: &str,
+    ) -> ApiResult<UserResponse>;
 
     async fn user_by_id(&self, id: Uuid, token: &str) -> ApiResult<UserResponse>;
 
@@ -613,6 +620,25 @@ impl ApiClient for DefaultApiClient {
                 .get(format!("{}{PATH_TRACK}", self.base_url))
                 .bearer_auth(token)
                 .query(&req)
+                .build()?;
+            Self::send_and_parse_json_response(req).await
+        }
+        .instrument(span)
+        .await
+    }
+
+    async fn update_user(
+        &self,
+        id: Uuid,
+        req: &UpdateUserRequest,
+        token: &str,
+    ) -> ApiResult<UserResponse> {
+        let span = debug_span!("update_user", usr.id = %id, usr.role = %req.role);
+        async {
+            let req = Client::new()
+                .put(format!("{}{PATH_USR}/{id}", self.base_url))
+                .bearer_auth(token)
+                .json(req)
                 .build()?;
             Self::send_and_parse_json_response(req).await
         }
@@ -1277,6 +1303,31 @@ mod test {
                     .tracks(req, "jwt")
                     .await
                     .expect("failed to get tracks");
+                assert_eq!(resp, expected);
+            }
+        }
+
+        mod update_user {
+            use super::*;
+
+            // Tests
+
+            #[tokio::test]
+            async fn user() {
+                let req = UpdateUserRequest { role: Role::Admin };
+                let expected = UserResponse {
+                    creation: DateTime::parse_from_rfc3339("2022-01-02T00:00:00Z")
+                        .expect("failed to parse date")
+                        .into(),
+                    creds: Default::default(),
+                    id: Uuid::from_u128(0x730ea2158aa44463a1379c4c71d50ed6),
+                    role: req.role,
+                };
+                let client = init();
+                let resp = client
+                    .update_user(expected.id, &req, "jwt")
+                    .await
+                    .expect("failed to update user");
                 assert_eq!(resp, expected);
             }
         }

@@ -3,7 +3,7 @@ use std::{
     io::{stderr, stdout, Write},
     marker::PhantomData,
     net::SocketAddr,
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 
 use anyhow::{anyhow, bail};
@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use autoplaylist_common::{
     api::{
         AuthenticateViaSpotifyQueryParams, CreatePlaylistRequest, PageRequestQueryParams,
-        RedirectUriQueryParam, SearchQueryParam,
+        RedirectUriQueryParam, SearchQueryParam, UpdateUserRequest,
     },
     db::{
         pg::{PostgresConfig, PostgresConnection, PostgresPool, PostgresTransaction},
@@ -22,6 +22,7 @@ use autoplaylist_common::{
 };
 use clap::{Parser, Subcommand, ValueEnum};
 use mockable::{DefaultEnv, DefaultHttpServer, DefaultSystem, HttpResponse, HttpServer, System};
+use serde::{de::DeserializeOwned, Serialize};
 use tracing::{debug, error, info_span, trace, Instrument};
 use uuid::Uuid;
 
@@ -47,7 +48,7 @@ const CODE_QUERY_PARAM: &str = "code";
 // AdminCommand
 
 #[derive(Clone, Debug, Eq, PartialEq, Subcommand)]
-#[command(about = "Admin commands")]
+#[command(about = "Admin commands (not using API)")]
 enum AdminCommand {
     #[command(subcommand, alias = "usr")]
     User(AdminUserCommand),
@@ -479,6 +480,8 @@ enum UserCommand {
     Playlists(UserPlaylistsCommandArgs),
     #[command(about = "List user sources")]
     Sources(UserSourcesCommandArgs),
+    #[command(about = "Update user")]
+    Update(UserUpdateCommandArgs),
 }
 
 // UserDeleteCommandArgs
@@ -533,6 +536,20 @@ struct UserSourcesCommandArgs {
     id: Uuid,
     #[command(flatten)]
     req: PageRequestArgs<25>,
+}
+
+// UserUpdateCommandArgs
+
+#[derive(clap::Args, Clone, Debug, Eq, PartialEq)]
+struct UserUpdateCommandArgs {
+    #[command(flatten)]
+    api_base_url: ApiBaseUrlArg,
+    #[command(flatten)]
+    api_token: TokenArg,
+    #[arg(help = "User update JSON file", index = 2)]
+    file: PathBuf,
+    #[arg(help = "User ID", index = 1)]
+    id: Uuid,
 }
 
 // Services
@@ -686,9 +703,7 @@ impl<
                         api.delete_authenticated_user(&args.api_token.value).await?;
                     } else {
                         let resp = api.authenticated_user(&args.api_token.value).await?;
-                        trace!("writing response on output");
-                        serde_json::to_writer(&mut out, &resp)?;
-                        writeln!(out)?;
+                        Self::write_to_output(out, &resp)?;
                     }
                     Ok(())
                 }
@@ -702,16 +717,10 @@ impl<
                     params.file = %args.file.display()
                 );
                 async {
-                    debug!("opening file");
-                    let file = File::open(&args.file)?;
-                    debug!("deserializing file");
-                    let req: CreatePlaylistRequest = serde_json::from_reader(file)?;
+                    let req: CreatePlaylistRequest = Self::read_json_file(&args.file)?;
                     let api = self.svc.api(args.api_base_url.value);
                     let resp = api.create_playlist(&req, &args.api_token.value).await?;
-                    trace!("writing response on output");
-                    serde_json::to_writer(&mut out, &resp)?;
-                    writeln!(out)?;
-                    Ok(())
+                    Self::write_to_output(out, &resp)
                 }
                 .instrument(span)
                 .await
@@ -739,10 +748,7 @@ impl<
                 async {
                     let api = self.svc.api(args.api_base_url.value);
                     let resp = api.playlist_by_id(args.id, &args.api_token.value).await?;
-                    trace!("writing response on output");
-                    serde_json::to_writer(&mut out, &resp)?;
-                    writeln!(out)?;
-                    Ok(())
+                    Self::write_to_output(out, &resp)
                 }
                 .instrument(span)
                 .await
@@ -778,10 +784,7 @@ impl<
                         api.authenticated_user_playlists(req, &args.api_token.value)
                             .await?
                     };
-                    trace!("writing response on output");
-                    serde_json::to_writer(&mut out, &resp)?;
-                    writeln!(out)?;
-                    Ok(())
+                    Self::write_to_output(out, &resp)
                 }
                 .instrument(span)
                 .await
@@ -815,10 +818,7 @@ impl<
                     let resp = api
                         .playlist_tracks(args.id, req, &args.api_token.value)
                         .await?;
-                    trace!("writing response on output");
-                    serde_json::to_writer(&mut out, &resp)?;
-                    writeln!(out)?;
-                    Ok(())
+                    Self::write_to_output(out, &resp)
                 }
                 .instrument(span)
                 .await
@@ -857,10 +857,7 @@ impl<
                         api.authenticated_user_sources(req, &args.api_token.value)
                             .await?
                     };
-                    trace!("writing response on output");
-                    serde_json::to_writer(&mut out, &resp)?;
-                    writeln!(out)?;
-                    Ok(())
+                    Self::write_to_output(out, &resp)
                 }
                 .instrument(span)
                 .await
@@ -894,10 +891,7 @@ impl<
                     let resp = api
                         .source_tracks(args.id, req, &args.api_token.value)
                         .await?;
-                    trace!("writing response on output");
-                    serde_json::to_writer(&mut out, &resp)?;
-                    writeln!(out)?;
-                    Ok(())
+                    Self::write_to_output(out, &resp)
                 }
                 .instrument(span)
                 .await
@@ -911,10 +905,7 @@ impl<
                 async {
                     let api = self.svc.api(args.api_base_url.value);
                     let resp = api.track_by_id(args.id, &args.api_token.value).await?;
-                    trace!("writing response on output");
-                    serde_json::to_writer(&mut out, &resp)?;
-                    writeln!(out)?;
-                    Ok(())
+                    Self::write_to_output(out, &resp)
                 }
                 .instrument(span)
                 .await
@@ -930,10 +921,7 @@ impl<
                     let api = self.svc.api(args.api_base_url.value);
                     let req = PageRequestQueryParams::from(args.req);
                     let resp = api.tracks(req, &args.api_token.value).await?;
-                    trace!("writing response on output");
-                    serde_json::to_writer(&mut out, &resp)?;
-                    writeln!(out)?;
-                    Ok(())
+                    Self::write_to_output(out, &resp)
                 }
                 .instrument(span)
                 .await
@@ -961,10 +949,7 @@ impl<
                 async {
                     let api = self.svc.api(args.api_base_url.value);
                     let resp = api.user_by_id(args.id, &args.api_token.value).await?;
-                    trace!("writing response on output");
-                    serde_json::to_writer(&mut out, &resp)?;
-                    writeln!(out)?;
-                    Ok(())
+                    Self::write_to_output(out, &resp)
                 }
                 .instrument(span)
                 .await
@@ -987,10 +972,7 @@ impl<
                     } else {
                         api.users(req, &args.api_token.value).await?
                     };
-                    trace!("writing response on output");
-                    serde_json::to_writer(&mut out, &resp)?;
-                    writeln!(out)?;
-                    Ok(())
+                    Self::write_to_output(out, &resp)
                 }
                 .instrument(span)
                 .await
@@ -1009,10 +991,7 @@ impl<
                     let resp = api
                         .user_playlists(args.id, req, &args.api_token.value)
                         .await?;
-                    trace!("writing response on output");
-                    serde_json::to_writer(&mut out, &resp)?;
-                    writeln!(out)?;
-                    Ok(())
+                    Self::write_to_output(out, &resp)
                 }
                 .instrument(span)
                 .await
@@ -1031,15 +1010,47 @@ impl<
                     let resp = api
                         .user_sources(args.id, req, &args.api_token.value)
                         .await?;
-                    trace!("writing response on output");
-                    serde_json::to_writer(&mut out, &resp)?;
-                    writeln!(out)?;
-                    Ok(())
+                    Self::write_to_output(out, &resp)
+                }
+                .instrument(span)
+                .await
+            }
+            Command::User(UserCommand::Update(args)) => {
+                let span = info_span!(
+                    "update_user",
+                    api_base_url = %args.api_base_url.value,
+                    params.file = %args.file.display(),
+                    usr.id = %args.id,
+                );
+                async {
+                    let req: UpdateUserRequest = Self::read_json_file(&args.file)?;
+                    let api = self.svc.api(args.api_base_url.value);
+                    let resp = api
+                        .update_user(args.id, &req, &args.api_token.value)
+                        .await?;
+                    Self::write_to_output(out, &resp)
                 }
                 .instrument(span)
                 .await
             }
         }
+    }
+
+    #[inline]
+    fn read_json_file<T: DeserializeOwned>(path: &Path) -> anyhow::Result<T> {
+        debug!("opening file");
+        let file = File::open(path)?;
+        debug!("deserializing file");
+        let req: T = serde_json::from_reader(file)?;
+        Ok(req)
+    }
+
+    #[inline]
+    fn write_to_output<T: Serialize>(mut out: &mut dyn Write, resp: &T) -> anyhow::Result<()> {
+        trace!("writing response on output");
+        serde_json::to_writer(&mut out, resp)?;
+        writeln!(&mut out)?;
+        Ok(())
     }
 }
 
@@ -1208,6 +1219,7 @@ mod test {
                 q: &'static str,
                 req: PageRequestArgs<LIMIT>,
                 role: Role,
+                update_usr_req: UpdateUserRequest,
             }
 
             // Mocks
@@ -1219,6 +1231,7 @@ mod test {
                 auth_usr_srcs: Mock<Page<SourceResponse>>,
                 auth_via_spotify: Mock<JwtResponse>,
                 create_playlist: Mock<PlaylistResponse>,
+                db_update_usr: Mock<()>,
                 db_usr_by_id: Mock<User, User>,
                 delete_auth_usr: Mock<()>,
                 delete_playlist: Mock<()>,
@@ -1239,7 +1252,7 @@ mod test {
                 start_src_sync: Mock<()>,
                 track_by_id: Mock<Track>,
                 tracks: Mock<Page<Track>>,
-                update_usr: Mock<()>,
+                update_usr: Mock<UserResponse>,
                 usr_by_id: Mock<UserResponse>,
                 usr_playlists: Mock<Page<PlaylistResponse>>,
                 usr_srcs: Mock<Page<SourceResponse>>,
@@ -1440,6 +1453,17 @@ mod test {
                                 let mock = mocks.usr_srcs.clone();
                                 move |_, _, _| Ok(mock.call())
                             });
+                        api.expect_update_user()
+                            .with(
+                                eq(data.id),
+                                eq(data.update_usr_req.clone()),
+                                eq(data.api_token),
+                            )
+                            .times(mocks.update_usr.times())
+                            .returning({
+                                let mock = mocks.update_usr.clone();
+                                move |_, _, _| Ok(mock.call())
+                            });
                         api
                     }
                 });
@@ -1471,7 +1495,7 @@ mod test {
                                     conn.0
                                         .expect_update_user()
                                         .with(eq(usr))
-                                        .times(mocks.update_usr.times())
+                                        .times(mocks.db_update_usr.times())
                                         .returning(|_| Ok(()));
                                     conn
                                 }
@@ -1572,6 +1596,7 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
                     auth_via_spotify: Mock::once({
@@ -1633,6 +1658,7 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
                     auth_usr: Mock::once({
@@ -1694,6 +1720,7 @@ mod test {
                     q: "name",
                     req,
                     role: Role::Admin,
+                    update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
                     auth_usr_playlists: Mock::once({
@@ -1754,6 +1781,7 @@ mod test {
                     q: "name",
                     req,
                     role: Role::Admin,
+                    update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
                     auth_usr_srcs: Mock::once({
@@ -1828,6 +1856,7 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
                     create_playlist: Mock::once({
@@ -1883,6 +1912,7 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
                     delete_auth_usr: Mock::once(|| ()),
@@ -1930,6 +1960,7 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
                     delete_playlist: Mock::once(|| ()),
@@ -1977,6 +2008,7 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
                     delete_usr: Mock::once(|| ()),
@@ -2044,6 +2076,7 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
                     playlist_by_id: Mock::once({
@@ -2105,6 +2138,7 @@ mod test {
                     port,
                     req,
                     role: Role::Admin,
+                    update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
                     playlist_tracks: Mock::once({
@@ -2166,6 +2200,7 @@ mod test {
                     port,
                     req,
                     role: Role::Admin,
+                    update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
                     playlists: Mock::once({
@@ -2228,6 +2263,7 @@ mod test {
                     q,
                     req,
                     role: Role::Admin,
+                    update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
                     search_auth_usr_plalists: Mock::once({
@@ -2290,6 +2326,7 @@ mod test {
                     q,
                     req,
                     role: Role::Admin,
+                    update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
                     search_plalists: Mock::once({
@@ -2351,6 +2388,7 @@ mod test {
                     port,
                     req,
                     role: Role::Admin,
+                    update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
                     search_usrs: Mock::once({
@@ -2415,6 +2453,7 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
                     src_by_id: Mock::once({
@@ -2476,6 +2515,7 @@ mod test {
                     port,
                     req,
                     role: Role::Admin,
+                    update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
                     src_tracks: Mock::once({
@@ -2536,6 +2576,7 @@ mod test {
                     port,
                     req,
                     role: Role::Admin,
+                    update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
                     srcs: Mock::once({
@@ -2590,6 +2631,7 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
                     start_playlist_sync: Mock::once(|| ()),
@@ -2639,6 +2681,7 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
                     start_src_sync: Mock::once(|| ()),
@@ -2699,6 +2742,7 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
                     track_by_id: Mock::once({
@@ -2758,6 +2802,7 @@ mod test {
                     port,
                     req,
                     role: Role::Admin,
+                    update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
                     tracks: Mock::once({
@@ -2808,10 +2853,11 @@ mod test {
                         offset: 0,
                     },
                     role: Role::from(role),
+                    update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
                     db_usr_by_id: Mock::once_with_args(|usr| usr),
-                    update_usr: Mock::once(|| ()),
+                    db_update_usr: Mock::once(|| ()),
                     ..Default::default()
                 };
                 let out = run(data, mocks).await;
@@ -2862,6 +2908,7 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
                     usr_by_id: Mock::once({
@@ -2923,6 +2970,7 @@ mod test {
                     port,
                     req,
                     role: Role::Admin,
+                    update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
                     usr_playlists: Mock::once({
@@ -2984,6 +3032,7 @@ mod test {
                     port,
                     req,
                     role: Role::Admin,
+                    update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
                     usr_srcs: Mock::once({
@@ -3044,6 +3093,7 @@ mod test {
                     port,
                     req,
                     role: Role::Admin,
+                    update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
                     usrs: Mock::once({

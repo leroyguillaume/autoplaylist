@@ -11,9 +11,9 @@ use autoplaylist_common::{
     api::{
         AuthenticateViaSpotifyQueryParams, CreatePlaylistRequest, JwtResponse,
         PageRequestQueryParams, PlaylistResponse, RedirectUriQueryParam, SearchQueryParam,
-        SourceResponse, UserResponse, Validate, ValidationErrorResponse, PATH_AUTH, PATH_HEALTH,
-        PATH_ME, PATH_PLAYLIST, PATH_SEARCH, PATH_SPOTIFY, PATH_SRC, PATH_SYNC, PATH_TOKEN,
-        PATH_TRACK, PATH_USR,
+        SourceResponse, UpdateUserRequest, UserResponse, Validate, ValidationErrorResponse,
+        PATH_AUTH, PATH_HEALTH, PATH_ME, PATH_PLAYLIST, PATH_SEARCH, PATH_SPOTIFY, PATH_SRC,
+        PATH_SYNC, PATH_TOKEN, PATH_TRACK, PATH_USR,
     },
     broker::{
         rabbitmq::{RabbitMqClient, RabbitMqConfig},
@@ -1081,6 +1081,42 @@ fn create_app<
                 },
             ),
         )
+        // update_user
+        .route(
+            &format!("{PATH_USR}/:id"),
+            routing::put(
+                |Path(id): Path<Uuid>,
+                 headers: HeaderMap,
+                 State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
+                 Json(req): Json<UpdateUserRequest>| async move {
+                     handling_error(async {
+                        let mut db_conn = state.db.acquire().await?;
+                        let usr = state
+                            .svc
+                            .auth()
+                            .authenticate(&headers, &mut db_conn)
+                            .await?;
+                        let span = info_span!(
+                            "update_user",
+                            auth.usr.id = %usr.id,
+                            usr.id = %id,
+                            usr.role = %req.role,
+                        );
+                        async {
+                            ensure_user_is_admin!(usr);
+                            let mut usr = db_conn.user_by_id(id).await?.ok_or(ApiError::NotFound(id))?;
+                            usr.role = req.role;
+                            db_conn.update_user(&usr).await?;
+                            info!("user updated");
+                            Ok((StatusCode::OK, Json(UserResponse::from(usr))))
+                        }
+                        .instrument(span)
+                        .await
+                    })
+                    .await
+                },
+            ),
+        )
         // delete_user
         .route(
             &format!("{PATH_USR}/:id"),
@@ -1499,8 +1535,7 @@ mod test {
             };
             let (resp, expected) = run(mocks).await;
             resp.assert_status(StatusCode::CREATED);
-            let resp = resp.json();
-            assert_eq!(expected, resp);
+            resp.assert_json(&expected);
         }
 
         #[tokio::test]
@@ -1512,8 +1547,7 @@ mod test {
             };
             let (resp, expected) = run(mocks).await;
             resp.assert_status(StatusCode::OK);
-            let resp = resp.json();
-            assert_eq!(expected, resp);
+            resp.assert_json(&expected);
         }
     }
 
@@ -1978,8 +2012,7 @@ mod test {
                     vec![ValidationErrorKind::Length(1, 100)],
                 )]),
             };
-            let resp: ValidationErrorResponse = resp.json();
-            assert_eq!(resp, expected);
+            resp.assert_json(&expected);
         }
 
         #[tokio::test]
@@ -2688,8 +2721,7 @@ mod test {
             };
             let (resp, expected) = run(mocks).await;
             resp.assert_status(StatusCode::OK);
-            let resp: PlaylistResponse = resp.json();
-            assert_eq!(resp, expected);
+            resp.assert_json(&expected);
         }
 
         #[tokio::test]
@@ -2706,8 +2738,7 @@ mod test {
             };
             let (resp, expected) = run(mocks).await;
             resp.assert_status(StatusCode::OK);
-            let resp: PlaylistResponse = resp.json();
-            assert_eq!(resp, expected);
+            resp.assert_json(&expected);
         }
     }
 
@@ -3480,8 +3511,7 @@ mod test {
             };
             let (resp, expected) = run(mocks).await;
             resp.assert_status(StatusCode::OK);
-            let resp: SourceResponse = resp.json();
-            assert_eq!(resp, expected);
+            resp.assert_json(&expected);
         }
 
         #[tokio::test]
@@ -3498,8 +3528,7 @@ mod test {
             };
             let (resp, expected) = run(mocks).await;
             resp.assert_status(StatusCode::OK);
-            let resp: SourceResponse = resp.json();
-            assert_eq!(resp, expected);
+            resp.assert_json(&expected);
         }
     }
 
@@ -4206,8 +4235,7 @@ mod test {
             };
             let (resp, expected) = run(mocks).await;
             resp.assert_status(StatusCode::OK);
-            let resp: Track = resp.json();
-            assert_eq!(resp, expected);
+            resp.assert_json(&expected);
         }
     }
 
@@ -4304,6 +4332,143 @@ mod test {
             let mocks = Mocks {
                 auth: Mock::once_with_args(Ok),
                 tracks: Mock::once(|| ()),
+            };
+            let (resp, expected) = run(mocks).await;
+            resp.assert_status_ok();
+            resp.assert_json(&expected);
+        }
+    }
+
+    mod update_user {
+        use super::*;
+
+        // Mocks
+
+        #[derive(Clone, Default)]
+        struct Mocks {
+            auth: Mock<ApiResult<User>, User>,
+            by_id: Mock<Option<User>, User>,
+            update: Mock<()>,
+        }
+
+        // Tests
+
+        async fn run(mocks: Mocks) -> (TestResponse, UserResponse) {
+            let usr = User {
+                creation: Utc::now(),
+                creds: Default::default(),
+                id: Uuid::new_v4(),
+                role: Role::Admin,
+            };
+            let req = UpdateUserRequest { role: Role::User };
+            let usr_updated = User {
+                role: req.role,
+                ..usr.clone()
+            };
+            let expected = UserResponse::from(usr_updated.clone());
+            let mut auth = MockAuthenticator::new();
+            auth.expect_authenticate()
+                .times(mocks.auth.times())
+                .returning({
+                    let usr = usr.clone();
+                    let mock = mocks.auth.clone();
+                    move |_, _| {
+                        Box::pin({
+                            let usr = usr.clone();
+                            let mock = mock.clone();
+                            async move { mock.call_with_args(usr.clone()) }
+                        })
+                    }
+                });
+            let db = MockDatabasePool {
+                acquire: Mock::once({
+                    let usr = usr.clone();
+                    let mocks = mocks.clone();
+                    move || {
+                        let mut conn = MockDatabaseConnection::new();
+                        conn.0
+                            .expect_user_by_id()
+                            .with(eq(usr.id))
+                            .times(mocks.by_id.times())
+                            .returning({
+                                let usr = usr.clone();
+                                let mock = mocks.by_id.clone();
+                                move |_| Ok(mock.call_with_args(usr.clone()))
+                            });
+                        conn.0
+                            .expect_update_user()
+                            .with(eq(usr_updated.clone()))
+                            .times(mocks.update.times())
+                            .returning(|_| Ok(()));
+                        conn
+                    }
+                }),
+                ..Default::default()
+            };
+            let state = AppState {
+                db,
+                svc: MockServices {
+                    auth,
+                    ..Default::default()
+                },
+                _dbconn: PhantomData,
+                _dbtx: PhantomData,
+            };
+            let server = init(state);
+            let resp = server
+                .put(&format!("{PATH_USR}/{}", usr.id))
+                .json(&req)
+                .await;
+            (resp, expected)
+        }
+
+        // Tests
+
+        #[tokio::test]
+        async fn unauthorized() {
+            let mocks = Mocks {
+                auth: Mock::once_with_args(|_| Err(ApiError::Unauthorized)),
+                ..Default::default()
+            };
+            let (resp, _) = run(mocks).await;
+            resp.assert_status_unauthorized();
+            assert!(resp.as_bytes().is_empty());
+        }
+
+        #[tokio::test]
+        async fn forbidden() {
+            let mocks = Mocks {
+                auth: Mock::once_with_args(|usr| {
+                    Ok(User {
+                        role: Role::User,
+                        ..usr
+                    })
+                }),
+                ..Default::default()
+            };
+            let (resp, _) = run(mocks).await;
+            resp.assert_status(StatusCode::FORBIDDEN);
+            assert!(resp.as_bytes().is_empty());
+        }
+
+        #[tokio::test]
+        async fn not_found() {
+            let mocks = Mocks {
+                auth: Mock::once_with_args(Ok),
+                by_id: Mock::once_with_args(|_| None),
+                ..Default::default()
+            };
+            let (resp, _) = run(mocks).await;
+            resp.assert_status(StatusCode::NOT_FOUND);
+            assert!(resp.as_bytes().is_empty());
+        }
+
+        #[tokio::test]
+        async fn ok() {
+            let mocks = Mocks {
+                auth: Mock::once_with_args(Ok),
+                by_id: Mock::once_with_args(Some),
+                update: Mock::once(|| ()),
             };
             let (resp, expected) = run(mocks).await;
             resp.assert_status_ok();
@@ -4428,8 +4593,7 @@ mod test {
             };
             let (resp, expected) = run(mocks).await;
             resp.assert_status(StatusCode::OK);
-            let resp: UserResponse = resp.json();
-            assert_eq!(resp, expected);
+            resp.assert_json(&expected);
         }
 
         #[tokio::test]
@@ -4445,8 +4609,7 @@ mod test {
             };
             let (resp, expected) = run(mocks).await;
             resp.assert_status(StatusCode::OK);
-            let resp: UserResponse = resp.json();
-            assert_eq!(resp, expected);
+            resp.assert_json(&expected);
         }
     }
 

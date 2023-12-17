@@ -198,6 +198,14 @@ impl From<Source> for SourceResponse {
     }
 }
 
+// UpdateUserRequest
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateUserRequest {
+    pub role: Role,
+}
+
 // UserResponse
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
