@@ -268,6 +268,11 @@ macro_rules! client_impl {
                 Ok(())
             }
 
+            async fn update_track(&mut self, track: &Track) -> DatabaseResult<()> {
+                update_track(track, &mut self.conn).await?;
+                Ok(())
+            }
+
             async fn update_user(&mut self, user: &User) -> DatabaseResult<()> {
                 update_user(user, &self.key, &mut self.conn).await?;
                 Ok(())
@@ -899,6 +904,7 @@ async fn create_track<
         track.platform = %creation.platform,
         track.platform_id = creation.platform_id,
         track.title = title,
+        track.year = creation.year,
     );
     async {
         trace!("acquiring database connection");
@@ -2005,6 +2011,54 @@ async fn update_source<
             "resources/main/db/pg/queries/update-source.sql",
             src.id,
             sync,
+        )
+        .execute(&mut *conn)
+        .await?;
+        Ok(())
+    }
+    .instrument(span)
+    .await
+}
+
+// update_track
+
+#[inline]
+async fn update_track<
+    'a,
+    A: Acquire<'a, Database = Postgres, Connection = &'a mut PgConnection>,
+>(
+    track: &Track,
+    conn: A,
+) -> PostgresResult<()> {
+    let album = track.album.name.to_lowercase();
+    let artists = track
+        .artists
+        .iter()
+        .map(|artist| artist.to_lowercase())
+        .collect::<Vec<_>>();
+    let title = track.title.to_lowercase();
+    let span = debug_span!(
+        "update_track",
+        track.album.name = album,
+        track.artists = ?artists,
+        %track.id,
+        %track.platform,
+        track.platform_id,
+        track.title = title,
+        track.year,
+    );
+    async {
+        trace!("acquiring database connection");
+        let conn = conn.acquire().await?;
+        debug!("updating track");
+        query_file!(
+            "resources/main/db/pg/queries/update-track.sql",
+            track.id,
+            title,
+            &artists,
+            album,
+            track.album.compil,
+            track.year,
         )
         .execute(&mut *conn)
         .await?;
@@ -3843,14 +3897,14 @@ mod test {
                     sync: Synchronization::Running,
                     ..data.srcs[0].clone()
                 };
-                let source_updated = Source {
+                let src_updated = Source {
                     creation: Utc::now(),
                     id: expected.id,
                     kind: SourceKind::Spotify(SpotifySourceKind::Playlist("id".into())),
                     owner: data.usrs[1].clone(),
                     sync: expected.sync.clone(),
                 };
-                conn.update_source(&source_updated)
+                conn.update_source(&src_updated)
                     .await
                     .expect("failed to update source");
                 let src = conn
@@ -3859,6 +3913,55 @@ mod test {
                     .expect("failed to fetch source")
                     .expect("source doesn't exist");
                 assert_eq!(src, expected);
+            }
+        }
+
+        mod update_track {
+            use super::*;
+
+            // Tests
+
+            #[sqlx::test]
+            async fn unit(db: PgPool) {
+                let data = Data::new();
+                let db = init(db).await;
+                let mut conn = db.acquire().await.expect("failed to acquire connection");
+                let expected = Track {
+                    album: Album {
+                        compil: false,
+                        name: "i/o".into(),
+                    },
+                    artists: BTreeSet::from_iter(["peter gabriel".into()]),
+                    title: "track_2".into(),
+                    year: 2023,
+                    ..data.tracks[0].clone()
+                };
+                let track_updated = Track {
+                    album: Album {
+                        compil: expected.album.compil,
+                        name: expected.album.name.to_uppercase(),
+                    },
+                    artists: expected
+                        .artists
+                        .iter()
+                        .map(|a| a.to_uppercase())
+                        .collect::<BTreeSet<_>>(),
+                    creation: Utc::now(),
+                    id: expected.id,
+                    platform: expected.platform,
+                    platform_id: "track_1_1".into(),
+                    title: expected.title.to_uppercase(),
+                    year: expected.year,
+                };
+                conn.update_track(&track_updated)
+                    .await
+                    .expect("failed to update track");
+                let track = conn
+                    .track_by_id(expected.id)
+                    .await
+                    .expect("failed to fetch track")
+                    .expect("track doesn't exist");
+                assert_eq!(track, expected);
             }
         }
 

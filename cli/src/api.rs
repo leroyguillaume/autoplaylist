@@ -3,8 +3,9 @@ use autoplaylist_common::{
     api::{
         AuthenticateViaSpotifyQueryParams, CreatePlaylistRequest, JwtResponse,
         PageRequestQueryParams, PlaylistResponse, RedirectUriQueryParam, SearchQueryParam,
-        SourceResponse, UpdateUserRequest, UserResponse, PATH_AUTH, PATH_ME, PATH_PLAYLIST,
-        PATH_SEARCH, PATH_SPOTIFY, PATH_SRC, PATH_SYNC, PATH_TOKEN, PATH_TRACK, PATH_USR,
+        SourceResponse, UpdateTrackRequest, UpdateUserRequest, UserResponse, PATH_AUTH, PATH_ME,
+        PATH_PLAYLIST, PATH_SEARCH, PATH_SPOTIFY, PATH_SRC, PATH_SYNC, PATH_TOKEN, PATH_TRACK,
+        PATH_USR,
     },
     model::{Page, Track},
 };
@@ -140,6 +141,13 @@ pub trait ApiClient: Send + Sync {
     async fn track_by_id(&self, id: Uuid, token: &str) -> ApiResult<Track>;
 
     async fn tracks(&self, req: PageRequestQueryParams<25>, token: &str) -> ApiResult<Page<Track>>;
+
+    async fn update_track(
+        &self,
+        id: Uuid,
+        req: &UpdateTrackRequest,
+        token: &str,
+    ) -> ApiResult<Track>;
 
     async fn update_user(
         &self,
@@ -620,6 +628,32 @@ impl ApiClient for DefaultApiClient {
                 .get(format!("{}{PATH_TRACK}", self.base_url))
                 .bearer_auth(token)
                 .query(&req)
+                .build()?;
+            Self::send_and_parse_json_response(req).await
+        }
+        .instrument(span)
+        .await
+    }
+
+    async fn update_track(
+        &self,
+        id: Uuid,
+        req: &UpdateTrackRequest,
+        token: &str,
+    ) -> ApiResult<Track> {
+        let span = debug_span!(
+            "update_track",
+            track.album = req.album.name,
+            track.artists = ?req.artists,
+            track.id = %id,
+            track.title = req.title,
+            track.year = req.year,
+        );
+        async {
+            let req = Client::new()
+                .put(format!("{}{PATH_TRACK}/{id}", self.base_url))
+                .bearer_auth(token)
+                .json(req)
                 .build()?;
             Self::send_and_parse_json_response(req).await
         }
@@ -1303,6 +1337,43 @@ mod test {
                     .tracks(req, "jwt")
                     .await
                     .expect("failed to get tracks");
+                assert_eq!(resp, expected);
+            }
+        }
+
+        mod update_track {
+            use super::*;
+
+            // Tests
+
+            #[tokio::test]
+            async fn track() {
+                let req = UpdateTrackRequest {
+                    album: Album {
+                        compil: false,
+                        name: "album".into(),
+                    },
+                    artists: Default::default(),
+                    title: "title".into(),
+                    year: 2020,
+                };
+                let expected = Track {
+                    album: req.album.clone(),
+                    artists: req.artists.clone(),
+                    creation: DateTime::parse_from_rfc3339("2022-01-02T00:00:00Z")
+                        .expect("failed to parse date")
+                        .into(),
+                    id: Uuid::from_u128(0x2f3f13153bb74b3189c58bdffdb5e8de),
+                    platform: Platform::Spotify,
+                    platform_id: "id".into(),
+                    title: req.title.clone(),
+                    year: req.year,
+                };
+                let client = init();
+                let resp = client
+                    .update_track(expected.id, &req, "jwt")
+                    .await
+                    .expect("failed to update track");
                 assert_eq!(resp, expected);
             }
         }

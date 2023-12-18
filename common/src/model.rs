@@ -6,6 +6,7 @@ use std::{
 use chrono::{DateTime, Utc};
 use enum_display::EnumDisplay;
 use serde::{Deserialize, Deserializer, Serialize};
+use serde_trim::string_trim;
 use uuid::Uuid;
 
 // Types
@@ -76,6 +77,7 @@ pub trait SynchronizationStep: Send + Sync {
 #[serde(rename_all = "camelCase")]
 pub struct Album {
     pub compil: bool,
+    #[serde(deserialize_with = "string_trim")]
     pub name: String,
 }
 

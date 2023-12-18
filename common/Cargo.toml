@@ -11,7 +11,7 @@ mockall = {version = "0.11", optional = true}
 rspotify = {version = "0.12", optional = true}
 serde = {version = "1.0", features = ["derive"], optional = true}
 serde_json = {version = "1.0", optional = true}
-serde_trim = {version = "1.0", optional = true}
+serde_trim = {version = "1.1", optional = true}
 sqlx = {version = "0.7", features = ["chrono", "macros", "migrate", "postgres", "runtime-tokio", "uuid"], optional = true}
 thiserror = {version = "1.0", optional = true}
 tokio = {version = "1.33", features = ["full"], optional = true}

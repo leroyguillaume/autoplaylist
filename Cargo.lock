@@ -2802,9 +2802,9 @@ dependencies = [
 
 [[package]]
 name = "serde_trim"
-version = "1.0.0"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a424fad3efb3eb2e4894bb20d71bc273e9044db79bc5086d66a0c87a8bfd40bb"
+checksum = "70d1324d30004a76bf70a0bf2a409cf4a7f31b0c28b8c29b00e739cfe90b1e82"
 dependencies = [
  "serde",
  "trim-in-place",

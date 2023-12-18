@@ -234,6 +234,10 @@ macro_rules! mock_client_impl {
                 self.$attr.update_source(src).await
             }
 
+            async fn update_track(&mut self, track: &Track) -> DatabaseResult<()> {
+                self.$attr.update_track(track).await
+            }
+
             async fn update_user(&mut self, user: &User) -> DatabaseResult<()> {
                 self.$attr.update_user(user).await
             }
@@ -470,6 +474,8 @@ pub trait DatabaseClient: Send + Sync {
     async fn update_playlist(&mut self, playlist: &Playlist) -> DatabaseResult<()>;
 
     async fn update_source(&mut self, src: &Source) -> DatabaseResult<()>;
+
+    async fn update_track(&mut self, track: &Track) -> DatabaseResult<()>;
 
     async fn update_user(&mut self, user: &User) -> DatabaseResult<()>;
 
