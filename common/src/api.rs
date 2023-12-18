@@ -1,12 +1,12 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use serde_trim::string_trim;
+use serde_trim::{btreeset_non_empty_string_trim, string_trim};
 use uuid::Uuid;
 
 use crate::model::{
-    Credentials, PageRequest, Playlist, PlaylistSynchronization, Predicate, Role, Source,
+    Album, Credentials, PageRequest, Playlist, PlaylistSynchronization, Predicate, Role, Source,
     SourceKind, SourceSynchronization, SpotifyCredentials, Target, User,
 };
 
@@ -194,6 +194,48 @@ impl From<Source> for SourceResponse {
             kind: src.kind,
             owner: src.owner.into(),
             sync: src.sync,
+        }
+    }
+}
+
+// UpdateTrackRequest
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateTrackRequest {
+    pub album: Album,
+    #[serde(deserialize_with = "btreeset_non_empty_string_trim")]
+    pub artists: BTreeSet<String>,
+    #[serde(deserialize_with = "string_trim")]
+    pub title: String,
+    pub year: i32,
+}
+
+impl Validate for UpdateTrackRequest {
+    fn validate(&self) -> ValidationResult {
+        let mut resp = ValidationErrorResponse::new();
+        if self.album.name.is_empty() {
+            resp.errs.insert(
+                "album.name".into(),
+                vec![ValidationErrorKind::Length(1, usize::MAX)],
+            );
+        }
+        if self.artists.is_empty() {
+            resp.errs.insert(
+                "artists".into(),
+                vec![ValidationErrorKind::Length(1, usize::MAX)],
+            );
+        }
+        if self.title.is_empty() {
+            resp.errs.insert(
+                "title".into(),
+                vec![ValidationErrorKind::Length(1, usize::MAX)],
+            );
+        }
+        if resp.errs.is_empty() {
+            Ok(())
+        } else {
+            Err(resp)
         }
     }
 }
@@ -459,6 +501,63 @@ mod test {
                     id: creds.id.clone(),
                 };
                 let resp = SpotifyCredentialsResponse::from(creds);
+                assert_eq!(resp, expected);
+            }
+        }
+    }
+
+    mod update_track_request {
+        use super::*;
+
+        // Mods
+
+        mod validate {
+            use super::*;
+
+            // Tests
+
+            #[test]
+            fn unit() {
+                let req = UpdateTrackRequest {
+                    album: Album {
+                        compil: true,
+                        name: "name".into(),
+                    },
+                    artists: BTreeSet::from_iter(["artist".into()]),
+                    title: "title".into(),
+                    year: 1993,
+                };
+                req.validate().expect("request should be valid");
+            }
+
+            #[test]
+            fn resp() {
+                let req = UpdateTrackRequest {
+                    album: Album {
+                        compil: true,
+                        name: "".into(),
+                    },
+                    artists: Default::default(),
+                    title: "".into(),
+                    year: 1993,
+                };
+                let resp = req.validate().expect_err("request should be invalid");
+                let expected = ValidationErrorResponse {
+                    errs: HashMap::from_iter([
+                        (
+                            "album.name".into(),
+                            vec![ValidationErrorKind::Length(1, usize::MAX)],
+                        ),
+                        (
+                            "artists".into(),
+                            vec![ValidationErrorKind::Length(1, usize::MAX)],
+                        ),
+                        (
+                            "title".into(),
+                            vec![ValidationErrorKind::Length(1, usize::MAX)],
+                        ),
+                    ]),
+                };
                 assert_eq!(resp, expected);
             }
         }

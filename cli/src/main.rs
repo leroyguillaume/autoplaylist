@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use autoplaylist_common::{
     api::{
         AuthenticateViaSpotifyQueryParams, CreatePlaylistRequest, PageRequestQueryParams,
-        RedirectUriQueryParam, SearchQueryParam, UpdateUserRequest,
+        RedirectUriQueryParam, SearchQueryParam, UpdateTrackRequest, UpdateUserRequest,
     },
     db::{
         pg::{PostgresConfig, PostgresConnection, PostgresPool, PostgresTransaction},
@@ -439,6 +439,8 @@ enum TrackCommand {
     Get(TrackGetCommandArgs),
     #[command(about = "List tracks", alias = "ls")]
     List(TrackListCommandArgs),
+    #[command(about = "Update a track")]
+    Update(TrackUpdateCommandArgs),
 }
 
 // TrackListCommandArgs
@@ -451,6 +453,20 @@ struct TrackListCommandArgs {
     api_token: TokenArg,
     #[command(flatten)]
     req: PageRequestArgs<25>,
+}
+
+// TrackUpdateCommandArgs
+
+#[derive(clap::Args, Clone, Debug, Eq, PartialEq)]
+struct TrackUpdateCommandArgs {
+    #[command(flatten)]
+    api_base_url: ApiBaseUrlArg,
+    #[command(flatten)]
+    api_token: TokenArg,
+    #[arg(help = "Track update JSON file", index = 2)]
+    file: PathBuf,
+    #[arg(help = "Track ID", index = 1)]
+    id: Uuid,
 }
 
 // UserGetCommandArgs
@@ -926,6 +942,24 @@ impl<
                 .instrument(span)
                 .await
             }
+            Command::Track(TrackCommand::Update(args)) => {
+                let span = info_span!(
+                    "update_track",
+                    api_base_url = %args.api_base_url.value,
+                    params.file = %args.file.display(),
+                    track.id = %args.id,
+                );
+                async {
+                    let req: UpdateTrackRequest = Self::read_json_file(&args.file)?;
+                    let api = self.svc.api(args.api_base_url.value);
+                    let resp = api
+                        .update_track(args.id, &req, &args.api_token.value)
+                        .await?;
+                    Self::write_to_output(out, &resp)
+                }
+                .instrument(span)
+                .await
+            }
             Command::User(UserCommand::Delete(args)) => {
                 let span = info_span!(
                     "delete_user",
@@ -1219,6 +1253,7 @@ mod test {
                 q: &'static str,
                 req: PageRequestArgs<LIMIT>,
                 role: Role,
+                update_track_req: UpdateTrackRequest,
                 update_usr_req: UpdateUserRequest,
             }
 
@@ -1252,6 +1287,7 @@ mod test {
                 start_src_sync: Mock<()>,
                 track_by_id: Mock<Track>,
                 tracks: Mock<Page<Track>>,
+                update_track: Mock<Track>,
                 update_usr: Mock<UserResponse>,
                 usr_by_id: Mock<UserResponse>,
                 usr_playlists: Mock<Page<PlaylistResponse>>,
@@ -1464,6 +1500,17 @@ mod test {
                                 let mock = mocks.update_usr.clone();
                                 move |_, _, _| Ok(mock.call())
                             });
+                        api.expect_update_track()
+                            .with(
+                                eq(data.id),
+                                eq(data.update_track_req.clone()),
+                                eq(data.api_token),
+                            )
+                            .times(mocks.update_track.times())
+                            .returning({
+                                let mock = mocks.update_track.clone();
+                                move |_, _, _| Ok(mock.call())
+                            });
                         api
                     }
                 });
@@ -1596,6 +1643,15 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    update_track_req: UpdateTrackRequest {
+                        album: Album {
+                            compil: false,
+                            name: "album".into(),
+                        },
+                        artists: Default::default(),
+                        title: "title".into(),
+                        year: 2020,
+                    },
                     update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
@@ -1658,6 +1714,15 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    update_track_req: UpdateTrackRequest {
+                        album: Album {
+                            compil: false,
+                            name: "album".into(),
+                        },
+                        artists: Default::default(),
+                        title: "title".into(),
+                        year: 2020,
+                    },
                     update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
@@ -1720,6 +1785,15 @@ mod test {
                     q: "name",
                     req,
                     role: Role::Admin,
+                    update_track_req: UpdateTrackRequest {
+                        album: Album {
+                            compil: false,
+                            name: "album".into(),
+                        },
+                        artists: Default::default(),
+                        title: "title".into(),
+                        year: 2020,
+                    },
                     update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
@@ -1781,6 +1855,15 @@ mod test {
                     q: "name",
                     req,
                     role: Role::Admin,
+                    update_track_req: UpdateTrackRequest {
+                        album: Album {
+                            compil: false,
+                            name: "album".into(),
+                        },
+                        artists: Default::default(),
+                        title: "title".into(),
+                        year: 2020,
+                    },
                     update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
@@ -1856,6 +1939,15 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    update_track_req: UpdateTrackRequest {
+                        album: Album {
+                            compil: false,
+                            name: "album".into(),
+                        },
+                        artists: Default::default(),
+                        title: "title".into(),
+                        year: 2020,
+                    },
                     update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
@@ -1912,6 +2004,15 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    update_track_req: UpdateTrackRequest {
+                        album: Album {
+                            compil: false,
+                            name: "album".into(),
+                        },
+                        artists: Default::default(),
+                        title: "title".into(),
+                        year: 2020,
+                    },
                     update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
@@ -1960,6 +2061,15 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    update_track_req: UpdateTrackRequest {
+                        album: Album {
+                            compil: false,
+                            name: "album".into(),
+                        },
+                        artists: Default::default(),
+                        title: "title".into(),
+                        year: 2020,
+                    },
                     update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
@@ -2008,6 +2118,15 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    update_track_req: UpdateTrackRequest {
+                        album: Album {
+                            compil: false,
+                            name: "album".into(),
+                        },
+                        artists: Default::default(),
+                        title: "title".into(),
+                        year: 2020,
+                    },
                     update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
@@ -2076,6 +2195,15 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    update_track_req: UpdateTrackRequest {
+                        album: Album {
+                            compil: false,
+                            name: "album".into(),
+                        },
+                        artists: Default::default(),
+                        title: "title".into(),
+                        year: 2020,
+                    },
                     update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
@@ -2138,6 +2266,15 @@ mod test {
                     port,
                     req,
                     role: Role::Admin,
+                    update_track_req: UpdateTrackRequest {
+                        album: Album {
+                            compil: false,
+                            name: "album".into(),
+                        },
+                        artists: Default::default(),
+                        title: "title".into(),
+                        year: 2020,
+                    },
                     update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
@@ -2200,6 +2337,15 @@ mod test {
                     port,
                     req,
                     role: Role::Admin,
+                    update_track_req: UpdateTrackRequest {
+                        album: Album {
+                            compil: false,
+                            name: "album".into(),
+                        },
+                        artists: Default::default(),
+                        title: "title".into(),
+                        year: 2020,
+                    },
                     update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
@@ -2263,6 +2409,15 @@ mod test {
                     q,
                     req,
                     role: Role::Admin,
+                    update_track_req: UpdateTrackRequest {
+                        album: Album {
+                            compil: false,
+                            name: "album".into(),
+                        },
+                        artists: Default::default(),
+                        title: "title".into(),
+                        year: 2020,
+                    },
                     update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
@@ -2326,6 +2481,15 @@ mod test {
                     q,
                     req,
                     role: Role::Admin,
+                    update_track_req: UpdateTrackRequest {
+                        album: Album {
+                            compil: false,
+                            name: "album".into(),
+                        },
+                        artists: Default::default(),
+                        title: "title".into(),
+                        year: 2020,
+                    },
                     update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
@@ -2388,6 +2552,15 @@ mod test {
                     port,
                     req,
                     role: Role::Admin,
+                    update_track_req: UpdateTrackRequest {
+                        album: Album {
+                            compil: false,
+                            name: "album".into(),
+                        },
+                        artists: Default::default(),
+                        title: "title".into(),
+                        year: 2020,
+                    },
                     update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
@@ -2453,6 +2626,15 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    update_track_req: UpdateTrackRequest {
+                        album: Album {
+                            compil: false,
+                            name: "album".into(),
+                        },
+                        artists: Default::default(),
+                        title: "title".into(),
+                        year: 2020,
+                    },
                     update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
@@ -2515,6 +2697,15 @@ mod test {
                     port,
                     req,
                     role: Role::Admin,
+                    update_track_req: UpdateTrackRequest {
+                        album: Album {
+                            compil: false,
+                            name: "album".into(),
+                        },
+                        artists: Default::default(),
+                        title: "title".into(),
+                        year: 2020,
+                    },
                     update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
@@ -2576,6 +2767,15 @@ mod test {
                     port,
                     req,
                     role: Role::Admin,
+                    update_track_req: UpdateTrackRequest {
+                        album: Album {
+                            compil: false,
+                            name: "album".into(),
+                        },
+                        artists: Default::default(),
+                        title: "title".into(),
+                        year: 2020,
+                    },
                     update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
@@ -2631,6 +2831,15 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    update_track_req: UpdateTrackRequest {
+                        album: Album {
+                            compil: false,
+                            name: "album".into(),
+                        },
+                        artists: Default::default(),
+                        title: "title".into(),
+                        year: 2020,
+                    },
                     update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
@@ -2681,6 +2890,15 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    update_track_req: UpdateTrackRequest {
+                        album: Album {
+                            compil: false,
+                            name: "album".into(),
+                        },
+                        artists: Default::default(),
+                        title: "title".into(),
+                        year: 2020,
+                    },
                     update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
@@ -2742,6 +2960,15 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    update_track_req: UpdateTrackRequest {
+                        album: Album {
+                            compil: false,
+                            name: "album".into(),
+                        },
+                        artists: Default::default(),
+                        title: "title".into(),
+                        year: 2020,
+                    },
                     update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
@@ -2802,6 +3029,15 @@ mod test {
                     port,
                     req,
                     role: Role::Admin,
+                    update_track_req: UpdateTrackRequest {
+                        album: Album {
+                            compil: false,
+                            name: "album".into(),
+                        },
+                        artists: Default::default(),
+                        title: "title".into(),
+                        year: 2020,
+                    },
                     update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
@@ -2811,6 +3047,85 @@ mod test {
                     }),
                     ..Default::default()
                 };
+                let expected = serde_json::to_string(&resp).expect("failed to serialize");
+                let expected = format!("{expected}\n");
+                let out = run(data, mocks).await;
+                assert_eq!(out, expected);
+            }
+
+            #[tokio::test]
+            async fn update_track() {
+                let temp_dir =
+                    TempDir::new("autoplaylist-cli").expect("failed to create directory");
+                let file_path = temp_dir.path().join("req.json");
+                let req = UpdateTrackRequest {
+                    album: Album {
+                        compil: false,
+                        name: "album".into(),
+                    },
+                    artists: Default::default(),
+                    title: "title".into(),
+                    year: 2020,
+                };
+                let resp = Track {
+                    album: req.album.clone(),
+                    artists: req.artists.clone(),
+                    creation: Utc::now(),
+                    id: Uuid::new_v4(),
+                    platform: Platform::Spotify,
+                    platform_id: "id".into(),
+                    title: req.title.clone(),
+                    year: req.year,
+                };
+                let api_base_url = "http://localhost:8000";
+                let port = 3000;
+                let data = Data {
+                    api_base_url,
+                    api_token: "jwt",
+                    cmd: Command::Track(TrackCommand::Update(TrackUpdateCommandArgs {
+                        api_base_url: ApiBaseUrlArg {
+                            value: api_base_url.into(),
+                        },
+                        api_token: TokenArg {
+                            value: "jwt".into(),
+                        },
+                        file: file_path.clone(),
+                        id: resp.id,
+                    })),
+                    create_playlist_req: CreatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearIs(1993),
+                        src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
+                    },
+                    db: DatabaseArgs {
+                        host: "host".into(),
+                        name: "name".into(),
+                        password: "password".into(),
+                        port: 5432,
+                        secret: "secret".into(),
+                        user: "user".into(),
+                    },
+                    id: resp.id,
+                    q: "name",
+                    port,
+                    req: PageRequestArgs::<25> {
+                        limit: 25,
+                        offset: 0,
+                    },
+                    role: Role::Admin,
+                    update_track_req: req,
+                    update_usr_req: UpdateUserRequest { role: Role::Admin },
+                };
+                let mocks = Mocks {
+                    update_track: Mock::once({
+                        let resp = resp.clone();
+                        move || resp.clone()
+                    }),
+                    ..Default::default()
+                };
+                let mut file = File::create(&file_path).expect("failed to create file");
+                serde_json::to_writer(&mut file, &data.update_track_req)
+                    .expect("failed to serialize into file");
                 let expected = serde_json::to_string(&resp).expect("failed to serialize");
                 let expected = format!("{expected}\n");
                 let out = run(data, mocks).await;
@@ -2853,6 +3168,15 @@ mod test {
                         offset: 0,
                     },
                     role: Role::from(role),
+                    update_track_req: UpdateTrackRequest {
+                        album: Album {
+                            compil: false,
+                            name: "album".into(),
+                        },
+                        artists: Default::default(),
+                        title: "title".into(),
+                        year: 2020,
+                    },
                     update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
@@ -2908,6 +3232,15 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    update_track_req: UpdateTrackRequest {
+                        album: Album {
+                            compil: false,
+                            name: "album".into(),
+                        },
+                        artists: Default::default(),
+                        title: "title".into(),
+                        year: 2020,
+                    },
                     update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
@@ -2970,6 +3303,15 @@ mod test {
                     port,
                     req,
                     role: Role::Admin,
+                    update_track_req: UpdateTrackRequest {
+                        album: Album {
+                            compil: false,
+                            name: "album".into(),
+                        },
+                        artists: Default::default(),
+                        title: "title".into(),
+                        year: 2020,
+                    },
                     update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
@@ -3032,6 +3374,15 @@ mod test {
                     port,
                     req,
                     role: Role::Admin,
+                    update_track_req: UpdateTrackRequest {
+                        album: Album {
+                            compil: false,
+                            name: "album".into(),
+                        },
+                        artists: Default::default(),
+                        title: "title".into(),
+                        year: 2020,
+                    },
                     update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
@@ -3093,6 +3444,15 @@ mod test {
                     port,
                     req,
                     role: Role::Admin,
+                    update_track_req: UpdateTrackRequest {
+                        album: Album {
+                            compil: false,
+                            name: "album".into(),
+                        },
+                        artists: Default::default(),
+                        title: "title".into(),
+                        year: 2020,
+                    },
                     update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
