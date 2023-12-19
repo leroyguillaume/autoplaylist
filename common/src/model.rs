@@ -26,7 +26,7 @@ pub trait PlatformTrack: Send + Sync {
 // Synchronizable
 
 #[cfg_attr(feature = "db", async_trait::async_trait)]
-pub trait Synchronizable<STEP: SynchronizationStep>: Send + Sync {
+pub trait Synchronizable<STEP: SynchronizationStep>: Clone + Send + Sync {
     #[cfg(feature = "db")]
     async fn by_id(
         id: Uuid,
@@ -44,12 +44,6 @@ pub trait Synchronizable<STEP: SynchronizationStep>: Send + Sync {
 
     fn id(&self) -> Uuid;
 
-    #[cfg(feature = "db")]
-    async fn lock_synchronization(
-        &self,
-        db_conn: &mut dyn crate::db::DatabaseClient,
-    ) -> crate::db::DatabaseResult<Option<Synchronization<STEP>>>;
-
     fn owner(&self) -> &User;
 
     fn owner_mut(&mut self) -> &mut User;
@@ -58,16 +52,24 @@ pub trait Synchronizable<STEP: SynchronizationStep>: Send + Sync {
 
     fn set_synchronization(&mut self, sync: Synchronization<STEP>);
 
+    fn synchronization(&self) -> &Synchronization<STEP>;
+
     #[cfg(feature = "db")]
     async fn update(
         &self,
         db_conn: &mut dyn crate::db::DatabaseClient,
-    ) -> crate::db::DatabaseResult<()>;
+    ) -> crate::db::DatabaseResult<bool>;
+
+    #[cfg(feature = "db")]
+    async fn update_safely(
+        &self,
+        db_conn: &mut dyn crate::db::DatabaseClient,
+    ) -> crate::db::DatabaseResult<bool>;
 }
 
 // SynchronizationStep
 
-pub trait SynchronizationStep: Send + Sync {
+pub trait SynchronizationStep: Copy + Send + Sync {
     fn first() -> Self;
 }
 
@@ -186,14 +188,6 @@ impl Synchronizable<PlaylistSynchronizationStep> for Playlist {
         self.id
     }
 
-    #[cfg(feature = "db")]
-    async fn lock_synchronization(
-        &self,
-        db_conn: &mut dyn crate::db::DatabaseClient,
-    ) -> crate::db::DatabaseResult<Option<PlaylistSynchronization>> {
-        db_conn.lock_playlist_synchronization(self.id).await
-    }
-
     fn owner(&self) -> &User {
         &self.src.owner
     }
@@ -206,6 +200,10 @@ impl Synchronizable<PlaylistSynchronizationStep> for Playlist {
         self.sync = sync;
     }
 
+    fn synchronization(&self) -> &Synchronization<PlaylistSynchronizationStep> {
+        &self.sync
+    }
+
     fn source_kind(&self) -> SourceKind {
         match &self.tgt {
             Target::Spotify(id) => SourceKind::Spotify(SpotifySourceKind::Playlist(id.clone())),
@@ -216,8 +214,16 @@ impl Synchronizable<PlaylistSynchronizationStep> for Playlist {
     async fn update(
         &self,
         db_conn: &mut dyn crate::db::DatabaseClient,
-    ) -> crate::db::DatabaseResult<()> {
+    ) -> crate::db::DatabaseResult<bool> {
         db_conn.update_playlist(self).await
+    }
+
+    #[cfg(feature = "db")]
+    async fn update_safely(
+        &self,
+        db_conn: &mut dyn crate::db::DatabaseClient,
+    ) -> crate::db::DatabaseResult<bool> {
+        db_conn.update_playlist_safely(self).await
     }
 }
 
@@ -369,14 +375,6 @@ impl Synchronizable<SourceSynchronizationStep> for Source {
         self.id
     }
 
-    #[cfg(feature = "db")]
-    async fn lock_synchronization(
-        &self,
-        db_conn: &mut dyn crate::db::DatabaseClient,
-    ) -> crate::db::DatabaseResult<Option<SourceSynchronization>> {
-        db_conn.lock_source_synchronization(self.id).await
-    }
-
     fn owner(&self) -> &User {
         &self.owner
     }
@@ -393,12 +391,24 @@ impl Synchronizable<SourceSynchronizationStep> for Source {
         self.kind.clone()
     }
 
+    fn synchronization(&self) -> &Synchronization<SourceSynchronizationStep> {
+        &self.sync
+    }
+
     #[cfg(feature = "db")]
     async fn update(
         &self,
         db_conn: &mut dyn crate::db::DatabaseClient,
-    ) -> crate::db::DatabaseResult<()> {
+    ) -> crate::db::DatabaseResult<bool> {
         db_conn.update_source(self).await
+    }
+
+    #[cfg(feature = "db")]
+    async fn update_safely(
+        &self,
+        db_conn: &mut dyn crate::db::DatabaseClient,
+    ) -> crate::db::DatabaseResult<bool> {
+        db_conn.update_source_safely(self).await
     }
 }
 
@@ -470,22 +480,38 @@ pub struct SpotifyToken {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Synchronization<STEP: SynchronizationStep> {
-    Aborted(SynchronizationState<STEP>),
+    Aborted {
+        end: DateTime<Utc>,
+        state: SynchronizationState<STEP>,
+    },
     Failed {
         details: String,
+        end: DateTime<Utc>,
         state: SynchronizationState<STEP>,
     },
     Pending,
-    Running,
+    Running(DateTime<Utc>),
     Succeeded {
         end: DateTime<Utc>,
         start: DateTime<Utc>,
     },
 }
 
+impl<STEP: SynchronizationStep> Display for Synchronization<STEP> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match &self {
+            Self::Aborted { .. } => write!(f, "aborted"),
+            Self::Failed { .. } => write!(f, "failed"),
+            Self::Pending => write!(f, "pending"),
+            Self::Running(_) => write!(f, "running"),
+            Self::Succeeded { .. } => write!(f, "succeeded"),
+        }
+    }
+}
+
 // SynchronizationState
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SynchronizationState<STEP: SynchronizationStep> {
     pub start: DateTime<Utc>,
@@ -742,33 +768,6 @@ mod test {
             }
         }
 
-        #[cfg(feature = "db")]
-        mod lock_synchronization {
-            use super::*;
-
-            // Tests
-
-            #[tokio::test]
-            async fn unit() {
-                let playlist = new_playlist(Target::Spotify("id".into()));
-                let mut db_conn = crate::db::MockDatabaseClient::new();
-                db_conn
-                    .expect_lock_playlist_synchronization()
-                    .with(eq(playlist.id))
-                    .times(1)
-                    .returning({
-                        let sync = playlist.sync.clone();
-                        move |_| Ok(Some(sync.clone()))
-                    });
-                let sync = playlist
-                    .lock_synchronization(&mut db_conn)
-                    .await
-                    .expect("failed to lock playlist synchronization")
-                    .expect("synchronization doesn't exist");
-                assert_eq!(sync, playlist.sync);
-            }
-        }
-
         mod set_synchronization {
             use super::*;
 
@@ -777,7 +776,7 @@ mod test {
             #[test]
             fn unit() {
                 let mut playlist = new_playlist(Target::Spotify("id".into()));
-                let sync = Synchronization::Running;
+                let sync = Synchronization::Pending;
                 let expected = Playlist {
                     sync: sync.clone(),
                     ..playlist.clone()
@@ -802,6 +801,19 @@ mod test {
             }
         }
 
+        mod synchronization {
+            use super::*;
+
+            // Tests
+
+            #[test]
+            fn unit() {
+                let playlist = new_playlist(Target::Spotify("id".into()));
+                let sync = playlist.synchronization();
+                assert_eq!(sync.clone(), playlist.sync);
+            }
+        }
+
         #[cfg(feature = "db")]
         mod update {
             use super::*;
@@ -810,17 +822,43 @@ mod test {
 
             #[tokio::test]
             async fn unit() {
+                let expected = true;
                 let playlist = new_playlist(Target::Spotify("id".into()));
                 let mut db_conn = crate::db::MockDatabaseClient::new();
                 db_conn
                     .expect_update_playlist()
                     .with(eq(playlist.clone()))
                     .times(1)
-                    .returning(|_| Ok(()));
-                playlist
+                    .returning(move |_| Ok(expected));
+                let updated = playlist
                     .update(&mut db_conn)
                     .await
                     .expect("failed to update playlist");
+                assert_eq!(updated, expected);
+            }
+        }
+
+        #[cfg(feature = "db")]
+        mod update_safely {
+            use super::*;
+
+            // Tests
+
+            #[tokio::test]
+            async fn unit() {
+                let expected = true;
+                let playlist = new_playlist(Target::Spotify("id".into()));
+                let mut db_conn = crate::db::MockDatabaseClient::new();
+                db_conn
+                    .expect_update_playlist_safely()
+                    .with(eq(playlist.clone()))
+                    .times(1)
+                    .returning(move |_| Ok(expected));
+                let updated = playlist
+                    .update_safely(&mut db_conn)
+                    .await
+                    .expect("failed to update playlist");
+                assert_eq!(updated, expected);
             }
         }
     }
@@ -1227,52 +1265,7 @@ mod test {
             }
         }
 
-        #[cfg(feature = "db")]
-        mod lock_synchronization {
-            use super::*;
-
-            // Tests
-
-            #[tokio::test]
-            async fn unit() {
-                let src = new_source(SourceKind::Spotify(SpotifySourceKind::SavedTracks));
-                let mut db_conn = crate::db::MockDatabaseClient::new();
-                db_conn
-                    .expect_lock_source_synchronization()
-                    .with(eq(src.id))
-                    .times(1)
-                    .returning({
-                        let sync = src.sync.clone();
-                        move |_| Ok(Some(sync.clone()))
-                    });
-                let sync = src
-                    .lock_synchronization(&mut db_conn)
-                    .await
-                    .expect("failed to lock source synchronization")
-                    .expect("synchronization doesn't exist");
-                assert_eq!(sync, src.sync);
-            }
-        }
-
-        mod set_synchronization {
-            use super::*;
-
-            // Tests
-
-            #[test]
-            fn unit() {
-                let mut src = new_source(SourceKind::Spotify(SpotifySourceKind::SavedTracks));
-                let sync = Synchronization::Running;
-                let expected = Source {
-                    sync: sync.clone(),
-                    ..src.clone()
-                };
-                src.set_synchronization(sync);
-                assert_eq!(src, expected);
-            }
-        }
-
-        mod to_resource {
+        mod source_kind {
             use super::*;
 
             // spotify
@@ -1298,6 +1291,37 @@ mod test {
             }
         }
 
+        mod set_synchronization {
+            use super::*;
+
+            // Tests
+
+            #[test]
+            fn unit() {
+                let mut src = new_source(SourceKind::Spotify(SpotifySourceKind::SavedTracks));
+                let sync = Synchronization::Pending;
+                let expected = Source {
+                    sync: sync.clone(),
+                    ..src.clone()
+                };
+                src.set_synchronization(sync);
+                assert_eq!(src, expected);
+            }
+        }
+
+        mod synchronization {
+            use super::*;
+
+            // Tests
+
+            #[test]
+            fn unit() {
+                let src = new_source(SourceKind::Spotify(SpotifySourceKind::SavedTracks));
+                let sync = src.synchronization();
+                assert_eq!(sync.clone(), src.sync);
+            }
+        }
+
         #[cfg(feature = "db")]
         mod update {
             use super::*;
@@ -1306,16 +1330,43 @@ mod test {
 
             #[tokio::test]
             async fn unit() {
+                let expected = true;
                 let src = new_source(SourceKind::Spotify(SpotifySourceKind::SavedTracks));
                 let mut db_conn = crate::db::MockDatabaseClient::new();
                 db_conn
                     .expect_update_source()
                     .with(eq(src.clone()))
                     .times(1)
-                    .returning(|_| Ok(()));
-                src.update(&mut db_conn)
+                    .returning(move |_| Ok(expected));
+                let updated = src
+                    .update(&mut db_conn)
                     .await
                     .expect("failed to update source");
+                assert_eq!(updated, expected);
+            }
+        }
+
+        #[cfg(feature = "db")]
+        mod update_safely {
+            use super::*;
+
+            // Tests
+
+            #[tokio::test]
+            async fn unit() {
+                let expected = true;
+                let src = new_source(SourceKind::Spotify(SpotifySourceKind::SavedTracks));
+                let mut db_conn = crate::db::MockDatabaseClient::new();
+                db_conn
+                    .expect_update_source_safely()
+                    .with(eq(src.clone()))
+                    .times(1)
+                    .returning(move |_| Ok(expected));
+                let updated = src
+                    .update_safely(&mut db_conn)
+                    .await
+                    .expect("failed to update source");
+                assert_eq!(updated, expected);
             }
         }
     }

@@ -606,8 +606,9 @@ fn create_app<
                                 let playlist = db_tx.create_playlist(&creation).await?;
                                 info!(
                                     %playlist.id,
-                                    %playlist.src.kind,
                                     %playlist.src.owner.id,
+                                    %playlist.src.sync,
+                                    %playlist.sync,
                                     "playlist created"
                                 );
                                 Ok::<(Playlist, bool), ApiError>((playlist, new_src))
@@ -1509,7 +1510,7 @@ mod test {
                                 let mock = mocks.update_usr.clone();
                                 move |_| {
                                     mock.call();
-                                    Ok(())
+                                    Ok(true)
                                 }
                             });
                         conn.0
@@ -4460,7 +4461,7 @@ mod test {
                             .expect_update_track()
                             .with(eq(expected.clone()))
                             .times(mocks.update.times())
-                            .returning(|_| Ok(()));
+                            .returning(|_| Ok(true));
                         conn
                     }
                 }),
@@ -4656,7 +4657,7 @@ mod test {
                             .expect_update_user()
                             .with(eq(usr_updated.clone()))
                             .times(mocks.update.times())
-                            .returning(|_| Ok(()));
+                            .returning(|_| Ok(true));
                         conn
                     }
                 }),

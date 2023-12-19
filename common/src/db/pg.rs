@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use magic_crypt::{new_magic_crypt, MagicCrypt256, MagicCryptError, MagicCryptTrait};
 use mockable::Env;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::{
     migrate, migrate::MigrateError, pool::PoolConnection, query_file, query_file_as, Acquire,
@@ -18,9 +18,8 @@ use tracing::{debug, debug_span, info, trace, Instrument};
 use uuid::Uuid;
 
 use crate::model::{
-    Album, Credentials, Page, PageRequest, Platform, Playlist, PlaylistSynchronization, Role,
-    Source, SourceKind, SourceSynchronization, SpotifyCredentials, Synchronization,
-    SynchronizationStep, Track, User,
+    Album, Credentials, Page, PageRequest, Platform, Playlist, Role, Source, SourceKind,
+    SpotifyCredentials, Track, User,
 };
 
 use super::{
@@ -107,22 +106,6 @@ macro_rules! client_impl {
             async fn delete_user(&mut self, id: Uuid) -> DatabaseResult<bool> {
                 let deleted = delete_user(id, &mut self.conn).await?;
                 Ok(deleted)
-            }
-
-            async fn lock_playlist_synchronization(
-                &mut self,
-                id: Uuid,
-            ) -> DatabaseResult<Option<PlaylistSynchronization>> {
-                let sync = lock_playlist_synchronization(id, &mut self.conn).await?;
-                Ok(sync)
-            }
-
-            async fn lock_source_synchronization(
-                &mut self,
-                id: Uuid,
-            ) -> DatabaseResult<Option<SourceSynchronization>> {
-                let sync = lock_source_synchronization(id, &mut self.conn).await?;
-                Ok(sync)
             }
 
             async fn playlist_by_id(&mut self, id: Uuid) -> DatabaseResult<Option<Playlist>> {
@@ -258,24 +241,37 @@ macro_rules! client_impl {
                 Ok(page)
             }
 
-            async fn update_playlist(&mut self, playlist: &Playlist) -> DatabaseResult<()> {
-                update_playlist(playlist, &mut self.conn).await?;
-                Ok(())
+            async fn update_playlist(&mut self, playlist: &Playlist) -> DatabaseResult<bool> {
+                let updated = update_playlist(playlist, false, &mut self.conn).await?;
+                Ok(updated)
             }
 
-            async fn update_source(&mut self, src: &Source) -> DatabaseResult<()> {
-                update_source(src, &mut self.conn).await?;
-                Ok(())
+            async fn update_playlist_safely(
+                &mut self,
+                playlist: &Playlist,
+            ) -> DatabaseResult<bool> {
+                let updated = update_playlist(playlist, true, &mut self.conn).await?;
+                Ok(updated)
             }
 
-            async fn update_track(&mut self, track: &Track) -> DatabaseResult<()> {
-                update_track(track, &mut self.conn).await?;
-                Ok(())
+            async fn update_source(&mut self, src: &Source) -> DatabaseResult<bool> {
+                let updated = update_source(src, false, &mut self.conn).await?;
+                Ok(updated)
             }
 
-            async fn update_user(&mut self, user: &User) -> DatabaseResult<()> {
-                update_user(user, &self.key, &mut self.conn).await?;
-                Ok(())
+            async fn update_source_safely(&mut self, src: &Source) -> DatabaseResult<bool> {
+                let updated = update_source(src, true, &mut self.conn).await?;
+                Ok(updated)
+            }
+
+            async fn update_track(&mut self, track: &Track) -> DatabaseResult<bool> {
+                let updated = update_track(track, &mut self.conn).await?;
+                Ok(updated)
+            }
+
+            async fn update_user(&mut self, user: &User) -> DatabaseResult<bool> {
+                let updated = update_user(user, &self.key, &mut self.conn).await?;
+                Ok(updated)
             }
 
             async fn user_by_id(&mut self, id: Uuid) -> DatabaseResult<Option<User>> {
@@ -631,21 +627,6 @@ impl From<SpotifyCredentials> for SpotifyPublicCredentials {
     }
 }
 
-// SynchronizationRecord
-
-struct SynchronizationRecord {
-    sync: Value,
-}
-
-impl SynchronizationRecord {
-    fn into_entity<S: SynchronizationStep + DeserializeOwned>(
-        self,
-    ) -> PostgresResult<Synchronization<S>> {
-        let sync = serde_json::from_value(self.sync)?;
-        Ok(sync)
-    }
-}
-
 // TrackRecord
 
 struct TrackRecord {
@@ -815,6 +796,7 @@ async fn create_playlist<
         playlist.name = creation.name,
         playlist.src.kind = %creation.src.kind,
         playlist.src.owner.id = %creation.src.owner.id,
+        playlist.src.sync = %creation.src.sync,
     );
     async {
         trace!("serializing playlist predicate");
@@ -835,7 +817,7 @@ async fn create_playlist<
         .fetch_one(&mut *conn)
         .await?;
         let playlist = record.into_entity(key)?;
-        debug!(%playlist.id, "playlist created");
+        debug!(%playlist.id, %playlist.sync, "playlist created");
         Ok(playlist)
     }
     .instrument(span)
@@ -873,7 +855,7 @@ async fn create_source<
         .fetch_one(&mut *conn)
         .await?;
         let src = record.into_entity(key)?;
-        debug!(%src.id, "source created");
+        debug!(%src.id, %src.sync, "source created");
         Ok(src)
     }
     .instrument(span)
@@ -1129,70 +1111,6 @@ fn encrypt_credentials(creds: &Credentials, key: &MagicCrypt256) -> PostgresResu
     let creds = serde_json::to_string(creds)?;
     trace!("encrypting user credentials");
     Ok(key.encrypt_str_to_base64(creds))
-}
-
-// lock_playlist_synchronization
-
-#[inline]
-async fn lock_playlist_synchronization<
-    'a,
-    A: Acquire<'a, Database = Postgres, Connection = &'a mut PgConnection>,
->(
-    id: Uuid,
-    conn: A,
-) -> PostgresResult<Option<PlaylistSynchronization>> {
-    let span = debug_span!(
-        "lock_playlist_synchronization",
-        playlist.id = %id,
-    );
-    async {
-        trace!("acquiring database connection");
-        let conn = conn.acquire().await?;
-        debug!("locking playlist synchronization");
-        let record = query_file_as!(
-            SynchronizationRecord,
-            "resources/main/db/pg/queries/lock-playlist-synchronization.sql",
-            id,
-        )
-        .fetch_optional(&mut *conn)
-        .await?;
-        let sync = record.map(|record| record.into_entity()).transpose()?;
-        Ok(sync)
-    }
-    .instrument(span)
-    .await
-}
-
-// lock_source_synchronization
-
-#[inline]
-async fn lock_source_synchronization<
-    'a,
-    A: Acquire<'a, Database = Postgres, Connection = &'a mut PgConnection>,
->(
-    id: Uuid,
-    conn: A,
-) -> PostgresResult<Option<SourceSynchronization>> {
-    let span = debug_span!(
-        "lock_source_synchronization",
-        src.id = %id,
-    );
-    async {
-        trace!("acquiring database connection");
-        let conn = conn.acquire().await?;
-        debug!("locking source synchronization");
-        let record = query_file_as!(
-            SynchronizationRecord,
-            "resources/main/db/pg/queries/lock-source-synchronization.sql",
-            id,
-        )
-        .fetch_optional(&mut *conn)
-        .await?;
-        let sync = record.map(|record| record.into_entity()).transpose()?;
-        Ok(sync)
-    }
-    .instrument(span)
-    .await
 }
 
 // playlist_by_id
@@ -1959,14 +1877,17 @@ async fn update_playlist<
     A: Acquire<'a, Database = Postgres, Connection = &'a mut PgConnection>,
 >(
     playlist: &Playlist,
+    safely: bool,
     conn: A,
-) -> PostgresResult<()> {
+) -> PostgresResult<bool> {
     let span = debug_span!(
         "update_playlist",
         %playlist.id,
         playlist.name,
         %playlist.src.kind,
         %playlist.src.owner.id,
+        %playlist.src.sync,
+        %playlist.sync,
     );
     async {
         trace!("serializing playlist synchronization");
@@ -1974,14 +1895,25 @@ async fn update_playlist<
         trace!("acquiring database connection");
         let conn = conn.acquire().await?;
         debug!("updating playlist");
-        query_file!(
-            "resources/main/db/pg/queries/update-playlist.sql",
-            playlist.id,
-            sync,
-        )
-        .execute(&mut *conn)
-        .await?;
-        Ok(())
+        let query = if safely {
+            query_file!(
+                "resources/main/db/pg/queries/update-playlist-safely.sql",
+                playlist.id,
+                sync,
+            )
+        } else {
+            query_file!(
+                "resources/main/db/pg/queries/update-playlist.sql",
+                playlist.id,
+                sync,
+            )
+        };
+        let res = query.execute(&mut *conn).await?;
+        let updated = res.rows_affected() > 0;
+        if updated {
+            debug!("playlist updated");
+        }
+        Ok(updated)
     }
     .instrument(span)
     .await
@@ -1995,8 +1927,9 @@ async fn update_source<
     A: Acquire<'a, Database = Postgres, Connection = &'a mut PgConnection>,
 >(
     src: &Source,
+    safely: bool,
     conn: A,
-) -> PostgresResult<()> {
+) -> PostgresResult<bool> {
     let span: tracing::Span = debug_span!(
         "update_source",
         %src.id,
@@ -2007,14 +1940,25 @@ async fn update_source<
         trace!("acquiring database connection");
         let conn = conn.acquire().await?;
         debug!("updating playlist");
-        query_file!(
-            "resources/main/db/pg/queries/update-source.sql",
-            src.id,
-            sync,
-        )
-        .execute(&mut *conn)
-        .await?;
-        Ok(())
+        let query = if safely {
+            query_file!(
+                "resources/main/db/pg/queries/update-source-safely.sql",
+                src.id,
+                sync,
+            )
+        } else {
+            query_file!(
+                "resources/main/db/pg/queries/update-source.sql",
+                src.id,
+                sync,
+            )
+        };
+        let res = query.execute(&mut *conn).await?;
+        let updated = res.rows_affected() > 0;
+        if updated {
+            debug!("source updated");
+        }
+        Ok(updated)
     }
     .instrument(span)
     .await
@@ -2029,7 +1973,7 @@ async fn update_track<
 >(
     track: &Track,
     conn: A,
-) -> PostgresResult<()> {
+) -> PostgresResult<bool> {
     let album = track.album.name.to_lowercase();
     let artists = track
         .artists
@@ -2051,7 +1995,7 @@ async fn update_track<
         trace!("acquiring database connection");
         let conn = conn.acquire().await?;
         debug!("updating track");
-        query_file!(
+        let res = query_file!(
             "resources/main/db/pg/queries/update-track.sql",
             track.id,
             title,
@@ -2062,7 +2006,11 @@ async fn update_track<
         )
         .execute(&mut *conn)
         .await?;
-        Ok(())
+        let updated = res.rows_affected() > 0;
+        if updated {
+            debug!("track updated");
+        }
+        Ok(updated)
     }
     .instrument(span)
     .await
@@ -2073,7 +2021,7 @@ async fn update_user<'a, A: Acquire<'a, Database = Postgres, Connection = &'a mu
     usr: &User,
     key: &MagicCrypt256,
     conn: A,
-) -> PostgresResult<()> {
+) -> PostgresResult<bool> {
     let span = debug_span!(
         "update_user",
         %usr.id,
@@ -2091,7 +2039,7 @@ async fn update_user<'a, A: Acquire<'a, Database = Postgres, Connection = &'a mu
         trace!("acquiring database connection");
         let conn = conn.acquire().await?;
         debug!("updating user");
-        query_file!(
+        let res = query_file!(
             "resources/main/db/pg/queries/update-user.sql",
             usr.id,
             usr.role as _,
@@ -2100,7 +2048,11 @@ async fn update_user<'a, A: Acquire<'a, Database = Postgres, Connection = &'a mu
         )
         .execute(&mut *conn)
         .await?;
-        Ok(())
+        let updated = res.rows_affected() > 0;
+        if updated {
+            debug!("user updated");
+        }
+        Ok(updated)
     }
     .instrument(span)
     .await
@@ -2359,7 +2311,7 @@ mod test {
     use crate::{
         model::{
             Credentials, Predicate, SourceKind, SpotifyCredentials, SpotifySourceKind,
-            SpotifyToken, Target,
+            SpotifyToken, Synchronization, Target,
         },
         test_env_var, TracingConfig,
     };
@@ -2526,7 +2478,11 @@ mod test {
                 id: Uuid::from_u128(0xf1c418db13c047a79ecb9aa4cf4995eb),
                 kind: SourceKind::Spotify(SpotifySourceKind::Playlist("src_2".into())),
                 owner: usr_1.clone(),
-                sync: Synchronization::Pending,
+                sync: Synchronization::Running(
+                    DateTime::parse_from_rfc3339("2023-02-05T00:00:10Z")
+                        .expect("failed to parse date")
+                        .into(),
+                ),
             };
             let src_3 = Source {
                 creation: DateTime::parse_from_rfc3339("2023-02-05T03:00:00Z")
@@ -2567,7 +2523,11 @@ mod test {
                         name: "playlist_2".into(),
                         predicate: Predicate::YearIs(2013),
                         src: src_1.clone(),
-                        sync: Synchronization::Pending,
+                        sync: Synchronization::Running(
+                            DateTime::parse_from_rfc3339("2023-02-05T00:00:10Z")
+                                .expect("failed to parse date")
+                                .into(),
+                        ),
                         tgt: Target::Spotify("playlist_2".into()),
                     },
                     Playlist {
@@ -3141,66 +3101,6 @@ mod test {
                 let id = data.usrs[0].id;
                 let deleted = run(id, db).await;
                 assert!(deleted);
-            }
-        }
-
-        mod lock_playlist_synchronization {
-            use super::*;
-
-            // run
-
-            async fn run(id: Uuid, expected: Option<PlaylistSynchronization>, db: PgPool) {
-                let db = init(db).await;
-                let mut conn = db.acquire().await.expect("failed to acquire connection");
-                let sync = conn
-                    .lock_playlist_synchronization(id)
-                    .await
-                    .expect("failed to fetch playlist synchronization");
-                assert_eq!(sync, expected);
-            }
-
-            // Tests
-
-            #[sqlx::test]
-            async fn none(db: PgPool) {
-                run(Uuid::new_v4(), None, db).await;
-            }
-
-            #[sqlx::test]
-            async fn synchronization(db: PgPool) {
-                let data = Data::new();
-                let id = data.playlists[0].id;
-                run(id, Some(Synchronization::Pending), db).await;
-            }
-        }
-
-        mod lock_source_synchronization {
-            use super::*;
-
-            // run
-
-            async fn run(id: Uuid, expected: Option<SourceSynchronization>, db: PgPool) {
-                let db = init(db).await;
-                let mut conn = db.acquire().await.expect("failed to acquire connection");
-                let sync = conn
-                    .lock_source_synchronization(id)
-                    .await
-                    .expect("failed to fetch source synchronization");
-                assert_eq!(sync, expected);
-            }
-
-            // Tests
-
-            #[sqlx::test]
-            async fn none(db: PgPool) {
-                run(Uuid::new_v4(), None, db).await;
-            }
-
-            #[sqlx::test]
-            async fn synchronization(db: PgPool) {
-                let data = Data::new();
-                let id = data.srcs[0].id;
-                run(id, Some(Synchronization::Pending), db).await;
             }
         }
 
@@ -3851,82 +3751,242 @@ mod test {
         mod update_playlist {
             use super::*;
 
-            // Tests
+            // run
 
-            #[sqlx::test]
-            async fn unit(db: PgPool) {
+            async fn run(id: Uuid, playlist: &Playlist, expected: bool, db: PgPool) {
                 let data = Data::new();
                 let db = init(db).await;
                 let mut conn = db.acquire().await.expect("failed to acquire connection");
-                let expected = Playlist {
-                    sync: Synchronization::Running,
-                    ..data.playlists[0].clone()
+                let playlist_expected = Playlist {
+                    sync: Synchronization::Running(Utc::now()),
+                    ..playlist.clone()
                 };
                 let playlist_updated = Playlist {
                     creation: Utc::now(),
-                    id: expected.id,
+                    id,
                     name: "playlist_2".into(),
                     predicate: Predicate::YearIs(1983),
                     src: data.srcs[1].clone(),
-                    sync: expected.sync.clone(),
+                    sync: playlist_expected.sync.clone(),
                     tgt: Target::Spotify("playlist_2".into()),
                 };
-                conn.update_playlist(&playlist_updated)
+                let updated = conn
+                    .update_playlist(&playlist_updated)
                     .await
                     .expect("failed to update playlist");
-                let playlist = conn
-                    .playlist_by_id(expected.id)
+                if expected {
+                    assert!(updated);
+                    let playlist = conn
+                        .playlist_by_id(id)
+                        .await
+                        .expect("failed to fetch source")
+                        .expect("source doesn't exist");
+                    assert_eq!(playlist, playlist_expected);
+                } else {
+                    assert!(!updated);
+                }
+            }
+
+            // Tests
+
+            #[sqlx::test]
+            async fn no(db: PgPool) {
+                let data = Data::new();
+                run(Uuid::new_v4(), &data.playlists[0], false, db).await;
+            }
+
+            #[sqlx::test]
+            async fn yes(db: PgPool) {
+                let data = Data::new();
+                let playlist = &data.playlists[0];
+                run(playlist.id, playlist, true, db).await;
+            }
+        }
+
+        mod update_playlist_safely {
+            use super::*;
+
+            // run
+
+            async fn run(id: Uuid, playlist: &Playlist, expected: bool, db: PgPool) {
+                let data = Data::new();
+                let db = init(db).await;
+                let mut conn = db.acquire().await.expect("failed to acquire connection");
+                let playlist_expected = Playlist {
+                    sync: Synchronization::Running(Utc::now()),
+                    ..playlist.clone()
+                };
+                let playlist_updated = Playlist {
+                    creation: Utc::now(),
+                    id,
+                    name: "playlist_2".into(),
+                    predicate: Predicate::YearIs(1983),
+                    src: data.srcs[1].clone(),
+                    sync: playlist_expected.sync.clone(),
+                    tgt: Target::Spotify("playlist_2".into()),
+                };
+                let updated = conn
+                    .update_playlist_safely(&playlist_updated)
                     .await
-                    .expect("failed to fetch source")
-                    .expect("source doesn't exist");
-                assert_eq!(playlist, expected);
+                    .expect("failed to update playlist");
+                if expected {
+                    assert!(updated);
+                    let playlist = conn
+                        .playlist_by_id(id)
+                        .await
+                        .expect("failed to fetch source")
+                        .expect("source doesn't exist");
+                    assert_eq!(playlist, playlist_expected);
+                } else {
+                    assert!(!updated);
+                }
+            }
+
+            // Tests
+
+            #[sqlx::test]
+            async fn no_when_playlist_doesnt_exist(db: PgPool) {
+                let data = Data::new();
+                run(Uuid::new_v4(), &data.playlists[0], false, db).await;
+            }
+
+            #[sqlx::test]
+            async fn no_when_sync_is_running(db: PgPool) {
+                let data = Data::new();
+                let playlist = &data.playlists[1];
+                run(playlist.id, playlist, false, db).await;
+            }
+
+            #[sqlx::test]
+            async fn yes(db: PgPool) {
+                let data = Data::new();
+                let playlist = &data.playlists[0];
+                run(playlist.id, playlist, true, db).await;
             }
         }
 
         mod update_source {
             use super::*;
 
-            // Tests
+            // run
 
-            #[sqlx::test]
-            async fn unit(db: PgPool) {
+            async fn run(id: Uuid, src: &Source, expected: bool, db: PgPool) {
                 let data = Data::new();
                 let db = init(db).await;
                 let mut conn = db.acquire().await.expect("failed to acquire connection");
-                let expected = Source {
-                    sync: Synchronization::Running,
-                    ..data.srcs[0].clone()
+                let src_expected = Source {
+                    sync: Synchronization::Running(Utc::now()),
+                    ..src.clone()
                 };
                 let src_updated = Source {
                     creation: Utc::now(),
-                    id: expected.id,
+                    id,
                     kind: SourceKind::Spotify(SpotifySourceKind::Playlist("id".into())),
                     owner: data.usrs[1].clone(),
-                    sync: expected.sync.clone(),
+                    sync: src_expected.sync.clone(),
                 };
-                conn.update_source(&src_updated)
+                let updated = conn
+                    .update_source(&src_updated)
                     .await
                     .expect("failed to update source");
-                let src = conn
-                    .source_by_id(expected.id)
+                if expected {
+                    assert!(updated);
+                    let src = conn
+                        .source_by_id(id)
+                        .await
+                        .expect("failed to fetch source")
+                        .expect("source doesn't exist");
+                    assert_eq!(src, src_expected);
+                } else {
+                    assert!(!updated);
+                }
+            }
+
+            // Tests
+
+            #[sqlx::test]
+            async fn no(db: PgPool) {
+                let data = Data::new();
+                run(Uuid::new_v4(), &data.srcs[0], false, db).await;
+            }
+
+            #[sqlx::test]
+            async fn yes(db: PgPool) {
+                let data = Data::new();
+                let src = &data.srcs[0];
+                run(src.id, src, true, db).await;
+            }
+        }
+
+        mod update_source_safely {
+            use super::*;
+
+            // run
+
+            async fn run(id: Uuid, src: &Source, expected: bool, db: PgPool) {
+                let data = Data::new();
+                let db = init(db).await;
+                let mut conn = db.acquire().await.expect("failed to acquire connection");
+                let src_expected = Source {
+                    sync: Synchronization::Running(Utc::now()),
+                    ..src.clone()
+                };
+                let src_updated = Source {
+                    creation: Utc::now(),
+                    id,
+                    kind: SourceKind::Spotify(SpotifySourceKind::Playlist("id".into())),
+                    owner: data.usrs[1].clone(),
+                    sync: src_expected.sync.clone(),
+                };
+                let updated = conn
+                    .update_source_safely(&src_updated)
                     .await
-                    .expect("failed to fetch source")
-                    .expect("source doesn't exist");
-                assert_eq!(src, expected);
+                    .expect("failed to update source");
+                if expected {
+                    assert!(updated);
+                    let src = conn
+                        .source_by_id(id)
+                        .await
+                        .expect("failed to fetch source")
+                        .expect("source doesn't exist");
+                    assert_eq!(src, src_expected);
+                } else {
+                    assert!(!updated);
+                }
+            }
+
+            // Tests
+
+            #[sqlx::test]
+            async fn no_when_source_doesnt_exist(db: PgPool) {
+                let data = Data::new();
+                run(Uuid::new_v4(), &data.srcs[0], false, db).await;
+            }
+
+            #[sqlx::test]
+            async fn no_when_sync_is_running(db: PgPool) {
+                let data = Data::new();
+                let src = &data.srcs[1];
+                run(src.id, src, false, db).await;
+            }
+
+            #[sqlx::test]
+            async fn yes(db: PgPool) {
+                let data = Data::new();
+                let src = &data.srcs[0];
+                run(src.id, src, true, db).await;
             }
         }
 
         mod update_track {
             use super::*;
 
-            // Tests
+            // run
 
-            #[sqlx::test]
-            async fn unit(db: PgPool) {
-                let data = Data::new();
+            async fn unit(id: Uuid, track: &Track, expected: bool, db: PgPool) {
                 let db = init(db).await;
                 let mut conn = db.acquire().await.expect("failed to acquire connection");
-                let expected = Track {
+                let track_expected = Track {
                     album: Album {
                         compil: false,
                         name: "i/o".into(),
@@ -3934,49 +3994,68 @@ mod test {
                     artists: BTreeSet::from_iter(["peter gabriel".into()]),
                     title: "track_2".into(),
                     year: 2023,
-                    ..data.tracks[0].clone()
+                    ..track.clone()
                 };
                 let track_updated = Track {
                     album: Album {
-                        compil: expected.album.compil,
-                        name: expected.album.name.to_uppercase(),
+                        compil: track_expected.album.compil,
+                        name: track_expected.album.name.to_uppercase(),
                     },
-                    artists: expected
+                    artists: track_expected
                         .artists
                         .iter()
                         .map(|a| a.to_uppercase())
                         .collect::<BTreeSet<_>>(),
                     creation: Utc::now(),
-                    id: expected.id,
-                    platform: expected.platform,
+                    id,
+                    platform: track_expected.platform,
                     platform_id: "track_1_1".into(),
-                    title: expected.title.to_uppercase(),
-                    year: expected.year,
+                    title: track_expected.title.to_uppercase(),
+                    year: track_expected.year,
                 };
-                conn.update_track(&track_updated)
+                let updated = conn
+                    .update_track(&track_updated)
                     .await
                     .expect("failed to update track");
-                let track = conn
-                    .track_by_id(expected.id)
-                    .await
-                    .expect("failed to fetch track")
-                    .expect("track doesn't exist");
-                assert_eq!(track, expected);
+                if expected {
+                    assert!(updated);
+                    let track = conn
+                        .track_by_id(id)
+                        .await
+                        .expect("failed to fetch track")
+                        .expect("track doesn't exist");
+                    assert_eq!(track, track_expected);
+                } else {
+                    assert!(!updated);
+                }
+            }
+
+            // Tests
+
+            #[sqlx::test]
+            async fn no(db: PgPool) {
+                let data = Data::new();
+                unit(Uuid::new_v4(), &data.tracks[0], false, db).await;
+            }
+
+            #[sqlx::test]
+            async fn yes(db: PgPool) {
+                let data = Data::new();
+                let track = &data.tracks[0];
+                unit(track.id, track, true, db).await;
             }
         }
 
         mod update_user {
             use super::*;
 
-            // Tests
+            // run
 
-            #[sqlx::test]
-            async fn unit(db: PgPool) {
-                let data = Data::new();
+            async fn run(id: Uuid, usr: &User, expected: bool, db: PgPool) {
                 let db = init(db).await;
                 let mut conn = db.acquire().await.expect("failed to acquire connection");
                 let spotify_id = "user_1_2";
-                let expected = User {
+                let usr_expected = User {
                     creds: Credentials {
                         spotify: Some(SpotifyCredentials {
                             email: "user_1_2@test".into(),
@@ -3989,28 +4068,49 @@ mod test {
                         }),
                     },
                     role: Role::User,
-                    ..data.usrs[0].clone()
+                    ..usr.clone()
                 };
                 let usr_updated = User {
                     creation: Utc::now(),
-                    id: expected.id,
-                    ..expected.clone()
+                    id,
+                    ..usr_expected.clone()
                 };
-                conn.update_user(&usr_updated)
+                let updated = conn
+                    .update_user(&usr_updated)
                     .await
                     .expect("failed to update user");
-                let usr = conn
-                    .user_by_id(expected.id)
-                    .await
-                    .expect("failed to fetch user")
-                    .expect("user doesn't exist");
-                assert_eq!(usr, expected);
-                let usr = conn
-                    .user_by_spotify_id(spotify_id)
-                    .await
-                    .expect("failed to fetch user")
-                    .expect("user doesn't exist");
-                assert_eq!(usr, expected);
+                if expected {
+                    assert!(updated);
+                    let usr = conn
+                        .user_by_id(id)
+                        .await
+                        .expect("failed to fetch user")
+                        .expect("user doesn't exist");
+                    assert_eq!(usr, usr_expected);
+                    let usr = conn
+                        .user_by_spotify_id(spotify_id)
+                        .await
+                        .expect("failed to fetch user")
+                        .expect("user doesn't exist");
+                    assert_eq!(usr, usr_expected);
+                } else {
+                    assert!(!updated);
+                }
+            }
+
+            // Tests
+
+            #[sqlx::test]
+            async fn no(db: PgPool) {
+                let data = Data::new();
+                run(Uuid::new_v4(), &data.usrs[0], false, db).await;
+            }
+
+            #[sqlx::test]
+            async fn yes(db: PgPool) {
+                let data = Data::new();
+                let usr = &data.usrs[0];
+                run(usr.id, usr, true, db).await;
             }
         }
 

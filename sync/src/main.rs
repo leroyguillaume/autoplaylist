@@ -24,6 +24,7 @@ use autoplaylist_common::{
     },
     TracingConfig,
 };
+use chrono::{DateTime, Utc};
 use mockable::{Clock, DefaultClock, DefaultEnv, Env};
 use thiserror::Error;
 use tokio::{select, sync::watch::Receiver};
@@ -137,6 +138,12 @@ enum StateProcessorError {
 
 #[derive(Debug, Error)]
 enum SynchronizerError {
+    #[error("database error: {0}")]
+    Database(
+        #[from]
+        #[source]
+        DatabaseError,
+    ),
     #[error("{0}")]
     StateProcessing(
         #[from]
@@ -176,8 +183,8 @@ trait Services: Send + Sync {
 trait StateComputer<STEP: SynchronizationStep>: Send + Sync {
     fn compute(
         &self,
-        sync: Synchronization<STEP>,
-        clock: &dyn Clock,
+        sync: &Synchronization<STEP>,
+        start: DateTime<Utc>,
     ) -> SynchronizerResult<SynchronizationState<STEP>>;
 }
 
@@ -201,7 +208,6 @@ trait Synchronizer<STEP: SynchronizationStep, SYNCABLE: Synchronizable<STEP>>: S
     async fn synchronize(
         &self,
         syncable: &mut SYNCABLE,
-        sync: Synchronization<STEP>,
         stop_rx: Receiver<()>,
         db_conn: &mut dyn DatabaseConnection,
         svc: &dyn Services,
@@ -278,21 +284,9 @@ impl<
             let mut syncable = SYNCABLE::by_id(id, &mut db_conn)
                 .await?
                 .ok_or(HandlerError::NotFound(id))?;
-            let sync = syncable
-                .lock_synchronization(&mut db_conn)
-                .await?
-                .ok_or(HandlerError::NotFound(id))?;
             self.syncer
-                .synchronize(
-                    &mut syncable,
-                    sync,
-                    stop_rx,
-                    &mut db_conn,
-                    self.svc.as_ref(),
-                )
+                .synchronize(&mut syncable, stop_rx, &mut db_conn, self.svc.as_ref())
                 .await?;
-            syncable.update(&mut db_conn).await?;
-            db_conn.update_user(syncable.owner()).await?;
             Ok::<(), HandlerError>(())
         }
         .await;
@@ -459,9 +453,11 @@ struct DefaultStateComputer;
 
 impl DefaultStateComputer {
     #[inline]
-    fn initial_state<STEP: SynchronizationStep>(clock: &dyn Clock) -> SynchronizationState<STEP> {
+    fn initial_state<STEP: SynchronizationStep>(
+        start: DateTime<Utc>,
+    ) -> SynchronizationState<STEP> {
         SynchronizationState {
-            start: clock.utc(),
+            start,
             step: STEP::first(),
         }
     }
@@ -470,15 +466,15 @@ impl DefaultStateComputer {
 impl<STEP: SynchronizationStep> StateComputer<STEP> for DefaultStateComputer {
     fn compute(
         &self,
-        sync: Synchronization<STEP>,
-        clock: &dyn Clock,
+        sync: &Synchronization<STEP>,
+        start: DateTime<Utc>,
     ) -> SynchronizerResult<SynchronizationState<STEP>> {
         match sync {
-            Synchronization::Aborted(state) => Ok(state),
-            Synchronization::Failed { state, .. } => Ok(state),
-            Synchronization::Pending => Ok(Self::initial_state(clock)),
-            Synchronization::Running => Err(SynchronizerError::SynchronizationAlreadyRunning),
-            Synchronization::Succeeded { .. } => Ok(Self::initial_state(clock)),
+            Synchronization::Aborted { state, .. } => Ok(*state),
+            Synchronization::Failed { state, .. } => Ok(*state),
+            Synchronization::Pending => Ok(Self::initial_state(start)),
+            Synchronization::Running(_) => Err(SynchronizerError::SynchronizationAlreadyRunning),
+            Synchronization::Succeeded { .. } => Ok(Self::initial_state(start)),
         }
     }
 }
@@ -524,13 +520,19 @@ impl<
     async fn synchronize(
         &self,
         syncable: &mut SYNCABLE,
-        sync: Synchronization<STEP>,
         mut stop_rx: Receiver<()>,
         db_conn: &mut dyn DatabaseConnection,
         svc: &dyn Services,
     ) -> SynchronizerResult<()> {
         let clock = svc.clock();
-        let mut state = self.state_cmpter.compute(sync, clock)?;
+        let start = clock.utc();
+        let mut state = self
+            .state_cmpter
+            .compute(syncable.synchronization(), start)?;
+        syncable.set_synchronization(Synchronization::Running(start));
+        if !syncable.update_safely(db_conn.as_client_mut()).await? {
+            return Err(SynchronizerError::SynchronizationAlreadyRunning);
+        }
         info!("synchronization started");
         let res = loop {
             select! {
@@ -561,18 +563,24 @@ impl<
             }
             Err(err) => match err {
                 StateProcessorError::SynchronizationAborted => {
-                    syncable.set_synchronization(Synchronization::Aborted(state));
+                    syncable.set_synchronization(Synchronization::Aborted {
+                        end: clock.utc(),
+                        state,
+                    });
                     info!("synchronization aborted");
                 }
                 _ => {
                     syncable.set_synchronization(Synchronization::Failed {
                         details: format!("{err}"),
+                        end: clock.utc(),
                         state,
                     });
                     error!(details = %err, "synchronization failed");
                 }
             },
         }
+        syncable.update(db_conn.as_client_mut()).await?;
+        db_conn.update_user(syncable.owner()).await?;
         Ok(())
     }
 }
@@ -762,7 +770,13 @@ impl<PULLER: Puller<SourceSynchronizationStep, Source>>
 
 #[cfg(test)]
 mod test {
-    use std::{collections::BTreeSet, sync::Arc};
+    use std::{
+        collections::BTreeSet,
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        },
+    };
 
     use autoplaylist_common::{
         broker::{MockBrokerClient, SourceMessageKind},
@@ -865,7 +879,7 @@ mod test {
             _: &mut dyn DatabaseConnection,
             _: &dyn Services,
         ) -> StateProcessorResult<bool> {
-            let ret = self.0.call_with_args((syncable.clone(), state.clone()));
+            let ret = self.0.call_with_args((syncable.clone(), *state));
             *syncable = ret.1;
             *state = ret.2;
             ret.0
@@ -874,9 +888,19 @@ mod test {
 
     // MockSynchronizer
 
-    struct MockSynchronizer<STEP: SynchronizationStep + Clone, SYNCABLE: Synchronizable<STEP> + Clone>(
-        Mock<SynchronizerResult<()>, (SYNCABLE, Synchronization<STEP>)>,
-    );
+    struct MockSynchronizer<STEP: SynchronizationStep, SYNCABLE: Synchronizable<STEP>> {
+        mock: Mock<SynchronizerResult<()>, SYNCABLE>,
+        _step: PhantomData<STEP>,
+    }
+
+    impl<STEP: SynchronizationStep, SYNCABLE: Synchronizable<STEP>> MockSynchronizer<STEP, SYNCABLE> {
+        fn new(mock: Mock<SynchronizerResult<()>, SYNCABLE>) -> Self {
+            Self {
+                mock,
+                _step: PhantomData,
+            }
+        }
+    }
 
     #[async_trait]
     impl<STEP: SynchronizationStep + Clone, SYNCABLE: Synchronizable<STEP> + Clone>
@@ -885,12 +909,11 @@ mod test {
         async fn synchronize(
             &self,
             syncable: &mut SYNCABLE,
-            sync: Synchronization<STEP>,
             _: Receiver<()>,
             _: &mut dyn DatabaseConnection,
             _: &dyn Services,
         ) -> SynchronizerResult<()> {
-            self.0.call_with_args((syncable.clone(), sync))
+            self.mock.call_with_args(syncable.clone())
         }
     }
 
@@ -926,11 +949,8 @@ mod test {
 
             #[derive(Default)]
             struct Mocks {
-                lock_sync: Mock<Option<SourceSynchronization>>,
                 source_by_id: Mock<Option<Source>>,
-                synchronize: Mock<SynchronizerResult<()>, (Source, SourceSynchronization)>,
-                update_src: Mock<()>,
-                update_user: Mock<()>,
+                synchronize: Mock<SynchronizerResult<()>, Source>,
             }
 
             // run
@@ -951,32 +971,11 @@ mod test {
                                     move |_| Ok(mock.call())
                                 });
                             db_conn
-                                .0
-                                .expect_lock_source_synchronization()
-                                .with(eq(data.src.id))
-                                .times(mocks.lock_sync.times())
-                                .returning({
-                                    let mock = mocks.lock_sync.clone();
-                                    move |_| Ok(mock.call())
-                                });
-                            db_conn
-                                .0
-                                .expect_update_source()
-                                .with(eq(data.src.clone()))
-                                .times(mocks.update_src.times())
-                                .returning(|_| Ok(()));
-                            db_conn
-                                .0
-                                .expect_update_user()
-                                .with(eq(data.src.owner.clone()))
-                                .times(mocks.update_user.times())
-                                .returning(|_| Ok(()));
-                            db_conn
                         }
                     }),
                     ..Default::default()
                 };
-                let syncer = MockSynchronizer(mocks.synchronize);
+                let syncer = MockSynchronizer::new(mocks.synchronize);
                 let (_, stop_rx) = watch::channel(());
                 let handler = DefaultMessageHandler {
                     db: Arc::new(db),
@@ -996,7 +995,7 @@ mod test {
             // Tests
 
             #[tokio::test]
-            async fn not_found_when_fetching_source() {
+            async fn not_found() {
                 let src = Source {
                     creation: Utc::now(),
                     id: Uuid::new_v4(),
@@ -1024,38 +1023,6 @@ mod test {
             }
 
             #[tokio::test]
-            async fn not_found_when_locking_source() {
-                let src = Source {
-                    creation: Utc::now(),
-                    id: Uuid::new_v4(),
-                    kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
-                    owner: User {
-                        creation: Utc::now(),
-                        creds: Default::default(),
-                        id: Uuid::new_v4(),
-                        role: Role::User,
-                    },
-                    sync: Synchronization::Pending,
-                };
-                let data = Data {
-                    msg: SourceMessage {
-                        id: src.id,
-                        kind: SourceMessageKind::Sync,
-                    },
-                    src,
-                };
-                let mocks = Mocks {
-                    lock_sync: Mock::once(|| None),
-                    source_by_id: Mock::once({
-                        let src = data.src.clone();
-                        move || Some(src.clone())
-                    }),
-                    ..Default::default()
-                };
-                run(data, mocks).await;
-            }
-
-            #[tokio::test]
             async fn already_running() {
                 let src = Source {
                     creation: Utc::now(),
@@ -1077,20 +1044,17 @@ mod test {
                     src,
                 };
                 let mocks = Mocks {
-                    lock_sync: Mock::once(|| Some(Synchronization::Running)),
                     source_by_id: Mock::once({
                         let src = data.src.clone();
                         move || Some(src.clone())
                     }),
                     synchronize: Mock::once_with_args({
                         let data = data.clone();
-                        move |(src, sync)| {
+                        move |src| {
                             assert_eq!(src, data.src);
-                            assert_eq!(sync, Synchronization::Running);
                             Err(SynchronizerError::SynchronizationAlreadyRunning)
                         }
                     }),
-                    ..Default::default()
                 };
                 run(data, mocks).await;
             }
@@ -1117,21 +1081,17 @@ mod test {
                     src,
                 };
                 let mocks = Mocks {
-                    lock_sync: Mock::once(|| Some(Synchronization::Running)),
                     source_by_id: Mock::once({
                         let src = data.src.clone();
                         move || Some(src.clone())
                     }),
                     synchronize: Mock::once_with_args({
                         let data = data.clone();
-                        move |(src, sync)| {
+                        move |src| {
                             assert_eq!(src, data.src);
-                            assert_eq!(sync, Synchronization::Running);
                             Ok(())
                         }
                     }),
-                    update_src: Mock::once(|| ()),
-                    update_user: Mock::once(|| ()),
                 };
                 run(data, mocks).await;
             }
@@ -1523,18 +1483,12 @@ mod test {
 
             fn run(
                 sync: SourceSynchronization,
-                mock_clock: bool,
             ) -> (
                 SynchronizerResult<SourceSynchronizationState>,
                 DateTime<Utc>,
             ) {
                 let now = Utc::now();
-                let mut clock = MockClock::new();
-                clock
-                    .expect_utc()
-                    .times(mock_clock as usize)
-                    .return_const(now);
-                let res = DefaultStateComputer.compute(sync, &clock);
+                let res = DefaultStateComputer.compute(&sync, now);
                 (res, now)
             }
 
@@ -1546,8 +1500,11 @@ mod test {
                     start: Utc::now(),
                     step: SourceSynchronizationStep::PullFromPlatform(50),
                 };
-                let sync = Synchronization::Aborted(expected.clone());
-                let state = run(sync, false)
+                let sync = Synchronization::Aborted {
+                    end: Utc::now(),
+                    state: expected,
+                };
+                let state = run(sync)
                     .0
                     .expect("failed to compute synchronization state");
                 assert_eq!(state, expected);
@@ -1561,9 +1518,10 @@ mod test {
                 };
                 let sync = Synchronization::Failed {
                     details: "error".into(),
-                    state: expected.clone(),
+                    end: Utc::now(),
+                    state: expected,
                 };
-                let state = run(sync, false)
+                let state = run(sync)
                     .0
                     .expect("failed to compute synchronization state");
                 assert_eq!(state, expected);
@@ -1571,7 +1529,7 @@ mod test {
 
             #[test]
             fn pending() {
-                let (state, start) = run(Synchronization::Pending, true);
+                let (state, start) = run(Synchronization::Pending);
                 let expected = SynchronizationState {
                     start,
                     step: SourceSynchronizationStep::DeleteOldPull,
@@ -1582,7 +1540,7 @@ mod test {
 
             #[test]
             fn running() {
-                let err = run(Synchronization::Running, false)
+                let err = run(Synchronization::Running(Utc::now()))
                     .0
                     .expect_err("computing synchronization state should fail");
                 assert!(matches!(
@@ -1597,7 +1555,7 @@ mod test {
                     end: Utc::now(),
                     start: Utc::now(),
                 };
-                let (state, start) = run(sync, true);
+                let (state, start) = run(sync);
                 let expected = SynchronizationState {
                     start,
                     step: SourceSynchronizationStep::DeleteOldPull,
@@ -1618,6 +1576,7 @@ mod test {
 
             #[derive(Clone)]
             struct Data {
+                start: DateTime<Utc>,
                 src: Source,
                 state_0: SourceSynchronizationState,
             }
@@ -1628,6 +1587,9 @@ mod test {
             struct Mocks {
                 end: Mock<DateTime<Utc>>,
                 process_state: MockStateProcessFn<SourceSynchronizationStep, Source>,
+                update: Mock<(), Source>,
+                update_safely: Mock<bool>,
+                update_user: Mock<()>,
             }
 
             // run
@@ -1639,21 +1601,57 @@ mod test {
             ) -> (SynchronizerResult<()>, Source) {
                 let sync = Synchronization::Pending;
                 let mut clock = MockClock::new();
-                clock.expect_utc().times(mocks.end.times()).returning({
+                let utc_idx = Arc::new(AtomicUsize::new(0));
+                clock.expect_utc().times(1 + mocks.end.times()).returning({
+                    let start = data.start;
                     let mock = mocks.end.clone();
-                    move || mock.call()
+                    move || {
+                        let idx = utc_idx.fetch_add(1, Ordering::Relaxed);
+                        if idx == 0 {
+                            start
+                        } else {
+                            mock.call()
+                        }
+                    }
                 });
                 let mut state_cmpter = MockStateComputer::new();
                 state_cmpter
                     .expect_compute()
                     .with(eq(sync.clone()), always())
                     .times(1)
-                    .returning({
-                        let state = data.state_0.clone();
-                        move |_, _| Ok(state.clone())
-                    });
+                    .returning(move |_, _| Ok(data.state_0));
                 let state_proc = MockStateProcessor(mocks.process_state);
                 let mut db_conn = MockDatabaseConnection::new();
+                let src = Source {
+                    sync: Synchronization::Running(data.start),
+                    ..data.src.clone()
+                };
+                db_conn
+                    .0
+                    .expect_update_source_safely()
+                    .with(eq(src))
+                    .times(mocks.update_safely.times())
+                    .returning({
+                        let mock = mocks.update_safely.clone();
+                        move |_| Ok(mock.call())
+                    });
+                db_conn
+                    .0
+                    .expect_update_source()
+                    .times(mocks.update.times())
+                    .returning({
+                        let mock = mocks.update.clone();
+                        move |src| {
+                            mock.call_with_args(src.clone());
+                            Ok(true)
+                        }
+                    });
+                db_conn
+                    .0
+                    .expect_update_user()
+                    .with(always())
+                    .times(mocks.update_user.times())
+                    .returning(|_| Ok(true));
                 let svc = MockServices {
                     clock,
                     ..Default::default()
@@ -1666,7 +1664,7 @@ mod test {
                 };
                 let mut src = data.src.clone();
                 let res = syncer
-                    .synchronize(&mut src, sync, stop_rx, &mut db_conn, &svc)
+                    .synchronize(&mut src, stop_rx, &mut db_conn, &svc)
                     .await;
                 (res, src)
             }
@@ -1674,9 +1672,49 @@ mod test {
             // Tests
 
             #[tokio::test]
+            async fn already_running() {
+                let data = Data {
+                    start: Utc::now(),
+                    src: Source {
+                        creation: Utc::now(),
+                        id: Uuid::new_v4(),
+                        kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
+                        owner: User {
+                            creation: Utc::now(),
+                            creds: Default::default(),
+                            id: Uuid::new_v4(),
+                            role: Role::User,
+                        },
+                        sync: Synchronization::Pending,
+                    },
+                    state_0: SynchronizationState {
+                        start: Utc::now(),
+                        step: SourceSynchronizationStep::DeleteOldPull,
+                    },
+                };
+                let expected = Source {
+                    sync: Synchronization::Running(data.start),
+                    ..data.src.clone()
+                };
+                let (_stop_tx, stop_rx) = watch::channel(());
+                let mocks = Mocks {
+                    update_safely: Mock::once(|| false),
+                    ..Default::default()
+                };
+                let (res, src) = run(data, mocks, stop_rx).await;
+                let err = res.expect_err("synchrnoization should fail");
+                assert!(matches!(
+                    err,
+                    SynchronizerError::SynchronizationAlreadyRunning
+                ));
+                assert_eq!(src, expected);
+            }
+
+            #[tokio::test]
             async fn succeeded() {
                 let end = Utc::now();
                 let data = Data {
+                    start: Utc::now(),
                     src: Source {
                         creation: Utc::now(),
                         id: Uuid::new_v4(),
@@ -1718,24 +1756,32 @@ mod test {
                     end: Mock::once(move || end),
                     process_state: Mock::always_with_args({
                         let data = data.clone();
-                        let state_1 = state_1.clone();
-                        let state_2 = state_2.clone();
                         move |idx, (src, state)| {
-                            assert_eq!(src, data.src);
+                            let expected = Source {
+                                sync: Synchronization::Running(data.start),
+                                ..data.src.clone()
+                            };
+                            assert_eq!(src, expected);
                             if idx == 0 {
                                 assert_eq!(state, data.state_0);
-                                (Ok(false), src, state_1.clone())
+                                (Ok(false), src, state_1)
                             } else if idx == 1 {
                                 assert_eq!(state, state_1);
-                                (Ok(false), src, state_2.clone())
+                                (Ok(false), src, state_2)
                             } else if idx == 2 {
                                 assert_eq!(state, state_2);
-                                (Ok(true), src, state_3.clone())
+                                (Ok(true), src, state_3)
                             } else {
                                 panic!("unexpected call");
                             }
                         }
                     }),
+                    update: Mock::once_with_args({
+                        let expected = expected.clone();
+                        move |src| assert_eq!(src, expected)
+                    }),
+                    update_safely: Mock::once(|| true),
+                    update_user: Mock::once(|| ()),
                 };
                 let (res, src) = run(data, mocks, stop_rx).await;
                 res.expect("failed to synchronize");
@@ -1744,7 +1790,9 @@ mod test {
 
             #[tokio::test]
             async fn failed() {
+                let end = Utc::now();
                 let data = Data {
+                    start: Utc::now(),
                     src: Source {
                         creation: Utc::now(),
                         id: Uuid::new_v4(),
@@ -1770,20 +1818,25 @@ mod test {
                     sync: Synchronization::Failed {
                         details: StateProcessorError::NoSpotifyCredentials(data.src.owner.id)
                             .to_string(),
-                        state: state_1.clone(),
+                        end,
+                        state: state_1,
                     },
                     ..data.src.clone()
                 };
                 let (_stop_tx, stop_rx) = watch::channel(());
                 let mocks = Mocks {
+                    end: Mock::once(move || end),
                     process_state: Mock::always_with_args({
                         let data = data.clone();
-                        let state_1 = state_1.clone();
                         move |idx, (src, state)| {
-                            assert_eq!(src, data.src);
+                            let expected = Source {
+                                sync: Synchronization::Running(data.start),
+                                ..data.src.clone()
+                            };
+                            assert_eq!(src, expected);
                             if idx == 0 {
                                 assert_eq!(state, data.state_0);
-                                (Ok(false), src, state_1.clone())
+                                (Ok(false), src, state_1)
                             } else if idx == 1 {
                                 assert_eq!(state, state_1);
                                 (
@@ -1791,14 +1844,19 @@ mod test {
                                         data.src.owner.id,
                                     )),
                                     src,
-                                    state_1.clone(),
+                                    state_1,
                                 )
                             } else {
                                 panic!("unexpected call");
                             }
                         }
                     }),
-                    ..Default::default()
+                    update: Mock::once_with_args({
+                        let expected = expected.clone();
+                        move |src| assert_eq!(src, expected)
+                    }),
+                    update_safely: Mock::once(|| true),
+                    update_user: Mock::once(|| ()),
                 };
                 let (res, src) = run(data, mocks, stop_rx).await;
                 res.expect("failed to synchronize");
@@ -1807,7 +1865,9 @@ mod test {
 
             #[tokio::test]
             async fn aborted() {
+                let end = Utc::now();
                 let data = Data {
+                    start: Utc::now(),
                     src: Source {
                         creation: Utc::now(),
                         id: Uuid::new_v4(),
@@ -1830,27 +1890,39 @@ mod test {
                     step: SourceSynchronizationStep::PullFromPlatform(0),
                 };
                 let expected = Source {
-                    sync: Synchronization::Aborted(state_1.clone()),
+                    sync: Synchronization::Aborted {
+                        end,
+                        state: state_1,
+                    },
                     ..data.src.clone()
                 };
                 let (stop_tx, stop_rx) = watch::channel(());
                 let mocks = Mocks {
+                    end: Mock::once(move || end),
                     process_state: Mock::always_with_args({
                         let data = data.clone();
-                        let state_1 = state_1.clone();
                         move |idx, (src, state)| {
-                            assert_eq!(src, data.src);
+                            let expected = Source {
+                                sync: Synchronization::Running(data.start),
+                                ..data.src.clone()
+                            };
+                            assert_eq!(src, expected);
                             if idx == 0 {
                                 assert_eq!(state, data.state_0);
-                                (Ok(false), src, state_1.clone())
+                                (Ok(false), src, state_1)
                             } else {
                                 assert_eq!(state, state_1);
                                 stop_tx.send(()).ok();
-                                (Ok(false), src, state_1.clone())
+                                (Ok(false), src, state_1)
                             }
                         }
                     }),
-                    ..Default::default()
+                    update: Mock::once_with_args({
+                        let expected = expected.clone();
+                        move |src| assert_eq!(src, expected)
+                    }),
+                    update_safely: Mock::once(|| true),
+                    update_user: Mock::once(|| ()),
                 };
                 let (res, src) = run(data, mocks, stop_rx).await;
                 res.expect("failed to synchronize");
@@ -1973,7 +2045,7 @@ mod test {
             };
             let proc = PlaylistStateProcessor(puller);
             let mut playlist = data.playlist.clone();
-            let mut state = data.state.clone();
+            let mut state = data.state;
             let succeeded = proc
                 .process(&mut playlist, &mut state, &mut db_conn, &svc)
                 .await;
@@ -3293,7 +3365,7 @@ mod test {
             };
             let proc = SourceStateProcessor(puller);
             let mut src = data.src.clone();
-            let mut state = data.state.clone();
+            let mut state = data.state;
             let succeeded = proc
                 .process(&mut src, &mut state, &mut db_conn, &svc)
                 .await
