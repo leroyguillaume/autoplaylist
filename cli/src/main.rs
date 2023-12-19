@@ -646,7 +646,7 @@ impl<
                     db.name = args.db.name,
                     db.port = args.db.port,
                     db.user = args.db.user,
-                    usr.id = %args.id
+                    usr.id = %args.id,
                 );
                 async {
                     let pool = self.svc.create_database_pool(args.db).await?;
@@ -657,7 +657,9 @@ impl<
                     };
                     let role = Role::from(args.role);
                     usr.role = role;
-                    db_conn.update_user(&usr).await?;
+                    if !db_conn.update_user(&usr).await? {
+                        bail!("user doesn't exist");
+                    }
                     Ok(())
                 }
                 .instrument(span)
@@ -1543,7 +1545,7 @@ mod test {
                                         .expect_update_user()
                                         .with(eq(usr))
                                         .times(mocks.db_update_usr.times())
-                                        .returning(|_| Ok(()));
+                                        .returning(|_| Ok(true));
                                     conn
                                 }
                             }),

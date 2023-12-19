@@ -5,8 +5,8 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::model::{
-    Album, Credentials, Page, PageRequest, Platform, Playlist, PlaylistSynchronization, Predicate,
-    Source, SourceKind, SourceSynchronization, Target, Track, User,
+    Album, Credentials, Page, PageRequest, Platform, Playlist, Predicate, Source, SourceKind,
+    Target, Track, User,
 };
 
 // Macros
@@ -95,20 +95,6 @@ macro_rules! mock_client_impl {
 
             async fn delete_user(&mut self, id: Uuid) -> DatabaseResult<bool> {
                 self.$attr.delete_user(id).await
-            }
-
-            async fn lock_playlist_synchronization(
-                &mut self,
-                id: Uuid,
-            ) -> DatabaseResult<Option<PlaylistSynchronization>> {
-                self.$attr.lock_playlist_synchronization(id).await
-            }
-
-            async fn lock_source_synchronization(
-                &mut self,
-                id: Uuid,
-            ) -> DatabaseResult<Option<SourceSynchronization>> {
-                self.$attr.lock_source_synchronization(id).await
             }
 
             async fn playlist_by_id(&mut self, id: Uuid) -> DatabaseResult<Option<Playlist>> {
@@ -226,19 +212,30 @@ macro_rules! mock_client_impl {
                 self.$attr.tracks(req).await
             }
 
-            async fn update_playlist(&mut self, playlist: &Playlist) -> DatabaseResult<()> {
+            async fn update_playlist(&mut self, playlist: &Playlist) -> DatabaseResult<bool> {
                 self.$attr.update_playlist(playlist).await
             }
 
-            async fn update_source(&mut self, src: &Source) -> DatabaseResult<()> {
+            async fn update_playlist_safely(
+                &mut self,
+                playlist: &Playlist,
+            ) -> DatabaseResult<bool> {
+                self.$attr.update_playlist_safely(playlist).await
+            }
+
+            async fn update_source(&mut self, src: &Source) -> DatabaseResult<bool> {
                 self.$attr.update_source(src).await
             }
 
-            async fn update_track(&mut self, track: &Track) -> DatabaseResult<()> {
+            async fn update_source_safely(&mut self, src: &Source) -> DatabaseResult<bool> {
+                self.$attr.update_source_safely(src).await
+            }
+
+            async fn update_track(&mut self, track: &Track) -> DatabaseResult<bool> {
                 self.$attr.update_track(track).await
             }
 
-            async fn update_user(&mut self, user: &User) -> DatabaseResult<()> {
+            async fn update_user(&mut self, user: &User) -> DatabaseResult<bool> {
                 self.$attr.update_user(user).await
             }
 
@@ -395,16 +392,6 @@ pub trait DatabaseClient: Send + Sync {
 
     async fn delete_user(&mut self, id: Uuid) -> DatabaseResult<bool>;
 
-    async fn lock_playlist_synchronization(
-        &mut self,
-        id: Uuid,
-    ) -> DatabaseResult<Option<PlaylistSynchronization>>;
-
-    async fn lock_source_synchronization(
-        &mut self,
-        id: Uuid,
-    ) -> DatabaseResult<Option<SourceSynchronization>>;
-
     async fn playlist_by_id(&mut self, id: Uuid) -> DatabaseResult<Option<Playlist>>;
 
     async fn playlist_contains_track(
@@ -471,13 +458,17 @@ pub trait DatabaseClient: Send + Sync {
 
     async fn tracks(&mut self, req: PageRequest) -> DatabaseResult<Page<Track>>;
 
-    async fn update_playlist(&mut self, playlist: &Playlist) -> DatabaseResult<()>;
+    async fn update_playlist(&mut self, playlist: &Playlist) -> DatabaseResult<bool>;
 
-    async fn update_source(&mut self, src: &Source) -> DatabaseResult<()>;
+    async fn update_playlist_safely(&mut self, playlist: &Playlist) -> DatabaseResult<bool>;
 
-    async fn update_track(&mut self, track: &Track) -> DatabaseResult<()>;
+    async fn update_source(&mut self, src: &Source) -> DatabaseResult<bool>;
 
-    async fn update_user(&mut self, user: &User) -> DatabaseResult<()>;
+    async fn update_source_safely(&mut self, src: &Source) -> DatabaseResult<bool>;
+
+    async fn update_track(&mut self, track: &Track) -> DatabaseResult<bool>;
+
+    async fn update_user(&mut self, user: &User) -> DatabaseResult<bool>;
 
     async fn user_by_id(&mut self, id: Uuid) -> DatabaseResult<Option<User>>;
 

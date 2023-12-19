@@ -93,37 +93,41 @@ BEGIN
             'NumtB/0HwFNYAEVUoRI6/NDtmfpPvXEA7vrJeiDZqeNvkvR3eudGriwtbqmmCLBPvapEoaM73cSC9CpA48ApXibqS9y3bZ9f9KXECzfm97InoK5gNuPcokkv2oDtJPH8A4tP03BPfHADOHoig1BU41UtYw4UpC7mC6X0SrYcHZ3+MEPeDOFGrqmcmSpuwx4D'
         );
 
-    INSERT INTO source (id, creation, owner, kind)
+    INSERT INTO source (id, creation, owner, kind, sync)
     VALUES
         (
             src_1,
             '2023-01-05T01:00:00Z',
             usr_1,
-            '{"spotify":"savedTracks"}'
+            '{"spotify":"savedTracks"}',
+            '"pending"'
         ),
         (
             src_2,
             '2023-02-05T02:00:00Z',
             usr_1,
-            '{"spotify":{"playlist":"src_2"}}'
+            '{"spotify":{"playlist":"src_2"}}',
+            '{"running":"2023-02-05T00:00:10Z"}'
         ),
         (
             src_3,
             '2023-02-05T03:00:00Z',
             usr_1,
-            '{"spotify":{"playlist":"src_3"}}'
+            '{"spotify":{"playlist":"src_3"}}',
+            '"pending"'
         ),
         (
             src_4,
             '2023-02-05T04:00:00Z',
             usr_2,
-            '{"spotify":{"playlist":"src_4"}}'
+            '{"spotify":{"playlist":"src_4"}}',
+            '"pending"'
         );
 
     INSERT INTO source_track
     VALUES (src_1, track_1);
 
-    INSERT INTO playlist (id, creation, name, predicate, src, tgt)
+    INSERT INTO playlist (id, creation, name, predicate, src, tgt, sync)
     VALUES
         (
             playlist_1,
@@ -131,7 +135,8 @@ BEGIN
             'playlist_1',
             '{"yearIs":1993}',
             src_1,
-            '{"spotify":"playlist_1"}'
+            '{"spotify":"playlist_1"}',
+            '"pending"'
         ),
         (
             playlist_2,
@@ -139,7 +144,8 @@ BEGIN
             'playlist_2',
             '{"yearIs":2013}',
             src_1,
-            '{"spotify":"playlist_2"}'
+            '{"spotify":"playlist_2"}',
+            '{"running":"2023-02-05T00:00:10Z"}'
         ),
         (
             playlist_3,
@@ -147,7 +153,8 @@ BEGIN
             'playlist_3',
             '{"yearIs":1961}',
             src_1,
-            '{"spotify":"playlist_3"}'
+            '{"spotify":"playlist_3"}',
+            '"pending"'
         ),
         (
             playlist_4,
@@ -155,7 +162,8 @@ BEGIN
             'playlist_4',
             '{"yearIs":1999}',
             src_4,
-            '{"spotify":"playlist_4"}'
+            '{"spotify":"playlist_4"}',
+            '"pending"'
         ),
         (
             playlist_5,
@@ -163,7 +171,8 @@ BEGIN
             'test_5',
             '{"yearIs":1999}',
             src_4,
-            '{"spotify":"playlist_5"}'
+            '{"spotify":"playlist_5"}',
+            '"pending"'
         ),
         (
             playlist_6,
@@ -171,7 +180,8 @@ BEGIN
             'test_6',
             '{"yearIs":1999}',
             src_2,
-            '{"spotify":"playlist_6"}'
+            '{"spotify":"playlist_6"}',
+            '"pending"'
         );
 
     INSERT INTO playlist_track
