@@ -1,0 +1,21 @@
+{
+  "request": {
+    "bodyPatterns": [
+      {
+        "equalToJson": {
+          "name": "New Name"
+        }
+      }
+    ],
+    "headers": {
+      "Authorization": {
+        "equalTo": "Bearer access_2"
+      }
+    },
+    "method": "PUT",
+    "urlPath": "/spotify/api/playlists/7sTVJNSq4b3FmlTl79fAae"
+  },
+  "response": {
+    "status": 200
+  }
+}

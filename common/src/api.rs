@@ -52,20 +52,7 @@ pub struct CreatePlaylistRequest {
 
 impl Validate for CreatePlaylistRequest {
     fn validate(&self) -> ValidationResult {
-        let mut resp = ValidationErrorResponse::new();
-        let len = self.name.len();
-        if !(1..=100).contains(&len) {
-            resp.errs
-                .insert("name".into(), vec![ValidationErrorKind::Length(1, 100)]);
-        }
-        if let Err(predicate_resp) = self.predicate.validate() {
-            resp.merge_with_prefix("predicate.", predicate_resp);
-        }
-        if resp.errs.is_empty() {
-            Ok(())
-        } else {
-            Err(resp)
-        }
+        validate_playlist_request(&self.name, &self.predicate)
     }
 }
 
@@ -107,6 +94,14 @@ pub struct PlaylistResponse {
     pub src: SourceResponse,
     pub sync: SynchronizationResponse,
     pub tgt: Target,
+}
+
+// PreconditionFailedResponse
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreconditionFailedResponse {
+    pub details: String,
 }
 
 // JwtResponse
@@ -172,6 +167,22 @@ pub enum SynchronizationResponse {
         end: DateTime<Utc>,
         start: DateTime<Utc>,
     },
+}
+
+// UpdatePlaylistRequest
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdatePlaylistRequest {
+    #[serde(deserialize_with = "string_trim")]
+    pub name: String,
+    pub predicate: Predicate,
+}
+
+impl Validate for UpdatePlaylistRequest {
+    fn validate(&self) -> ValidationResult {
+        validate_playlist_request(&self.name, &self.predicate)
+    }
 }
 
 // UpdateTrackRequest
@@ -266,6 +277,26 @@ impl ValidationErrorResponse {
     }
 }
 
+// validate_playlist_request
+
+#[inline]
+fn validate_playlist_request(name: &str, predicate: &Predicate) -> ValidationResult {
+    let mut resp = ValidationErrorResponse::new();
+    let len = name.len();
+    if !(1..=100).contains(&len) {
+        resp.errs
+            .insert("name".into(), vec![ValidationErrorKind::Length(1, 100)]);
+    }
+    if let Err(predicate_resp) = predicate.validate() {
+        resp.merge_with_prefix("predicate.", predicate_resp);
+    }
+    if resp.errs.is_empty() {
+        Ok(())
+    } else {
+        Err(resp)
+    }
+}
+
 // Tests
 
 #[cfg(test)]
@@ -335,6 +366,46 @@ mod test {
                 };
                 let params = PageRequestQueryParams::from(req);
                 assert_eq!(params, expected);
+            }
+        }
+    }
+
+    mod update_playlist_request {
+        use super::*;
+
+        // Mods
+
+        mod validate {
+            use super::*;
+
+            // Tests
+
+            #[test]
+            fn unit() {
+                let req = UpdatePlaylistRequest {
+                    name: "name".into(),
+                    predicate: Predicate::YearIs(1993),
+                };
+                req.validate().expect("request should be valid");
+            }
+
+            #[test]
+            fn resp() {
+                let req = UpdatePlaylistRequest {
+                    name: "".into(),
+                    predicate: Predicate::ArtistsAre(Default::default()),
+                };
+                let resp = req.validate().expect_err("request should be invalid");
+                let expected = ValidationErrorResponse {
+                    errs: HashMap::from_iter([
+                        ("name".into(), vec![ValidationErrorKind::Length(1, 100)]),
+                        (
+                            "predicate.artistsAre".into(),
+                            vec![ValidationErrorKind::Length(1, usize::MAX)],
+                        ),
+                    ]),
+                };
+                assert_eq!(resp, expected);
             }
         }
     }

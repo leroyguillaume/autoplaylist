@@ -1,6 +1,5 @@
 {
   "name": "Test",
-  "platform": "spotify",
   "predicate": {
     "yearIs": 1993
   },

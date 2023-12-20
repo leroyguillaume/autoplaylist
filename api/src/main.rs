@@ -10,10 +10,10 @@ use std::{
 use autoplaylist_common::{
     api::{
         AuthenticateViaSpotifyQueryParams, CreatePlaylistRequest, JwtResponse,
-        PageRequestQueryParams, RedirectUriQueryParam, SearchQueryParam, UpdateTrackRequest,
-        UpdateUserRequest, Validate, ValidationErrorResponse, PATH_AUTH, PATH_HEALTH, PATH_ME,
-        PATH_PLAYLIST, PATH_SEARCH, PATH_SPOTIFY, PATH_SRC, PATH_SYNC, PATH_TOKEN, PATH_TRACK,
-        PATH_USR,
+        PageRequestQueryParams, PreconditionFailedResponse, RedirectUriQueryParam,
+        SearchQueryParam, UpdatePlaylistRequest, UpdateTrackRequest, UpdateUserRequest, Validate,
+        ValidationErrorResponse, PATH_AUTH, PATH_HEALTH, PATH_ME, PATH_PLAYLIST, PATH_SEARCH,
+        PATH_SPOTIFY, PATH_SRC, PATH_SYNC, PATH_TOKEN, PATH_TRACK, PATH_USR,
     },
     broker::{
         rabbitmq::{RabbitMqClient, RabbitMqConfig},
@@ -168,10 +168,10 @@ pub enum ApiError {
         #[source]
         ::jwt::Error,
     ),
-    #[error("user {0} doesn't have Sotify credentials")]
-    NoSpotifyCredentials(Uuid),
-    #[error("resource {0} doesn't exist")]
-    NotFound(Uuid),
+    #[error("user doesn't have Sotify credentials")]
+    NoSpotifyCredentials,
+    #[error("resource doesn't exist")]
+    NotFound,
     #[error("regex compilation error: {0}")]
     RegexCompilation(
         #[from]
@@ -184,6 +184,8 @@ pub enum ApiError {
         #[source]
         serde_json::Error,
     ),
+    #[error("synchronization is running")]
+    SynchronizationIsRunning,
     #[error("Spotify error: {0}")]
     Spotify(
         #[from]
@@ -587,7 +589,7 @@ fn create_app<
                                         .creds
                                         .spotify
                                         .as_mut()
-                                        .ok_or(ApiError::NoSpotifyCredentials(auth_usr.id))?;
+                                        .ok_or(ApiError::NoSpotifyCredentials)?;
                                     let id = state.svc.spotify().create_playlist(&req.name, creds).await?;
                                     Target::Spotify(id)
                                 }
@@ -665,7 +667,7 @@ fn create_app<
                             playlist.id = %id,
                         );
                         async {
-                            let playlist = db_tx.playlist_by_id(id).await?.ok_or(ApiError::NotFound(id))?;
+                            let playlist = db_tx.playlist_by_id(id).await?.ok_or(ApiError::NotFound)?;
                             ensure_user_is_admin_or_owner!(auth_usr, playlist.src.owner);
                             transactional!(db_tx, async {
                                 let deleted = db_tx.delete_playlist(id).await?;
@@ -709,8 +711,65 @@ fn create_app<
                             playlist.id = %id,
                         );
                         async {
-                            let playlist = db_conn.playlist_by_id(id).await?.ok_or(ApiError::NotFound(id))?;
+                            let playlist = db_conn.playlist_by_id(id).await?.ok_or(ApiError::NotFound)?;
                             ensure_user_is_admin_or_owner!(auth_usr, playlist.src.owner);
+                            let resp = state.svc.converter().convert_playlist(playlist, &auth_usr);
+                            Ok((StatusCode::OK, Json(resp)))
+                        }
+                        .instrument(span)
+                        .await
+                    })
+                    .await
+                },
+            ),
+        )
+        // update_playlist
+        .route(
+            &format!("{PATH_PLAYLIST}/:id"),
+            routing::put(
+                |Path(id): Path<Uuid>,
+                 headers: HeaderMap,
+                 State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
+                 Json(req): Json<UpdatePlaylistRequest>| async move {
+                     handling_error(async {
+                        req.validate()?;
+                        let mut db_tx = state.db.begin().await?;
+                        let auth_usr = state
+                            .svc
+                            .auth()
+                            .authenticate(&headers, db_tx.as_client_mut())
+                            .await?;
+                        let span = info_span!(
+                            "update_playlist",
+                            auth.usr.id = %auth_usr.id,
+                            playlist.id = %id,
+                            playlist.name = req.name,
+                        );
+                        async {
+                            let playlist = transactional!(db_tx, async {
+                                let mut playlist = db_tx.playlist_by_id(id).await?.ok_or(ApiError::NotFound)?;
+                                ensure_user_is_admin_or_owner!(auth_usr, playlist.src.owner);
+                                playlist.name = req.name;
+                                playlist.predicate = req.predicate;
+                                if !db_tx.update_playlist_safely(&playlist).await? {
+                                    return Err(ApiError::SynchronizationIsRunning);
+                                }
+                                match &playlist.tgt {
+                                    Target::Spotify(id) => {
+                                        let creds = playlist.src.owner.creds.spotify.as_mut().ok_or(ApiError::NoSpotifyCredentials)?;
+                                        state.svc.spotify().update_playlist_name(id, &playlist.name, &mut creds.token).await?;
+                                    }
+                                }
+                                db_tx.update_user(&playlist.src.owner).await?;
+                                Ok(playlist)
+                            })?;
+                            info!(
+                                %playlist.id,
+                                %playlist.src.owner.id,
+                                %playlist.src.sync,
+                                %playlist.sync,
+                                "playlist updated"
+                            );
                             let resp = state.svc.converter().convert_playlist(playlist, &auth_usr);
                             Ok((StatusCode::OK, Json(resp)))
                         }
@@ -820,7 +879,7 @@ fn create_app<
                             playlist.id = %id,
                         );
                         async {
-                            let playlist = db_conn.playlist_by_id(id).await?.ok_or(ApiError::NotFound(id))?;
+                            let playlist = db_conn.playlist_by_id(id).await?.ok_or(ApiError::NotFound)?;
                             ensure_user_is_admin_or_owner!(auth_usr, playlist.src.owner);
                             let page = db_conn.playlist_tracks(id, req.into()).await?;
                             Ok((StatusCode::OK, Json(page)).into_response())
@@ -854,7 +913,9 @@ fn create_app<
                         );
                         async {
                             ensure_user_is_admin!(auth_usr);
-                            let page = db_conn.sources(req.into()).await?.map(|src| state.svc.converter().convert_source(src, &auth_usr));
+                            let page = db_conn.sources(req.into())
+                                .await?
+                                .map(|src| state.svc.converter().convert_source(src, &auth_usr));
                             Ok((StatusCode::OK, Json(page)))
                         }
                         .instrument(span)
@@ -887,7 +948,7 @@ fn create_app<
                             src.id = %id,
                         );
                         async {
-                            let src = db_conn.source_by_id(id).await?.ok_or(ApiError::NotFound(id))?;
+                            let src = db_conn.source_by_id(id).await?.ok_or(ApiError::NotFound)?;
                             ensure_user_is_admin_or_owner!(auth_usr, src.owner);
                             let page = db_conn.source_tracks(id, req.into()).await?;
                             Ok((StatusCode::OK, Json(page)).into_response())
@@ -919,7 +980,7 @@ fn create_app<
                             src.id = %id,
                         );
                         async {
-                            let src = db_conn.source_by_id(id).await?.ok_or(ApiError::NotFound(id))?;
+                            let src = db_conn.source_by_id(id).await?.ok_or(ApiError::NotFound)?;
                             ensure_user_is_admin_or_owner!(auth_usr, src.owner);
                             let resp = state.svc.converter().convert_source(src, &auth_usr);
                             Ok((StatusCode::OK, Json(resp)))
@@ -1021,7 +1082,7 @@ fn create_app<
                             track.id = %id,
                         );
                         async {
-                            let track = db_conn.track_by_id(id).await?.ok_or(ApiError::NotFound(id))?;
+                            let track = db_conn.track_by_id(id).await?.ok_or(ApiError::NotFound)?;
                             Ok((StatusCode::OK, Json(track)))
                         }
                         .instrument(span)
@@ -1058,7 +1119,7 @@ fn create_app<
                         );
                         async {
                             ensure_user_is_admin!(auth_usr);
-                            let mut track = db_conn.track_by_id(id).await?.ok_or(ApiError::NotFound(id))?;
+                            let mut track = db_conn.track_by_id(id).await?.ok_or(ApiError::NotFound)?;
                             track.album = req.album;
                             track.artists = req.artists;
                             track.title = req.title;
@@ -1127,7 +1188,7 @@ fn create_app<
                         );
                         async {
                             ensure_user_is_admin_or_itself!(auth_usr, id);
-                            let usr = db_conn.user_by_id(id).await?.ok_or(ApiError::NotFound(id))?;
+                            let usr = db_conn.user_by_id(id).await?.ok_or(ApiError::NotFound)?;
                             let resp = state.svc.converter().convert_user(usr);
                             Ok((StatusCode::OK, Json(resp)))
                         }
@@ -1161,7 +1222,7 @@ fn create_app<
                         );
                         async {
                             ensure_user_is_admin!(auth_usr);
-                            let mut usr = db_conn.user_by_id(id).await?.ok_or(ApiError::NotFound(id))?;
+                            let mut usr = db_conn.user_by_id(id).await?.ok_or(ApiError::NotFound)?;
                             usr.role = req.role;
                             db_conn.update_user(&usr).await?;
                             info!("user updated");
@@ -1341,13 +1402,23 @@ async fn handling_error<RESP: IntoResponse, FUT: Future<Output = ApiResult<RESP>
                 debug!(details = %err, "user doesn't have enough permissions");
                 StatusCode::FORBIDDEN.into_response()
             }
-            ApiError::NoSpotifyCredentials(_) => {
+            ApiError::NoSpotifyCredentials => {
                 debug!(details = %err, "user doesn't have Spotify credentials");
-                StatusCode::PRECONDITION_FAILED.into_response()
+                let resp = PreconditionFailedResponse {
+                    details: err.to_string(),
+                };
+                (StatusCode::PRECONDITION_FAILED, Json(resp)).into_response()
             }
-            ApiError::NotFound(_) => {
+            ApiError::NotFound => {
                 debug!(details = %err, "resource doesn't exist");
                 StatusCode::NOT_FOUND.into_response()
+            }
+            ApiError::SynchronizationIsRunning => {
+                debug!(details = %err, "synchronization is running");
+                let resp = PreconditionFailedResponse {
+                    details: err.to_string(),
+                };
+                (StatusCode::PRECONDITION_FAILED, Json(resp)).into_response()
             }
             ApiError::Unauthorized => {
                 debug!(details = %err, "user is not authenticated");
@@ -2184,7 +2255,7 @@ mod test {
         }
 
         #[tokio::test]
-        async fn no_spotify_credentials() {
+        async fn precondition_failed() {
             let creds = SpotifyCredentials {
                 email: "user@test".into(),
                 id: "id".into(),
@@ -2209,7 +2280,10 @@ mod test {
             };
             let (resp, _) = run(data, mocks).await;
             resp.assert_status(StatusCode::PRECONDITION_FAILED);
-            assert!(resp.as_bytes().is_empty());
+            let expected = PreconditionFailedResponse {
+                details: ApiError::NoSpotifyCredentials.to_string(),
+            };
+            resp.assert_json(&expected);
         }
 
         #[tokio::test]
@@ -4781,6 +4855,606 @@ mod test {
                 tracks: Mock::once(|| ()),
             };
             let (resp, expected) = run(mocks).await;
+            resp.assert_status_ok();
+            resp.assert_json(&expected);
+        }
+    }
+
+    mod update_playlist {
+        use super::*;
+
+        // Data
+
+        struct Data {
+            auth_usr: User,
+            playlist: Playlist,
+            req: UpdatePlaylistRequest,
+            spotify_id: &'static str,
+            spotify_token: SpotifyToken,
+        }
+
+        // Mocks
+
+        #[derive(Clone, Default)]
+        struct Mocks {
+            auth: Mock<ApiResult<User>, User>,
+            by_id: Mock<Option<Playlist>, Playlist>,
+            convert: Mock<()>,
+            rollback: Mock<()>,
+            spotify_update: Mock<()>,
+            update_playlist: Mock<bool>,
+            update_user: Mock<()>,
+        }
+
+        // Tests
+
+        async fn run(data: Data, mocks: Mocks) -> (TestResponse, PlaylistResponse) {
+            let playlist_updated = Playlist {
+                name: data.req.name.clone(),
+                predicate: data.req.predicate.clone(),
+                ..data.playlist.clone()
+            };
+            let expected =
+                DefaultConverter.convert_playlist(playlist_updated.clone(), &data.auth_usr);
+            let mut auth = MockAuthenticator::new();
+            auth.expect_authenticate()
+                .times(mocks.auth.times())
+                .returning({
+                    let usr = data.auth_usr.clone();
+                    let mock = mocks.auth.clone();
+                    move |_, _| {
+                        Box::pin({
+                            let usr = usr.clone();
+                            let mock = mock.clone();
+                            async move { mock.call_with_args(usr.clone()) }
+                        })
+                    }
+                });
+            let mut spotify = MockSpotifyClient::new();
+            spotify
+                .expect_update_playlist_name()
+                .with(
+                    eq(data.spotify_id),
+                    eq(playlist_updated.name.clone()),
+                    eq(data.spotify_token.clone()),
+                )
+                .times(mocks.spotify_update.times())
+                .returning(|_, _, _| Ok(()));
+            let db = MockDatabasePool {
+                begin: Mock::once({
+                    let playlist = data.playlist.clone();
+                    let playlist_updated = playlist_updated.clone();
+                    let mocks = mocks.clone();
+                    move || {
+                        let mut tx = MockDatabaseTransaction::new();
+                        tx.rollback = mocks.rollback.clone();
+                        tx.client
+                            .expect_playlist_by_id()
+                            .with(eq(playlist.id))
+                            .times(mocks.by_id.times())
+                            .returning({
+                                let playlist = playlist.clone();
+                                let mock = mocks.by_id.clone();
+                                move |_| Ok(mock.call_with_args(playlist.clone()))
+                            });
+                        tx.client
+                            .expect_update_user()
+                            .with(eq(playlist_updated.src.owner.clone()))
+                            .times(mocks.update_user.times())
+                            .returning(|_| Ok(true));
+                        tx.client
+                            .expect_update_playlist_safely()
+                            .with(eq(playlist_updated.clone()))
+                            .times(mocks.update_playlist.times())
+                            .returning({
+                                let mock = mocks.update_playlist.clone();
+                                move |_| Ok(mock.call())
+                            });
+                        tx
+                    }
+                }),
+                ..Default::default()
+            };
+            let mut conv = MockConverter::new();
+            conv.expect_convert_playlist()
+                .with(eq(playlist_updated.clone()), eq(data.auth_usr.clone()))
+                .times(mocks.convert.times())
+                .returning({
+                    let expected = expected.clone();
+                    move |_, _| expected.clone()
+                });
+            let state = AppState {
+                db,
+                svc: MockServices {
+                    auth,
+                    conv,
+                    spotify,
+                    ..Default::default()
+                },
+                _dbconn: PhantomData,
+                _dbtx: PhantomData,
+            };
+            let server = init(state);
+            let resp = server
+                .put(&format!("{PATH_PLAYLIST}/{}", playlist_updated.id))
+                .json(&data.req)
+                .await;
+            (resp, expected)
+        }
+
+        // Tests
+
+        #[tokio::test]
+        async fn bad_request() {
+            let spotify_token = SpotifyToken {
+                access: "access".into(),
+                expiration: Utc::now(),
+                refresh: "refresh".into(),
+            };
+            let spotify_id = "id";
+            let data = Data {
+                auth_usr: User {
+                    creation: Utc::now(),
+                    creds: Default::default(),
+                    id: Uuid::new_v4(),
+                    role: Role::Admin,
+                },
+                playlist: Playlist {
+                    creation: Utc::now(),
+                    id: Uuid::new_v4(),
+                    name: "name".into(),
+                    predicate: Predicate::YearIs(1993),
+                    src: Source {
+                        creation: Utc::now(),
+                        id: Uuid::new_v4(),
+                        kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
+                        owner: User {
+                            creation: Utc::now(),
+                            creds: Credentials {
+                                spotify: Some(SpotifyCredentials {
+                                    email: "user@test".into(),
+                                    id: "id".into(),
+                                    token: spotify_token.clone(),
+                                }),
+                            },
+                            id: Uuid::new_v4(),
+                            role: Role::User,
+                        },
+                        sync: Synchronization::Pending,
+                    },
+                    sync: Synchronization::Pending,
+                    tgt: Target::Spotify(spotify_id.into()),
+                },
+                req: UpdatePlaylistRequest {
+                    name: "".into(),
+                    predicate: Predicate::YearIs(1993),
+                },
+                spotify_id,
+                spotify_token,
+            };
+            let mocks = Mocks::default();
+            let (resp, _) = run(data, mocks).await;
+            resp.assert_status_bad_request();
+            let expected = ValidationErrorResponse {
+                errs: HashMap::from_iter([(
+                    "name".into(),
+                    vec![ValidationErrorKind::Length(1, 100)],
+                )]),
+            };
+            resp.assert_json(&expected);
+        }
+
+        #[tokio::test]
+        async fn unauthorized() {
+            let spotify_token = SpotifyToken {
+                access: "access".into(),
+                expiration: Utc::now(),
+                refresh: "refresh".into(),
+            };
+            let spotify_id = "id";
+            let data = Data {
+                auth_usr: User {
+                    creation: Utc::now(),
+                    creds: Default::default(),
+                    id: Uuid::new_v4(),
+                    role: Role::Admin,
+                },
+                playlist: Playlist {
+                    creation: Utc::now(),
+                    id: Uuid::new_v4(),
+                    name: "name".into(),
+                    predicate: Predicate::YearIs(1993),
+                    src: Source {
+                        creation: Utc::now(),
+                        id: Uuid::new_v4(),
+                        kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
+                        owner: User {
+                            creation: Utc::now(),
+                            creds: Credentials {
+                                spotify: Some(SpotifyCredentials {
+                                    email: "user@test".into(),
+                                    id: "id".into(),
+                                    token: spotify_token.clone(),
+                                }),
+                            },
+                            id: Uuid::new_v4(),
+                            role: Role::User,
+                        },
+                        sync: Synchronization::Pending,
+                    },
+                    sync: Synchronization::Pending,
+                    tgt: Target::Spotify(spotify_id.into()),
+                },
+                req: UpdatePlaylistRequest {
+                    name: "name 2".into(),
+                    predicate: Predicate::YearIs(2004),
+                },
+                spotify_id,
+                spotify_token,
+            };
+            let mocks = Mocks {
+                auth: Mock::once_with_args(|_| Err(ApiError::Unauthorized)),
+                ..Default::default()
+            };
+            let (resp, _) = run(data, mocks).await;
+            resp.assert_status_unauthorized();
+            assert!(resp.as_bytes().is_empty());
+        }
+
+        #[tokio::test]
+        async fn forbidden() {
+            let spotify_token = SpotifyToken {
+                access: "access".into(),
+                expiration: Utc::now(),
+                refresh: "refresh".into(),
+            };
+            let spotify_id = "id";
+            let data = Data {
+                auth_usr: User {
+                    creation: Utc::now(),
+                    creds: Default::default(),
+                    id: Uuid::new_v4(),
+                    role: Role::User,
+                },
+                playlist: Playlist {
+                    creation: Utc::now(),
+                    id: Uuid::new_v4(),
+                    name: "name".into(),
+                    predicate: Predicate::YearIs(1993),
+                    src: Source {
+                        creation: Utc::now(),
+                        id: Uuid::new_v4(),
+                        kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
+                        owner: User {
+                            creation: Utc::now(),
+                            creds: Credentials {
+                                spotify: Some(SpotifyCredentials {
+                                    email: "user@test".into(),
+                                    id: "id".into(),
+                                    token: spotify_token.clone(),
+                                }),
+                            },
+                            id: Uuid::new_v4(),
+                            role: Role::User,
+                        },
+                        sync: Synchronization::Pending,
+                    },
+                    sync: Synchronization::Pending,
+                    tgt: Target::Spotify(spotify_id.into()),
+                },
+                req: UpdatePlaylistRequest {
+                    name: "name 2".into(),
+                    predicate: Predicate::YearIs(2004),
+                },
+                spotify_id,
+                spotify_token,
+            };
+            let mocks = Mocks {
+                auth: Mock::once_with_args(Ok),
+                by_id: Mock::once_with_args(Some),
+                rollback: Mock::once(|| ()),
+                ..Default::default()
+            };
+            let (resp, _) = run(data, mocks).await;
+            resp.assert_status(StatusCode::FORBIDDEN);
+            assert!(resp.as_bytes().is_empty());
+        }
+
+        #[tokio::test]
+        async fn not_found() {
+            let spotify_token = SpotifyToken {
+                access: "access".into(),
+                expiration: Utc::now(),
+                refresh: "refresh".into(),
+            };
+            let spotify_id = "id";
+            let data = Data {
+                auth_usr: User {
+                    creation: Utc::now(),
+                    creds: Default::default(),
+                    id: Uuid::new_v4(),
+                    role: Role::Admin,
+                },
+                playlist: Playlist {
+                    creation: Utc::now(),
+                    id: Uuid::new_v4(),
+                    name: "name".into(),
+                    predicate: Predicate::YearIs(1993),
+                    src: Source {
+                        creation: Utc::now(),
+                        id: Uuid::new_v4(),
+                        kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
+                        owner: User {
+                            creation: Utc::now(),
+                            creds: Credentials {
+                                spotify: Some(SpotifyCredentials {
+                                    email: "user@test".into(),
+                                    id: "id".into(),
+                                    token: spotify_token.clone(),
+                                }),
+                            },
+                            id: Uuid::new_v4(),
+                            role: Role::User,
+                        },
+                        sync: Synchronization::Pending,
+                    },
+                    sync: Synchronization::Pending,
+                    tgt: Target::Spotify(spotify_id.into()),
+                },
+                req: UpdatePlaylistRequest {
+                    name: "name 2".into(),
+                    predicate: Predicate::YearIs(2004),
+                },
+                spotify_id,
+                spotify_token,
+            };
+            let mocks = Mocks {
+                auth: Mock::once_with_args(Ok),
+                by_id: Mock::once_with_args(|_| None),
+                rollback: Mock::once(|| ()),
+                ..Default::default()
+            };
+            let (resp, _) = run(data, mocks).await;
+            resp.assert_status(StatusCode::NOT_FOUND);
+            assert!(resp.as_bytes().is_empty());
+        }
+
+        #[tokio::test]
+        async fn precondition_failed_when_no_spotify_credentials() {
+            let spotify_token = SpotifyToken {
+                access: "access".into(),
+                expiration: Utc::now(),
+                refresh: "refresh".into(),
+            };
+            let spotify_id = "id";
+            let data = Data {
+                auth_usr: User {
+                    creation: Utc::now(),
+                    creds: Default::default(),
+                    id: Uuid::new_v4(),
+                    role: Role::Admin,
+                },
+                playlist: Playlist {
+                    creation: Utc::now(),
+                    id: Uuid::new_v4(),
+                    name: "name".into(),
+                    predicate: Predicate::YearIs(1993),
+                    src: Source {
+                        creation: Utc::now(),
+                        id: Uuid::new_v4(),
+                        kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
+                        owner: User {
+                            creation: Utc::now(),
+                            creds: Credentials::default(),
+                            id: Uuid::new_v4(),
+                            role: Role::User,
+                        },
+                        sync: Synchronization::Pending,
+                    },
+                    sync: Synchronization::Pending,
+                    tgt: Target::Spotify(spotify_id.into()),
+                },
+                req: UpdatePlaylistRequest {
+                    name: "name 2".into(),
+                    predicate: Predicate::YearIs(2004),
+                },
+                spotify_id,
+                spotify_token,
+            };
+            let mocks = Mocks {
+                auth: Mock::once_with_args(Ok),
+                by_id: Mock::once_with_args(Some),
+                rollback: Mock::once(|| ()),
+                update_playlist: Mock::once(|| true),
+                ..Default::default()
+            };
+            let (resp, _) = run(data, mocks).await;
+            resp.assert_status(StatusCode::PRECONDITION_FAILED);
+            let expected = PreconditionFailedResponse {
+                details: ApiError::NoSpotifyCredentials.to_string(),
+            };
+            resp.assert_json(&expected);
+        }
+
+        #[tokio::test]
+        async fn precondition_failed_when_synchronization_is_running() {
+            let spotify_token = SpotifyToken {
+                access: "access".into(),
+                expiration: Utc::now(),
+                refresh: "refresh".into(),
+            };
+            let spotify_id = "id";
+            let data = Data {
+                auth_usr: User {
+                    creation: Utc::now(),
+                    creds: Default::default(),
+                    id: Uuid::new_v4(),
+                    role: Role::Admin,
+                },
+                playlist: Playlist {
+                    creation: Utc::now(),
+                    id: Uuid::new_v4(),
+                    name: "name".into(),
+                    predicate: Predicate::YearIs(1993),
+                    src: Source {
+                        creation: Utc::now(),
+                        id: Uuid::new_v4(),
+                        kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
+                        owner: User {
+                            creation: Utc::now(),
+                            creds: Credentials {
+                                spotify: Some(SpotifyCredentials {
+                                    email: "user@test".into(),
+                                    id: "id".into(),
+                                    token: spotify_token.clone(),
+                                }),
+                            },
+                            id: Uuid::new_v4(),
+                            role: Role::User,
+                        },
+                        sync: Synchronization::Pending,
+                    },
+                    sync: Synchronization::Pending,
+                    tgt: Target::Spotify(spotify_id.into()),
+                },
+                req: UpdatePlaylistRequest {
+                    name: "name 2".into(),
+                    predicate: Predicate::YearIs(2004),
+                },
+                spotify_id,
+                spotify_token,
+            };
+            let mocks = Mocks {
+                auth: Mock::once_with_args(Ok),
+                by_id: Mock::once_with_args(Some),
+                rollback: Mock::once(|| ()),
+                update_playlist: Mock::once(|| false),
+                ..Default::default()
+            };
+            let (resp, _) = run(data, mocks).await;
+            resp.assert_status(StatusCode::PRECONDITION_FAILED);
+            let expected = PreconditionFailedResponse {
+                details: ApiError::SynchronizationIsRunning.to_string(),
+            };
+            resp.assert_json(&expected);
+        }
+
+        #[tokio::test]
+        async fn ok_when_user_is_owner() {
+            let spotify_token = SpotifyToken {
+                access: "access".into(),
+                expiration: Utc::now(),
+                refresh: "refresh".into(),
+            };
+            let spotify_id = "id";
+            let auth_usr = User {
+                creation: Utc::now(),
+                creds: Credentials {
+                    spotify: Some(SpotifyCredentials {
+                        email: "user@test".into(),
+                        id: "id".into(),
+                        token: spotify_token.clone(),
+                    }),
+                },
+                id: Uuid::new_v4(),
+                role: Role::User,
+            };
+            let data = Data {
+                auth_usr: auth_usr.clone(),
+                playlist: Playlist {
+                    creation: Utc::now(),
+                    id: Uuid::new_v4(),
+                    name: "name".into(),
+                    predicate: Predicate::YearIs(1993),
+                    src: Source {
+                        creation: Utc::now(),
+                        id: Uuid::new_v4(),
+                        kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
+                        owner: auth_usr.clone(),
+                        sync: Synchronization::Pending,
+                    },
+                    sync: Synchronization::Pending,
+                    tgt: Target::Spotify(spotify_id.into()),
+                },
+                req: UpdatePlaylistRequest {
+                    name: "name 2".into(),
+                    predicate: Predicate::YearIs(2004),
+                },
+                spotify_id,
+                spotify_token,
+            };
+            let mocks = Mocks {
+                auth: Mock::once_with_args(Ok),
+                by_id: Mock::once_with_args(Some),
+                convert: Mock::once(|| ()),
+                spotify_update: Mock::once(|| ()),
+                update_playlist: Mock::once(|| true),
+                update_user: Mock::once(|| ()),
+                ..Default::default()
+            };
+            let (resp, expected) = run(data, mocks).await;
+            resp.assert_status_ok();
+            resp.assert_json(&expected);
+        }
+
+        #[tokio::test]
+        async fn ok_when_user_is_admin() {
+            let spotify_token = SpotifyToken {
+                access: "access".into(),
+                expiration: Utc::now(),
+                refresh: "refresh".into(),
+            };
+            let spotify_id = "id";
+            let data = Data {
+                auth_usr: User {
+                    creation: Utc::now(),
+                    creds: Default::default(),
+                    id: Uuid::new_v4(),
+                    role: Role::Admin,
+                },
+                playlist: Playlist {
+                    creation: Utc::now(),
+                    id: Uuid::new_v4(),
+                    name: "name".into(),
+                    predicate: Predicate::YearIs(1993),
+                    src: Source {
+                        creation: Utc::now(),
+                        id: Uuid::new_v4(),
+                        kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
+                        owner: User {
+                            creation: Utc::now(),
+                            creds: Credentials {
+                                spotify: Some(SpotifyCredentials {
+                                    email: "user@test".into(),
+                                    id: "id".into(),
+                                    token: spotify_token.clone(),
+                                }),
+                            },
+                            id: Uuid::new_v4(),
+                            role: Role::User,
+                        },
+                        sync: Synchronization::Pending,
+                    },
+                    sync: Synchronization::Pending,
+                    tgt: Target::Spotify(spotify_id.into()),
+                },
+                req: UpdatePlaylistRequest {
+                    name: "name 2".into(),
+                    predicate: Predicate::YearIs(2004),
+                },
+                spotify_id,
+                spotify_token,
+            };
+            let mocks = Mocks {
+                auth: Mock::once_with_args(Ok),
+                by_id: Mock::once_with_args(Some),
+                convert: Mock::once(|| ()),
+                spotify_update: Mock::once(|| ()),
+                update_playlist: Mock::once(|| true),
+                update_user: Mock::once(|| ()),
+                ..Default::default()
+            };
+            let (resp, expected) = run(data, mocks).await;
             resp.assert_status_ok();
             resp.assert_json(&expected);
         }

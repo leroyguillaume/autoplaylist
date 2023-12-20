@@ -1,0 +1,12 @@
+{
+  "album": {
+    "compil": false,
+    "name": "album"
+  },
+  "artists": [
+    "artist1",
+    "artist2"
+  ],
+  "title": "title",
+  "year": 1993
+}
