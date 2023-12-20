@@ -99,6 +99,13 @@ pub trait SpotifyClient: Send + Sync {
         req: PageRequest,
         token: &mut SpotifyToken,
     ) -> SpotifyResult<Page<SpotifyTrack>>;
+
+    async fn update_playlist_name(
+        &self,
+        id: &str,
+        name: &str,
+        token: &mut SpotifyToken,
+    ) -> SpotifyResult<()>;
 }
 
 // Mods

@@ -11,7 +11,8 @@ use async_trait::async_trait;
 use autoplaylist_common::{
     api::{
         AuthenticateViaSpotifyQueryParams, CreatePlaylistRequest, PageRequestQueryParams,
-        RedirectUriQueryParam, SearchQueryParam, UpdateTrackRequest, UpdateUserRequest,
+        RedirectUriQueryParam, SearchQueryParam, UpdatePlaylistRequest, UpdateTrackRequest,
+        UpdateUserRequest,
     },
     db::{
         pg::{PostgresConfig, PostgresConnection, PostgresPool, PostgresTransaction},
@@ -252,6 +253,8 @@ enum PlaylistCommand {
     Synchronize(PlaylistSynchronizeCommandArgs),
     #[command(about = "List playlist tracks")]
     Tracks(PlaylistTracksCommandArgs),
+    #[command(about = "Update a playlist")]
+    Update(PlaylistUpdateCommandArgs),
 }
 
 // PlaylistCreateCommandArgs
@@ -323,6 +326,20 @@ struct PlaylistTracksCommandArgs {
     id: Uuid,
     #[command(flatten)]
     req: PageRequestArgs<25>,
+}
+
+// PlaylistUpdateCommandArgs
+
+#[derive(clap::Args, Clone, Debug, Eq, PartialEq)]
+struct PlaylistUpdateCommandArgs {
+    #[command(flatten)]
+    api_base_url: ApiBaseUrlArg,
+    #[command(flatten)]
+    api_token: TokenArg,
+    #[arg(help = "Playlist update JSON file", index = 2)]
+    file: PathBuf,
+    #[arg(help = "Playlist ID", index = 1)]
+    id: Uuid,
 }
 
 // RoleArg
@@ -841,6 +858,24 @@ impl<
                 .instrument(span)
                 .await
             }
+            Command::Playlist(PlaylistCommand::Update(args)) => {
+                let span = info_span!(
+                    "update_playlist",
+                    api_base_url = %args.api_base_url.value,
+                    params.file = %args.file.display(),
+                    playlist.id = %args.id,
+                );
+                async {
+                    let req: UpdatePlaylistRequest = Self::read_json_file(&args.file)?;
+                    let api = self.svc.api(args.api_base_url.value);
+                    let resp = api
+                        .update_playlist(args.id, &req, &args.api_token.value)
+                        .await?;
+                    Self::write_to_output(out, &resp)
+                }
+                .instrument(span)
+                .await
+            }
             Command::Source(SourceCommand::Get(args)) => {
                 let span = info_span!(
                     "source_by_id",
@@ -1257,6 +1292,7 @@ mod test {
                 q: &'static str,
                 req: PageRequestArgs<LIMIT>,
                 role: Role,
+                update_playlist_req: UpdatePlaylistRequest,
                 update_track_req: UpdateTrackRequest,
                 update_usr_req: UpdateUserRequest,
             }
@@ -1291,6 +1327,7 @@ mod test {
                 start_src_sync: Mock<()>,
                 track_by_id: Mock<Track>,
                 tracks: Mock<Page<Track>>,
+                update_playlist: Mock<PlaylistResponse>,
                 update_track: Mock<Track>,
                 update_usr: Mock<UserResponse>,
                 usr_by_id: Mock<UserResponse>,
@@ -1515,6 +1552,17 @@ mod test {
                                 let mock = mocks.update_track.clone();
                                 move |_, _, _| Ok(mock.call())
                             });
+                        api.expect_update_playlist()
+                            .with(
+                                eq(data.id),
+                                eq(data.update_playlist_req.clone()),
+                                eq(data.api_token),
+                            )
+                            .times(mocks.update_playlist.times())
+                            .returning({
+                                let mock = mocks.update_playlist.clone();
+                                move |_, _, _| Ok(mock.call())
+                            });
                         api
                     }
                 });
@@ -1647,6 +1695,10 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    update_playlist_req: UpdatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearIs(1993),
+                    },
                     update_track_req: UpdateTrackRequest {
                         album: Album {
                             compil: false,
@@ -1718,6 +1770,10 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    update_playlist_req: UpdatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearIs(1993),
+                    },
                     update_track_req: UpdateTrackRequest {
                         album: Album {
                             compil: false,
@@ -1789,6 +1845,10 @@ mod test {
                     q: "name",
                     req,
                     role: Role::Admin,
+                    update_playlist_req: UpdatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearIs(1993),
+                    },
                     update_track_req: UpdateTrackRequest {
                         album: Album {
                             compil: false,
@@ -1859,6 +1919,10 @@ mod test {
                     q: "name",
                     req,
                     role: Role::Admin,
+                    update_playlist_req: UpdatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearIs(1993),
+                    },
                     update_track_req: UpdateTrackRequest {
                         album: Album {
                             compil: false,
@@ -1943,6 +2007,10 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    update_playlist_req: UpdatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearIs(1993),
+                    },
                     update_track_req: UpdateTrackRequest {
                         album: Album {
                             compil: false,
@@ -2008,6 +2076,10 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    update_playlist_req: UpdatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearIs(1993),
+                    },
                     update_track_req: UpdateTrackRequest {
                         album: Album {
                             compil: false,
@@ -2065,6 +2137,10 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    update_playlist_req: UpdatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearIs(1993),
+                    },
                     update_track_req: UpdateTrackRequest {
                         album: Album {
                             compil: false,
@@ -2122,6 +2198,10 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    update_playlist_req: UpdatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearIs(1993),
+                    },
                     update_track_req: UpdateTrackRequest {
                         album: Album {
                             compil: false,
@@ -2199,6 +2279,10 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    update_playlist_req: UpdatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearIs(1993),
+                    },
                     update_track_req: UpdateTrackRequest {
                         album: Album {
                             compil: false,
@@ -2270,6 +2354,10 @@ mod test {
                     port,
                     req,
                     role: Role::Admin,
+                    update_playlist_req: UpdatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearIs(1993),
+                    },
                     update_track_req: UpdateTrackRequest {
                         album: Album {
                             compil: false,
@@ -2341,6 +2429,10 @@ mod test {
                     port,
                     req,
                     role: Role::Admin,
+                    update_playlist_req: UpdatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearIs(1993),
+                    },
                     update_track_req: UpdateTrackRequest {
                         album: Album {
                             compil: false,
@@ -2413,6 +2505,10 @@ mod test {
                     q,
                     req,
                     role: Role::Admin,
+                    update_playlist_req: UpdatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearIs(1993),
+                    },
                     update_track_req: UpdateTrackRequest {
                         album: Album {
                             compil: false,
@@ -2485,6 +2581,10 @@ mod test {
                     q,
                     req,
                     role: Role::Admin,
+                    update_playlist_req: UpdatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearIs(1993),
+                    },
                     update_track_req: UpdateTrackRequest {
                         album: Album {
                             compil: false,
@@ -2556,6 +2656,10 @@ mod test {
                     port,
                     req,
                     role: Role::Admin,
+                    update_playlist_req: UpdatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearIs(1993),
+                    },
                     update_track_req: UpdateTrackRequest {
                         album: Album {
                             compil: false,
@@ -2630,6 +2734,10 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    update_playlist_req: UpdatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearIs(1993),
+                    },
                     update_track_req: UpdateTrackRequest {
                         album: Album {
                             compil: false,
@@ -2701,6 +2809,10 @@ mod test {
                     port,
                     req,
                     role: Role::Admin,
+                    update_playlist_req: UpdatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearIs(1993),
+                    },
                     update_track_req: UpdateTrackRequest {
                         album: Album {
                             compil: false,
@@ -2771,6 +2883,10 @@ mod test {
                     port,
                     req,
                     role: Role::Admin,
+                    update_playlist_req: UpdatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearIs(1993),
+                    },
                     update_track_req: UpdateTrackRequest {
                         album: Album {
                             compil: false,
@@ -2835,6 +2951,10 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    update_playlist_req: UpdatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearIs(1993),
+                    },
                     update_track_req: UpdateTrackRequest {
                         album: Album {
                             compil: false,
@@ -2894,6 +3014,10 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    update_playlist_req: UpdatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearIs(1993),
+                    },
                     update_track_req: UpdateTrackRequest {
                         album: Album {
                             compil: false,
@@ -2964,6 +3088,10 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    update_playlist_req: UpdatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearIs(1993),
+                    },
                     update_track_req: UpdateTrackRequest {
                         album: Album {
                             compil: false,
@@ -3033,6 +3161,10 @@ mod test {
                     port,
                     req,
                     role: Role::Admin,
+                    update_playlist_req: UpdatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearIs(1993),
+                    },
                     update_track_req: UpdateTrackRequest {
                         album: Album {
                             compil: false,
@@ -3051,6 +3183,99 @@ mod test {
                     }),
                     ..Default::default()
                 };
+                let expected = serde_json::to_string(&resp).expect("failed to serialize");
+                let expected = format!("{expected}\n");
+                let out = run(data, mocks).await;
+                assert_eq!(out, expected);
+            }
+
+            #[tokio::test]
+            async fn update_playlist() {
+                let temp_dir =
+                    TempDir::new("autoplaylist-cli").expect("failed to create directory");
+                let file_path = temp_dir.path().join("req.json");
+                let req = UpdatePlaylistRequest {
+                    name: "name".into(),
+                    predicate: Predicate::YearIs(1993),
+                };
+                let resp = PlaylistResponse {
+                    creation: Utc::now(),
+                    id: Uuid::new_v4(),
+                    name: req.name.clone(),
+                    predicate: req.predicate.clone(),
+                    src: SourceResponse {
+                        creation: Utc::now(),
+                        id: Uuid::new_v4(),
+                        owner: UserResponse {
+                            creation: Utc::now(),
+                            creds: Default::default(),
+                            id: Uuid::new_v4(),
+                            role: Role::User,
+                        },
+                        kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
+                        sync: SynchronizationResponse::Pending,
+                    },
+                    sync: SynchronizationResponse::Pending,
+                    tgt: Target::Spotify("id".into()),
+                };
+                let api_base_url = "http://localhost:8000";
+                let port = 3000;
+                let data = Data {
+                    api_base_url,
+                    api_token: "jwt",
+                    cmd: Command::Playlist(PlaylistCommand::Update(PlaylistUpdateCommandArgs {
+                        api_base_url: ApiBaseUrlArg {
+                            value: api_base_url.into(),
+                        },
+                        api_token: TokenArg {
+                            value: "jwt".into(),
+                        },
+                        file: file_path.clone(),
+                        id: resp.id,
+                    })),
+                    create_playlist_req: CreatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearIs(1993),
+                        src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
+                    },
+                    db: DatabaseArgs {
+                        host: "host".into(),
+                        name: "name".into(),
+                        password: "password".into(),
+                        port: 5432,
+                        secret: "secret".into(),
+                        user: "user".into(),
+                    },
+                    id: resp.id,
+                    q: "name",
+                    port,
+                    req: PageRequestArgs::<25> {
+                        limit: 25,
+                        offset: 0,
+                    },
+                    role: Role::Admin,
+                    update_playlist_req: req,
+                    update_track_req: UpdateTrackRequest {
+                        album: Album {
+                            compil: false,
+                            name: "album".into(),
+                        },
+                        artists: Default::default(),
+                        title: "title".into(),
+                        year: 2020,
+                    },
+                    update_usr_req: UpdateUserRequest { role: Role::Admin },
+                };
+                let mocks = Mocks {
+                    update_playlist: Mock::once({
+                        let resp = resp.clone();
+                        move || resp.clone()
+                    }),
+                    ..Default::default()
+                };
+                let mut file = File::create(&file_path).expect("failed to create file");
+                serde_json::to_writer(&mut file, &data.update_playlist_req)
+                    .expect("failed to serialize into file");
                 let expected = serde_json::to_string(&resp).expect("failed to serialize");
                 let expected = format!("{expected}\n");
                 let out = run(data, mocks).await;
@@ -3117,6 +3342,10 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    update_playlist_req: UpdatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearIs(1993),
+                    },
                     update_track_req: req,
                     update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
@@ -3172,6 +3401,10 @@ mod test {
                         offset: 0,
                     },
                     role: Role::from(role),
+                    update_playlist_req: UpdatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearIs(1993),
+                    },
                     update_track_req: UpdateTrackRequest {
                         album: Album {
                             compil: false,
@@ -3236,6 +3469,10 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    update_playlist_req: UpdatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearIs(1993),
+                    },
                     update_track_req: UpdateTrackRequest {
                         album: Album {
                             compil: false,
@@ -3307,6 +3544,10 @@ mod test {
                     port,
                     req,
                     role: Role::Admin,
+                    update_playlist_req: UpdatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearIs(1993),
+                    },
                     update_track_req: UpdateTrackRequest {
                         album: Album {
                             compil: false,
@@ -3378,6 +3619,10 @@ mod test {
                     port,
                     req,
                     role: Role::Admin,
+                    update_playlist_req: UpdatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearIs(1993),
+                    },
                     update_track_req: UpdateTrackRequest {
                         album: Album {
                             compil: false,
@@ -3448,6 +3693,10 @@ mod test {
                     port,
                     req,
                     role: Role::Admin,
+                    update_playlist_req: UpdatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearIs(1993),
+                    },
                     update_track_req: UpdateTrackRequest {
                         album: Album {
                             compil: false,

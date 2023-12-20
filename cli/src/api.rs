@@ -3,9 +3,9 @@ use autoplaylist_common::{
     api::{
         AuthenticateViaSpotifyQueryParams, CreatePlaylistRequest, JwtResponse,
         PageRequestQueryParams, PlaylistResponse, RedirectUriQueryParam, SearchQueryParam,
-        SourceResponse, UpdateTrackRequest, UpdateUserRequest, UserResponse, PATH_AUTH, PATH_ME,
-        PATH_PLAYLIST, PATH_SEARCH, PATH_SPOTIFY, PATH_SRC, PATH_SYNC, PATH_TOKEN, PATH_TRACK,
-        PATH_USR,
+        SourceResponse, UpdatePlaylistRequest, UpdateTrackRequest, UpdateUserRequest, UserResponse,
+        PATH_AUTH, PATH_ME, PATH_PLAYLIST, PATH_SEARCH, PATH_SPOTIFY, PATH_SRC, PATH_SYNC,
+        PATH_TOKEN, PATH_TRACK, PATH_USR,
     },
     model::{Page, Track},
 };
@@ -141,6 +141,13 @@ pub trait ApiClient: Send + Sync {
     async fn track_by_id(&self, id: Uuid, token: &str) -> ApiResult<Track>;
 
     async fn tracks(&self, req: PageRequestQueryParams<25>, token: &str) -> ApiResult<Page<Track>>;
+
+    async fn update_playlist(
+        &self,
+        id: Uuid,
+        req: &UpdatePlaylistRequest,
+        token: &str,
+    ) -> ApiResult<PlaylistResponse>;
 
     async fn update_track(
         &self,
@@ -628,6 +635,29 @@ impl ApiClient for DefaultApiClient {
                 .get(format!("{}{PATH_TRACK}", self.base_url))
                 .bearer_auth(token)
                 .query(&req)
+                .build()?;
+            Self::send_and_parse_json_response(req).await
+        }
+        .instrument(span)
+        .await
+    }
+
+    async fn update_playlist(
+        &self,
+        id: Uuid,
+        req: &UpdatePlaylistRequest,
+        token: &str,
+    ) -> ApiResult<PlaylistResponse> {
+        let span = debug_span!(
+            "update_playlist",
+            playlist.id = %id,
+            playlist.name = %req.name,
+        );
+        async {
+            let req = Client::new()
+                .put(format!("{}{PATH_PLAYLIST}/{id}", self.base_url))
+                .bearer_auth(token)
+                .json(req)
                 .build()?;
             Self::send_and_parse_json_response(req).await
         }
@@ -1336,6 +1366,52 @@ mod test {
                     .tracks(req, "jwt")
                     .await
                     .expect("failed to get tracks");
+                assert_eq!(resp, expected);
+            }
+        }
+
+        mod update_playlist {
+            use super::*;
+
+            // Tests
+
+            #[tokio::test]
+            async fn playlist() {
+                let req = UpdatePlaylistRequest {
+                    name: "name".into(),
+                    predicate: Predicate::YearIs(1993),
+                };
+                let expected = PlaylistResponse {
+                    creation: DateTime::parse_from_rfc3339("2023-01-02T00:00:10Z")
+                        .expect("failed to parse date")
+                        .into(),
+                    id: Uuid::from_u128(0xf28c11c3bfeb4583ba1646797f662b9a),
+                    name: req.name.clone(),
+                    predicate: req.predicate.clone(),
+                    src: SourceResponse {
+                        creation: DateTime::parse_from_rfc3339("2023-01-02T00:00:00Z")
+                            .expect("failed to parse date")
+                            .into(),
+                        id: Uuid::from_u128(0x2f3f13153bb74b3189c58bdffdb5e8de),
+                        kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
+                        owner: UserResponse {
+                            creation: DateTime::parse_from_rfc3339("2022-01-02T00:00:00Z")
+                                .expect("failed to parse date")
+                                .into(),
+                            creds: Default::default(),
+                            id: Uuid::from_u128(0x730ea2158aa44463a1379c4c71d50ed6),
+                            role: Role::User,
+                        },
+                        sync: SynchronizationResponse::Pending,
+                    },
+                    sync: SynchronizationResponse::Pending,
+                    tgt: Target::Spotify("id".into()),
+                };
+                let client = init();
+                let resp = client
+                    .update_playlist(expected.id, &req, "jwt")
+                    .await
+                    .expect("failed to update playlist");
                 assert_eq!(resp, expected);
             }
         }

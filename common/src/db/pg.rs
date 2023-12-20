@@ -1890,6 +1890,8 @@ async fn update_playlist<
         %playlist.sync,
     );
     async {
+        trace!("serializing playlist predicate");
+        let predicate = serde_json::to_value(&playlist.predicate)?;
         trace!("serializing playlist synchronization");
         let sync = serde_json::to_value(&playlist.sync)?;
         trace!("acquiring database connection");
@@ -1899,12 +1901,16 @@ async fn update_playlist<
             query_file!(
                 "resources/main/db/pg/queries/update-playlist-safely.sql",
                 playlist.id,
+                playlist.name,
+                predicate,
                 sync,
             )
         } else {
             query_file!(
                 "resources/main/db/pg/queries/update-playlist.sql",
                 playlist.id,
+                playlist.name,
+                predicate,
                 sync,
             )
         };
@@ -3758,17 +3764,19 @@ mod test {
                 let db = init(db).await;
                 let mut conn = db.acquire().await.expect("failed to acquire connection");
                 let playlist_expected = Playlist {
+                    name: "playlist_1_2".into(),
+                    predicate: Predicate::YearIs(1983),
                     sync: Synchronization::Running(Utc::now()),
                     ..playlist.clone()
                 };
                 let playlist_updated = Playlist {
                     creation: Utc::now(),
                     id,
-                    name: "playlist_2".into(),
-                    predicate: Predicate::YearIs(1983),
+                    name: playlist_expected.name.clone(),
+                    predicate: playlist_expected.predicate.clone(),
                     src: data.srcs[1].clone(),
                     sync: playlist_expected.sync.clone(),
-                    tgt: Target::Spotify("playlist_2".into()),
+                    tgt: Target::Spotify("playlist_1_2".into()),
                 };
                 let updated = conn
                     .update_playlist(&playlist_updated)
@@ -3813,17 +3821,19 @@ mod test {
                 let db = init(db).await;
                 let mut conn = db.acquire().await.expect("failed to acquire connection");
                 let playlist_expected = Playlist {
+                    name: "playlist_1_2".into(),
+                    predicate: Predicate::YearIs(1983),
                     sync: Synchronization::Running(Utc::now()),
                     ..playlist.clone()
                 };
                 let playlist_updated = Playlist {
                     creation: Utc::now(),
                     id,
-                    name: "playlist_2".into(),
-                    predicate: Predicate::YearIs(1983),
+                    name: playlist_expected.name.clone(),
+                    predicate: playlist_expected.predicate.clone(),
                     src: data.srcs[1].clone(),
                     sync: playlist_expected.sync.clone(),
-                    tgt: Target::Spotify("playlist_2".into()),
+                    tgt: Target::Spotify("playlist_1_2".into()),
                 };
                 let updated = conn
                     .update_playlist_safely(&playlist_updated)

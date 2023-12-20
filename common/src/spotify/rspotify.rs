@@ -370,6 +370,31 @@ impl SpotifyClient for RSpotifyClient {
         .instrument(span)
         .await
     }
+
+    async fn update_playlist_name(
+        &self,
+        id: &str,
+        name: &str,
+        token: &mut SpotifyToken,
+    ) -> SpotifyResult<()> {
+        let span = debug_span!(
+            "update_playlist_name",
+            playlist.spotify_id = id,
+            playlist.name = name,
+        );
+        async {
+            let id = PlaylistId::from_id(id)?;
+            let client = self.api_client(token).await?;
+            debug!("updating playlist name");
+            client
+                .playlist_change_detail(id, Some(name), None, None, None)
+                .await?;
+            *token = self.token(&client).await?;
+            Ok(())
+        }
+        .instrument(span)
+        .await
+    }
 }
 
 // SpotifyError
@@ -888,6 +913,23 @@ mod test {
                     total: 100,
                 };
                 run(expected).await;
+            }
+        }
+
+        mod update_playlist_name {
+            use super::*;
+
+            // Tests
+
+            #[tokio::test]
+            async fn unit() {
+                let mut token = token();
+                let spotify = init();
+                spotify
+                    .update_playlist_name(PLAYLIST_ID, "New Name", &mut token)
+                    .await
+                    .expect("failed to update playlist name");
+                assert_token_updated(&token);
             }
         }
     }
