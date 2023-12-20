@@ -14,7 +14,7 @@ use sqlx::{
     PgConnection, PgPool, Postgres, Transaction,
 };
 use thiserror::Error;
-use tracing::{debug, debug_span, info, trace, Instrument};
+use tracing::{debug, info, info_span, trace, Instrument};
 use uuid::Uuid;
 
 use crate::model::{
@@ -694,7 +694,7 @@ async fn add_track_to_playlist<
     track_id: Uuid,
     conn: A,
 ) -> PostgresResult<()> {
-    let span = debug_span!(
+    let span = info_span!(
         "add_track_to_playlist",
         playlist.id = %playlist_id,
         track.id = %track_id,
@@ -727,7 +727,7 @@ async fn add_track_to_source<
     track_id: Uuid,
     conn: A,
 ) -> PostgresResult<()> {
-    let span = debug_span!(
+    let span = info_span!(
         "add_track_to_source",
         src.id = %src_id,
         track.id = %track_id,
@@ -759,7 +759,7 @@ async fn count_source_playlists<
     id: Uuid,
     conn: A,
 ) -> PostgresResult<u32> {
-    let span = debug_span!(
+    let span = info_span!(
         "count_source_playlists",
         src.id = %id,
     );
@@ -791,7 +791,7 @@ async fn create_playlist<
     key: &MagicCrypt256,
     conn: A,
 ) -> PostgresResult<Playlist> {
-    let span = debug_span!(
+    let span = info_span!(
         "create_playlist",
         playlist.name = creation.name,
         playlist.src.kind = %creation.src.kind,
@@ -835,7 +835,7 @@ async fn create_source<
     key: &MagicCrypt256,
     conn: A,
 ) -> PostgresResult<Source> {
-    let span = debug_span!(
+    let span = info_span!(
         "create_source",
         src.kind = %creation.kind,
         src.owner.id = %creation.owner.id,
@@ -879,7 +879,7 @@ async fn create_track<
         .map(|artist| artist.to_lowercase())
         .collect::<Vec<_>>();
     let title = creation.title.to_lowercase();
-    let span = debug_span!(
+    let span = info_span!(
         "create_track",
         track.album.name = album,
         track.artists = ?artists,
@@ -921,7 +921,7 @@ async fn create_user<'a, A: Acquire<'a, Database = Postgres, Connection = &'a mu
     key: &MagicCrypt256,
     conn: A,
 ) -> PostgresResult<User> {
-    let span = debug_span!("create_user");
+    let span = info_span!("create_user");
     async {
         let spotify_creds = creds
             .spotify
@@ -959,7 +959,7 @@ async fn delete_playlist<
     id: Uuid,
     conn: A,
 ) -> PostgresResult<bool> {
-    let span = debug_span!(
+    let span = info_span!(
         "delete_playlist",
         playlist.id = %id,
     );
@@ -990,7 +990,7 @@ async fn delete_source<
     id: Uuid,
     conn: A,
 ) -> PostgresResult<bool> {
-    let span = debug_span!(
+    let span = info_span!(
         "delete_source",
         src.id = %id,
     );
@@ -1021,7 +1021,7 @@ async fn delete_tracks_from_playlist<
     id: Uuid,
     conn: A,
 ) -> PostgresResult<u64> {
-    let span = debug_span!(
+    let span = info_span!(
         "delete_tracks_from_playlist",
         playlist.id = %id,
     );
@@ -1053,7 +1053,7 @@ async fn delete_tracks_from_source<
     id: Uuid,
     conn: A,
 ) -> PostgresResult<u64> {
-    let span = debug_span!(
+    let span = info_span!(
         "delete_tracks_from_source",
         src.id = %id,
     );
@@ -1082,7 +1082,7 @@ async fn delete_user<'a, A: Acquire<'a, Database = Postgres, Connection = &'a mu
     id: Uuid,
     conn: A,
 ) -> PostgresResult<bool> {
-    let span = debug_span!(
+    let span = info_span!(
         "delete_user",
         usr.id = %id,
     );
@@ -1124,7 +1124,7 @@ async fn playlist_by_id<
     key: &MagicCrypt256,
     conn: A,
 ) -> PostgresResult<Option<Playlist>> {
-    let span = debug_span!(
+    let span = info_span!(
         "playlist_by_id",
         playlist.id = %id,
     );
@@ -1157,7 +1157,7 @@ async fn playlist_contains_track<
     track_id: Uuid,
     conn: A,
 ) -> PostgresResult<bool> {
-    let span = debug_span!(
+    let span = info_span!(
         "playlist_contains_track",
         playlist.id = %playlist_id,
         track.id = %track_id,
@@ -1190,7 +1190,7 @@ async fn playlist_exists<
     id: Uuid,
     conn: A,
 ) -> PostgresResult<bool> {
-    let span = debug_span!(
+    let span = info_span!(
         "playlist_exists",
         playlist.id = %id,
     );
@@ -1219,7 +1219,7 @@ async fn playlist_ids_by_source<
     req: PageRequest,
     conn: A,
 ) -> PostgresResult<Page<Uuid>> {
-    let span = debug_span!(
+    let span = info_span!(
         "playlist_ids_by_source",
         params.limit = req.limit,
         params.offset = req.offset,
@@ -1269,7 +1269,7 @@ async fn playlist_tracks<
     req: PageRequest,
     conn: A,
 ) -> PostgresResult<Page<Track>> {
-    let span = debug_span!(
+    let span = info_span!(
         "playlist_tracks",
         params.limit = req.limit,
         params.offset = req.offset,
@@ -1318,7 +1318,7 @@ async fn playlists<'a, A: Acquire<'a, Database = Postgres, Connection = &'a mut 
     key: &MagicCrypt256,
     conn: A,
 ) -> PostgresResult<Page<Playlist>> {
-    let span = debug_span!(
+    let span = info_span!(
         "playlists",
         params.limit = req.limit,
         params.offset = req.offset,
@@ -1369,7 +1369,7 @@ async fn search_playlists_by_name<
     key: &MagicCrypt256,
     conn: A,
 ) -> PostgresResult<Page<Playlist>> {
-    let span = debug_span!(
+    let span = info_span!(
         "search_playlists_by_name",
         params.limit = req.limit,
         params.offset = req.offset,
@@ -1426,7 +1426,7 @@ async fn search_user_playlists_by_name<
     key: &MagicCrypt256,
     conn: A,
 ) -> PostgresResult<Page<Playlist>> {
-    let span = debug_span!(
+    let span = info_span!(
         "search_user_playlists_by_name",
         params.limit = req.limit,
         params.offset = req.offset,
@@ -1484,7 +1484,7 @@ async fn search_users_by_email<
     key: &MagicCrypt256,
     conn: A,
 ) -> PostgresResult<Page<User>> {
-    let span = debug_span!(
+    let span = info_span!(
         "search_users_by_email",
         params.limit = req.limit,
         params.offset = req.offset,
@@ -1539,7 +1539,7 @@ async fn source_by_id<
     key: &MagicCrypt256,
     conn: A,
 ) -> PostgresResult<Option<Source>> {
-    let span = debug_span!(
+    let span = info_span!(
         "source_by_id",
         src.id = %id,
     );
@@ -1573,7 +1573,7 @@ async fn source_by_owner_kind<
     key: &MagicCrypt256,
     conn: A,
 ) -> PostgresResult<Option<Source>> {
-    let span = debug_span!(
+    let span = info_span!(
         "source_by_owner_kind",
         src.owner.id = %owner_id,
     );
@@ -1609,7 +1609,7 @@ async fn source_contains_track<
     track_id: Uuid,
     conn: A,
 ) -> PostgresResult<bool> {
-    let span = debug_span!(
+    let span = info_span!(
         "source_contains_track",
         src.id = %src_id,
         track.id = %track_id,
@@ -1642,7 +1642,7 @@ async fn source_exists<
     id: Uuid,
     conn: A,
 ) -> PostgresResult<bool> {
-    let span = debug_span!(
+    let span = info_span!(
         "source_exists",
         src.id = %id,
     );
@@ -1671,7 +1671,7 @@ async fn source_tracks<
     req: PageRequest,
     conn: A,
 ) -> PostgresResult<Page<Track>> {
-    let span = debug_span!(
+    let span = info_span!(
         "source_tracks",
         params.limit = req.limit,
         params.offset = req.offset,
@@ -1720,7 +1720,7 @@ async fn sources<'a, A: Acquire<'a, Database = Postgres, Connection = &'a mut Pg
     key: &MagicCrypt256,
     conn: A,
 ) -> PostgresResult<Page<Source>> {
-    let span = debug_span!(
+    let span = info_span!(
         "sources",
         params.limit = req.limit,
         params.offset = req.offset,
@@ -1766,7 +1766,7 @@ async fn track_by_id<'a, A: Acquire<'a, Database = Postgres, Connection = &'a mu
     id: Uuid,
     conn: A,
 ) -> PostgresResult<Option<Track>> {
-    let span = debug_span!(
+    let span = info_span!(
         "track_by_id",
         track.id = %id,
     );
@@ -1799,7 +1799,7 @@ async fn track_by_platform_id<
     id: &str,
     conn: A,
 ) -> PostgresResult<Option<Track>> {
-    let span = debug_span!(
+    let span = info_span!(
         "track_by_platform_id",
         track.platform = %platform,
         track.platform_id = id,
@@ -1830,7 +1830,7 @@ async fn tracks<'a, A: Acquire<'a, Database = Postgres, Connection = &'a mut PgC
     req: PageRequest,
     conn: A,
 ) -> PostgresResult<Page<Track>> {
-    let span = debug_span!(
+    let span = info_span!(
         "tracks",
         params.limit = req.limit,
         params.offset = req.offset,
@@ -1880,7 +1880,7 @@ async fn update_playlist<
     safely: bool,
     conn: A,
 ) -> PostgresResult<bool> {
-    let span = debug_span!(
+    let span = info_span!(
         "update_playlist",
         %playlist.id,
         playlist.name,
@@ -1936,7 +1936,7 @@ async fn update_source<
     safely: bool,
     conn: A,
 ) -> PostgresResult<bool> {
-    let span: tracing::Span = debug_span!(
+    let span: tracing::Span = info_span!(
         "update_source",
         %src.id,
     );
@@ -1987,7 +1987,7 @@ async fn update_track<
         .map(|artist| artist.to_lowercase())
         .collect::<Vec<_>>();
     let title = track.title.to_lowercase();
-    let span = debug_span!(
+    let span = info_span!(
         "update_track",
         track.album.name = album,
         track.artists = ?artists,
@@ -2028,7 +2028,7 @@ async fn update_user<'a, A: Acquire<'a, Database = Postgres, Connection = &'a mu
     key: &MagicCrypt256,
     conn: A,
 ) -> PostgresResult<bool> {
-    let span = debug_span!(
+    let span = info_span!(
         "update_user",
         %usr.id,
         %usr.role,
@@ -2072,7 +2072,7 @@ async fn user_by_id<'a, A: Acquire<'a, Database = Postgres, Connection = &'a mut
     key: &MagicCrypt256,
     conn: A,
 ) -> PostgresResult<Option<User>> {
-    let span = debug_span!(
+    let span = info_span!(
         "user_by_id",
         usr.id = %id,
     );
@@ -2105,7 +2105,7 @@ async fn user_by_spotify_id<
     key: &MagicCrypt256,
     conn: A,
 ) -> PostgresResult<Option<User>> {
-    let span = debug_span!(
+    let span = info_span!(
         "user_by_spotify_id",
         usr.creds.spotify.id = %id,
     );
@@ -2134,7 +2134,7 @@ async fn user_exists<'a, A: Acquire<'a, Database = Postgres, Connection = &'a mu
     id: Uuid,
     conn: A,
 ) -> PostgresResult<bool> {
-    let span = debug_span!(
+    let span = info_span!(
         "user_exists",
         usr.id = %id,
     );
@@ -2164,7 +2164,7 @@ async fn user_playlists<
     key: &MagicCrypt256,
     conn: A,
 ) -> PostgresResult<Page<Playlist>> {
-    let span = debug_span!(
+    let span = info_span!(
         "user_playlists",
         params.limit = req.limit,
         params.offset = req.offset,
@@ -2217,7 +2217,7 @@ async fn user_sources<
     key: &MagicCrypt256,
     conn: A,
 ) -> PostgresResult<Page<Source>> {
-    let span = debug_span!(
+    let span = info_span!(
         "user_sources",
         params.limit = req.limit,
         params.offset = req.offset,
@@ -2266,7 +2266,7 @@ async fn users<'a, A: Acquire<'a, Database = Postgres, Connection = &'a mut PgCo
     key: &MagicCrypt256,
     conn: A,
 ) -> PostgresResult<Page<User>> {
-    let span = debug_span!(
+    let span = info_span!(
         "users",
         params.limit = req.limit,
         params.offset = req.offset,

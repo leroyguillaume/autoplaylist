@@ -13,7 +13,7 @@ use rspotify::{
     DEFAULT_AUTH_BASE_URL,
 };
 use thiserror::Error;
-use tracing::{debug, debug_span, trace, Instrument};
+use tracing::{debug, info_span, trace, Instrument};
 
 use crate::model::{Album, Page, PageRequest, SpotifyCredentials, SpotifyToken};
 
@@ -222,7 +222,7 @@ impl SpotifyClient for RSpotifyClient {
         tracks: &[String],
         token: &mut SpotifyToken,
     ) -> SpotifyResult<()> {
-        let span = debug_span!("add_tracks_to_playlist", playlist.spotify_id = id,);
+        let span = info_span!("add_tracks_to_playlist", playlist.spotify_id = id,);
         async {
             let id = PlaylistId::from_id(id)?;
             let tracks = tracks
@@ -240,7 +240,7 @@ impl SpotifyClient for RSpotifyClient {
     }
 
     async fn authenticate(&self, code: &str, redirect_uri: &str) -> SpotifyResult<SpotifyToken> {
-        let span = debug_span!("authenticate", params.code = code,);
+        let span = info_span!("authenticate", params.code = code,);
         async {
             let client = self.auth_client(redirect_uri);
             debug!("getting token");
@@ -253,7 +253,7 @@ impl SpotifyClient for RSpotifyClient {
     }
 
     async fn authenticated_user(&self, token: &mut SpotifyToken) -> SpotifyResult<SpotifyUser> {
-        let span = debug_span!("authenticated_user",);
+        let span = info_span!("authenticated_user",);
         async {
             let client = self.api_client(token).await?;
             debug!("getting authenticated user");
@@ -277,7 +277,7 @@ impl SpotifyClient for RSpotifyClient {
         name: &str,
         creds: &mut SpotifyCredentials,
     ) -> SpotifyResult<String> {
-        let span = debug_span!(
+        let span = info_span!(
             "create_playlist",
             playlist.name = name,
             playlist.spotify_owner = creds.id
@@ -302,7 +302,7 @@ impl SpotifyClient for RSpotifyClient {
         req: PageRequest,
         token: &mut SpotifyToken,
     ) -> SpotifyResult<Page<SpotifyTrack>> {
-        let span = debug_span!(
+        let span = info_span!(
             "playlist_tracks",
             params.limit = req.limit,
             params.offset = req.offset
@@ -328,7 +328,7 @@ impl SpotifyClient for RSpotifyClient {
         tracks: &[String],
         token: &mut SpotifyToken,
     ) -> SpotifyResult<()> {
-        let span = debug_span!("remove_tracks_from_playlist", playlist.spotify_id = id,);
+        let span = info_span!("remove_tracks_from_playlist", playlist.spotify_id = id,);
         async {
             let id = PlaylistId::from_id(id)?;
             let tracks = tracks
@@ -352,7 +352,7 @@ impl SpotifyClient for RSpotifyClient {
         req: PageRequest,
         token: &mut SpotifyToken,
     ) -> SpotifyResult<Page<SpotifyTrack>> {
-        let span = debug_span!(
+        let span = info_span!(
             "saved_tracks",
             params.limit = req.limit,
             params.offset = req.offset
@@ -377,7 +377,7 @@ impl SpotifyClient for RSpotifyClient {
         name: &str,
         token: &mut SpotifyToken,
     ) -> SpotifyResult<()> {
-        let span = debug_span!(
+        let span = info_span!(
             "update_playlist_name",
             playlist.spotify_id = id,
             playlist.name = name,
