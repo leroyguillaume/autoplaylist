@@ -5,10 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_trim::{btreeset_non_empty_string_trim, string_trim};
 use uuid::Uuid;
 
-use crate::model::{
-    Album, Credentials, PageRequest, Playlist, PlaylistSynchronization, Predicate, Role, Source,
-    SourceKind, SourceSynchronization, SpotifyCredentials, Target, User,
-};
+use crate::model::{Album, PageRequest, Predicate, Role, SourceKind, Target};
 
 // Consts - Paths
 
@@ -80,14 +77,6 @@ pub struct CredentialsResponse {
     pub spotify: Option<SpotifyCredentialsResponse>,
 }
 
-impl From<Credentials> for CredentialsResponse {
-    fn from(creds: Credentials) -> Self {
-        Self {
-            spotify: creds.spotify.map(SpotifyCredentialsResponse::from),
-        }
-    }
-}
-
 // PageRequest
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -116,22 +105,8 @@ pub struct PlaylistResponse {
     pub name: String,
     pub predicate: Predicate,
     pub src: SourceResponse,
-    pub sync: PlaylistSynchronization,
+    pub sync: SynchronizationResponse,
     pub tgt: Target,
-}
-
-impl From<Playlist> for PlaylistResponse {
-    fn from(playlist: Playlist) -> Self {
-        Self {
-            creation: playlist.creation,
-            id: playlist.id,
-            name: playlist.name,
-            predicate: playlist.predicate,
-            src: playlist.src.into(),
-            sync: playlist.sync,
-            tgt: playlist.tgt,
-        }
-    }
 }
 
 // JwtResponse
@@ -165,15 +140,6 @@ pub struct SpotifyCredentialsResponse {
     pub id: String,
 }
 
-impl From<SpotifyCredentials> for SpotifyCredentialsResponse {
-    fn from(creds: SpotifyCredentials) -> Self {
-        Self {
-            email: creds.email,
-            id: creds.id,
-        }
-    }
-}
-
 // SourceResponse
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -183,19 +149,29 @@ pub struct SourceResponse {
     pub id: Uuid,
     pub kind: SourceKind,
     pub owner: UserResponse,
-    pub sync: SourceSynchronization,
+    pub sync: SynchronizationResponse,
 }
 
-impl From<Source> for SourceResponse {
-    fn from(src: Source) -> Self {
-        Self {
-            creation: src.creation,
-            id: src.id,
-            kind: src.kind,
-            owner: src.owner.into(),
-            sync: src.sync,
-        }
-    }
+// SynchronizationResponse
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SynchronizationResponse {
+    Aborted {
+        end: DateTime<Utc>,
+        start: DateTime<Utc>,
+    },
+    Failed {
+        details: Option<String>,
+        end: DateTime<Utc>,
+        start: DateTime<Utc>,
+    },
+    Pending,
+    Running(DateTime<Utc>),
+    Succeeded {
+        end: DateTime<Utc>,
+        start: DateTime<Utc>,
+    },
 }
 
 // UpdateTrackRequest
@@ -259,17 +235,6 @@ pub struct UserResponse {
     pub role: Role,
 }
 
-impl From<User> for UserResponse {
-    fn from(usr: User) -> Self {
-        Self {
-            creation: usr.creation,
-            creds: usr.creds.into(),
-            id: usr.id,
-            role: usr.role,
-        }
-    }
-}
-
 // ValidationErrorKind
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -305,7 +270,7 @@ impl ValidationErrorResponse {
 
 #[cfg(test)]
 mod test {
-    use crate::model::{Role, SpotifySourceKind, SpotifyToken, Target, User};
+    use crate::model::SpotifySourceKind;
 
     use super::*;
 
@@ -353,35 +318,6 @@ mod test {
         }
     }
 
-    mod credentials_response {
-        use super::*;
-
-        mod from_credentials {
-            use super::*;
-
-            #[test]
-            fn response() {
-                let spotify_creds = SpotifyCredentials {
-                    email: "email".into(),
-                    id: "id".into(),
-                    token: SpotifyToken {
-                        access: "access".into(),
-                        expiration: Utc::now(),
-                        refresh: "refresh".into(),
-                    },
-                };
-                let creds = Credentials {
-                    spotify: Some(spotify_creds.clone()),
-                };
-                let expected = CredentialsResponse {
-                    spotify: Some(spotify_creds.into()),
-                };
-                let resp = CredentialsResponse::from(creds);
-                assert_eq!(resp, expected);
-            }
-        }
-    }
-
     mod page_request_query_params {
         use super::*;
 
@@ -399,109 +335,6 @@ mod test {
                 };
                 let params = PageRequestQueryParams::from(req);
                 assert_eq!(params, expected);
-            }
-        }
-    }
-
-    mod playlist_response {
-        use super::*;
-
-        mod from_playlist {
-            use super::*;
-
-            #[test]
-            fn response() {
-                let playlist = Playlist {
-                    creation: Utc::now(),
-                    id: Uuid::new_v4(),
-                    name: "name".into(),
-                    predicate: Predicate::YearIs(1993),
-                    src: Source {
-                        creation: Utc::now(),
-                        id: Uuid::new_v4(),
-                        kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
-                        owner: User {
-                            creation: Utc::now(),
-                            creds: Default::default(),
-                            id: Uuid::new_v4(),
-                            role: Role::User,
-                        },
-                        sync: SourceSynchronization::Pending,
-                    },
-                    sync: PlaylistSynchronization::Pending,
-                    tgt: Target::Spotify("id".into()),
-                };
-                let expected = PlaylistResponse {
-                    creation: playlist.creation,
-                    id: playlist.id,
-                    name: playlist.name.clone(),
-                    predicate: playlist.predicate.clone(),
-                    src: playlist.src.clone().into(),
-                    sync: playlist.sync.clone(),
-                    tgt: playlist.tgt.clone(),
-                };
-                let resp = PlaylistResponse::from(playlist);
-                assert_eq!(resp, expected);
-            }
-        }
-    }
-
-    mod source_response {
-        use super::*;
-
-        mod from_source {
-            use super::*;
-
-            #[test]
-            fn response() {
-                let src = Source {
-                    creation: Utc::now(),
-                    id: Uuid::new_v4(),
-                    kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
-                    owner: User {
-                        creation: Utc::now(),
-                        creds: Default::default(),
-                        id: Uuid::new_v4(),
-                        role: Role::User,
-                    },
-                    sync: SourceSynchronization::Pending,
-                };
-                let expected = SourceResponse {
-                    creation: src.creation,
-                    id: src.id,
-                    kind: src.kind.clone(),
-                    owner: src.owner.clone().into(),
-                    sync: src.sync.clone(),
-                };
-                let resp = SourceResponse::from(src);
-                assert_eq!(resp, expected);
-            }
-        }
-    }
-
-    mod spotify_credentials_response {
-        use super::*;
-
-        mod from_spotify_credentials {
-            use super::*;
-
-            #[test]
-            fn response() {
-                let creds = SpotifyCredentials {
-                    email: "email".into(),
-                    id: "id".into(),
-                    token: SpotifyToken {
-                        access: "access".into(),
-                        expiration: Utc::now(),
-                        refresh: "refresh".into(),
-                    },
-                };
-                let expected = SpotifyCredentialsResponse {
-                    email: creds.email.clone(),
-                    id: creds.id.clone(),
-                };
-                let resp = SpotifyCredentialsResponse::from(creds);
-                assert_eq!(resp, expected);
             }
         }
     }
@@ -558,32 +391,6 @@ mod test {
                         ),
                     ]),
                 };
-                assert_eq!(resp, expected);
-            }
-        }
-    }
-
-    mod user_response {
-        use super::*;
-
-        mod from_user {
-            use super::*;
-
-            #[test]
-            fn response() {
-                let usr = User {
-                    creation: Utc::now(),
-                    creds: Default::default(),
-                    id: Uuid::new_v4(),
-                    role: Role::User,
-                };
-                let expected = UserResponse {
-                    creation: usr.creation,
-                    creds: usr.creds.clone().into(),
-                    id: usr.id,
-                    role: usr.role,
-                };
-                let resp = UserResponse::from(usr);
                 assert_eq!(resp, expected);
             }
         }

@@ -1176,11 +1176,13 @@ mod test {
     use std::collections::HashMap;
 
     use autoplaylist_common::{
-        api::{JwtResponse, PlaylistResponse, SourceResponse, UserResponse},
+        api::{
+            JwtResponse, PlaylistResponse, SourceResponse, SynchronizationResponse, UserResponse,
+        },
         db::{MockDatabaseConnection, MockDatabasePool, MockDatabaseTransaction},
         model::{
-            Album, PageRequest, Platform, Predicate, SourceKind, SpotifySourceKind,
-            Synchronization, Target, Track, User,
+            Album, PageRequest, Platform, Predicate, SourceKind, SpotifySourceKind, Target, Track,
+            User,
         },
     };
     use chrono::Utc;
@@ -1903,9 +1905,9 @@ mod test {
                             role: Role::User,
                         },
                         kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
-                        sync: Synchronization::Pending,
+                        sync: SynchronizationResponse::Pending,
                     },
-                    sync: Synchronization::Pending,
+                    sync: SynchronizationResponse::Pending,
                     tgt: Target::Spotify("id".into()),
                 };
                 let data = Data {
@@ -2156,9 +2158,9 @@ mod test {
                             role: Role::User,
                         },
                         kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
-                        sync: Synchronization::Pending,
+                        sync: SynchronizationResponse::Pending,
                     },
-                    sync: Synchronization::Pending,
+                    sync: SynchronizationResponse::Pending,
                     tgt: Target::Spotify("id".into()),
                 };
                 let api_base_url = "http://localhost:8000";
@@ -2590,7 +2592,7 @@ mod test {
                         role: Role::User,
                     },
                     kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
-                    sync: Synchronization::Pending,
+                    sync: SynchronizationResponse::Pending,
                 };
                 let api_base_url = "http://localhost:8000";
                 let api_token = "jwt";

@@ -771,10 +771,9 @@ mod test {
     use std::io::stderr;
 
     use autoplaylist_common::{
-        api::SourceResponse,
+        api::{SourceResponse, SynchronizationResponse},
         model::{
-            Album, PageRequest, Platform, Predicate, Role, SourceKind, SpotifySourceKind,
-            Synchronization, Target,
+            Album, PageRequest, Platform, Predicate, Role, SourceKind, SpotifySourceKind, Target,
         },
         test_env_var, TracingConfig,
     };
@@ -927,9 +926,9 @@ mod test {
                             id: Uuid::from_u128(0x730ea2158aa44463a1379c4c71d50ed6),
                             role: Role::User,
                         },
-                        sync: Synchronization::Pending,
+                        sync: SynchronizationResponse::Pending,
                     },
-                    sync: Synchronization::Pending,
+                    sync: SynchronizationResponse::Pending,
                     tgt: Target::Spotify("id".into()),
                 };
                 let client = init();
@@ -1016,9 +1015,9 @@ mod test {
                             id: Uuid::from_u128(0x730ea2158aa44463a1379c4c71d50ed6),
                             role: Role::User,
                         },
-                        sync: Synchronization::Pending,
+                        sync: SynchronizationResponse::Pending,
                     },
-                    sync: Synchronization::Pending,
+                    sync: SynchronizationResponse::Pending,
                     tgt: Target::Spotify("id".into()),
                 };
                 let client = init();
@@ -1175,7 +1174,7 @@ mod test {
                         id: Uuid::from_u128(0x730ea2158aa44463a1379c4c71d50ed6),
                         role: Role::User,
                     },
-                    sync: Synchronization::Pending,
+                    sync: SynchronizationResponse::Pending,
                 };
                 let client = init();
                 let resp = client
