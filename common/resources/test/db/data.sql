@@ -13,6 +13,7 @@ DECLARE
     track_1 UUID := 'd16eb9f1-cf4d-4a41-9515-e9a8125d7843';
     track_2 UUID := '9095b250-d4ab-427f-b38f-32aaf45afec5';
     track_3 UUID := 'f747ca3a-0cc7-4d9f-b38a-dc506f99f5df';
+    track_4 UUID := '38ac42e0-1579-4f3f-9816-081f4df0210a';
     usr_1 UUID := 'ee21186a-990c-42e9-bcd2-69f9090a7736';
     usr_2 UUID := 'ec1ca9f9-3c47-44a2-95c7-a13ff6de852d';
     usr_3 UUID := '8fc899c5-f254-4966-9b5a-e8f1c4f97f7c';
@@ -45,7 +46,7 @@ BEGIN
         ),
         (
             track_3,
-            '2023-01-02T00:01:00Z',
+            '2023-01-02T00:02:00Z',
             'the letter',
             ARRAY['the box tops'],
             'the letter/neon rainbow',
@@ -53,6 +54,17 @@ BEGIN
             1967,
             'spotify',
             'track_3'
+        ),
+        (
+            track_4,
+            '2023-01-02T00:03:00Z',
+            'panopticom',
+            ARRAY['peter gabriel'],
+            'i/o',
+            FALSE,
+            2023,
+            'spotify',
+            'track_4'
         );
 
     INSERT INTO "user" (id, creation, role, spotify_creds, creds)
@@ -125,7 +137,10 @@ BEGIN
         );
 
     INSERT INTO source_track
-    VALUES (src_1, track_1);
+    VALUES
+        (src_1, track_1),
+        (src_1, track_2),
+        (src_1, track_3);
 
     INSERT INTO playlist (id, creation, name, predicate, src, tgt, sync)
     VALUES
@@ -185,6 +200,9 @@ BEGIN
         );
 
     INSERT INTO playlist_track
-    VALUES (playlist_1, track_1);
+    VALUES
+        (playlist_1, track_1),
+        (playlist_1, track_2),
+        (playlist_1, track_3);
 END;
 $$;
