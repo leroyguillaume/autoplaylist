@@ -456,12 +456,26 @@ struct TrackGetCommandArgs {
 #[derive(Clone, Debug, Eq, PartialEq, Subcommand)]
 #[command(about = "Track commands")]
 enum TrackCommand {
+    #[command(about = "Delete a track", alias = "del")]
+    Delete(TrackDeleteCommandArgs),
     #[command(about = "Get a track")]
     Get(TrackGetCommandArgs),
     #[command(about = "List tracks", alias = "ls")]
     List(TrackListCommandArgs),
     #[command(about = "Update a track")]
     Update(TrackUpdateCommandArgs),
+}
+
+// TrackDeleteCommandArgs
+
+#[derive(clap::Args, Clone, Debug, Eq, PartialEq)]
+struct TrackDeleteCommandArgs {
+    #[command(flatten)]
+    api_base_url: ApiBaseUrlArg,
+    #[command(flatten)]
+    api_token: TokenArg,
+    #[arg(help = "Track ID")]
+    id: Uuid,
 }
 
 // TrackListCommandArgs
@@ -509,7 +523,7 @@ struct UserGetCommandArgs {
 #[derive(Clone, Debug, Eq, PartialEq, Subcommand)]
 #[command(about = "Playlist commands")]
 enum UserCommand {
-    #[command(about = "Delete user", alias = "del")]
+    #[command(about = "Delete an user", alias = "del")]
     Delete(UserDeleteCommandArgs),
     #[command(about = "Get an user")]
     Get(UserGetCommandArgs),
@@ -977,6 +991,20 @@ impl<
                 .instrument(span)
                 .await
             }
+            Command::Track(TrackCommand::Delete(args)) => {
+                let span = info_span!(
+                    "delete_track",
+                    api_base_url = %args.api_base_url.value,
+                    track.id = %args.id
+                );
+                async {
+                    let api = self.svc.api(args.api_base_url.value);
+                    api.delete_track(args.id, &args.api_token.value).await?;
+                    Ok(())
+                }
+                .instrument(span)
+                .await
+            }
             Command::Track(TrackCommand::Get(args)) => {
                 let span = info_span!(
                     "track_by_id",
@@ -1349,6 +1377,7 @@ mod test {
                 db_usr_by_id: Mock<User, User>,
                 delete_auth_usr: Mock<()>,
                 delete_playlist: Mock<()>,
+                delete_track: Mock<()>,
                 delete_usr: Mock<()>,
                 open_spotify_authorize_url: Mock<()>,
                 next_http_req: Mock<()>,
@@ -1626,6 +1655,10 @@ mod test {
                                 let mock = mocks.search_tracks.clone();
                                 move |_, _, _| Ok(mock.call())
                             });
+                        api.expect_delete_track()
+                            .with(eq(data.id), eq(data.api_token))
+                            .times(mocks.delete_track.times())
+                            .returning(|_, _| Ok(()));
                         api
                     }
                 });
@@ -2217,6 +2250,67 @@ mod test {
                 };
                 let mocks = Mocks {
                     delete_playlist: Mock::once(|| ()),
+                    ..Default::default()
+                };
+                let out = run(data, mocks).await;
+                assert!(out.is_empty());
+            }
+
+            #[tokio::test]
+            async fn delete_track() {
+                let api_base_url = "http://localhost:8000";
+                let api_token = "jwt";
+                let id = Uuid::new_v4();
+                let data = Data {
+                    api_base_url,
+                    api_token,
+                    cmd: Command::Track(TrackCommand::Delete(TrackDeleteCommandArgs {
+                        api_base_url: ApiBaseUrlArg {
+                            value: api_base_url.into(),
+                        },
+                        api_token: TokenArg {
+                            value: api_token.into(),
+                        },
+                        id,
+                    })),
+                    create_playlist_req: CreatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearIs(1993),
+                        src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
+                    },
+                    db: DatabaseArgs {
+                        host: "host".into(),
+                        name: "name".into(),
+                        password: "password".into(),
+                        port: 5432,
+                        secret: "secret".into(),
+                        user: "user".into(),
+                    },
+                    id,
+                    port: 8080,
+                    q: "name",
+                    req: PageRequestArgs::<25> {
+                        limit: 25,
+                        offset: 0,
+                    },
+                    role: Role::Admin,
+                    update_playlist_req: UpdatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearIs(1993),
+                    },
+                    update_track_req: UpdateTrackRequest {
+                        album: Album {
+                            compil: false,
+                            name: "album".into(),
+                        },
+                        artists: Default::default(),
+                        title: "title".into(),
+                        year: 2020,
+                    },
+                    update_usr_req: UpdateUserRequest { role: Role::Admin },
+                };
+                let mocks = Mocks {
+                    delete_track: Mock::once(|| ()),
                     ..Default::default()
                 };
                 let out = run(data, mocks).await;
