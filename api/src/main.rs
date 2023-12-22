@@ -1213,6 +1213,42 @@ fn create_app<
                 },
             ),
         )
+        // delete_track
+        .route(
+            &format!("{PATH_TRACK}/:id"),
+            routing::delete(
+                |Path(id): Path<Uuid>,
+                 headers: HeaderMap,
+                 State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>| async move {
+                     handling_error(async {
+                        let mut db_conn = state.db.acquire().await?;
+                        let auth_usr = state
+                            .svc
+                            .auth()
+                            .authenticate(&headers, db_conn.as_client_mut())
+                            .await?;
+                        let span = info_span!(
+                            "delete_track",
+                            auth.usr.id = %auth_usr.id,
+                            track.id = %id,
+                        );
+                        async {
+                            ensure_user_is_admin!(auth_usr);
+                            let deleted = db_conn.delete_track(id).await?;
+                            if deleted {
+                                info!(%id, "track deleted");
+                                Ok(StatusCode::NO_CONTENT)
+                            } else {
+                                Ok(StatusCode::NOT_FOUND)
+                            }
+                        }
+                        .instrument(span)
+                        .await
+                    })
+                    .await
+                },
+            ),
+        )
         // search_tracks_by_title_artists_album
         .route(
             &format!("{PATH_TRACK}{PATH_SEARCH}"),
@@ -2761,6 +2797,124 @@ mod test {
                 del: Mock::once(|| true),
                 del_src: Mock::once(|| ()),
                 playlist_by_id: Mock::once_with_args(Some),
+            };
+            let resp = run(mocks).await;
+            resp.assert_status(StatusCode::NO_CONTENT);
+            assert!(resp.as_bytes().is_empty());
+        }
+    }
+
+    mod delete_track {
+        use super::*;
+
+        // Mocks
+
+        #[derive(Clone, Default)]
+        struct Mocks {
+            auth: Mock<ApiResult<User>, User>,
+            del: Mock<bool>,
+        }
+
+        // Tests
+
+        async fn run(mocks: Mocks) -> TestResponse {
+            let id = Uuid::new_v4();
+            let auth_usr = User {
+                creation: Utc::now(),
+                creds: Default::default(),
+                id: Uuid::new_v4(),
+                role: Role::Admin,
+            };
+            let mut auth = MockAuthenticator::new();
+            auth.expect_authenticate()
+                .times(mocks.auth.times())
+                .returning({
+                    let usr = auth_usr.clone();
+                    let mock = mocks.auth.clone();
+                    move |_, _| {
+                        Box::pin({
+                            let usr = usr.clone();
+                            let mock = mock.clone();
+                            async move { mock.call_with_args(usr.clone()) }
+                        })
+                    }
+                });
+            let db = MockDatabasePool {
+                acquire: Mock::once({
+                    let mocks = mocks.clone();
+                    move || {
+                        let mut conn = MockDatabaseConnection::new();
+                        conn.0
+                            .expect_delete_track()
+                            .with(eq(id))
+                            .times(mocks.del.times())
+                            .returning({
+                                let mock = mocks.del.clone();
+                                move |_| Ok(mock.call())
+                            });
+                        conn
+                    }
+                }),
+                ..Default::default()
+            };
+            let state = AppState {
+                db,
+                svc: MockServices {
+                    auth,
+                    ..Default::default()
+                },
+                _dbconn: PhantomData,
+                _dbtx: PhantomData,
+            };
+            let server = init(state);
+            server.delete(&format!("{PATH_TRACK}/{}", id)).await
+        }
+
+        // Tests
+
+        #[tokio::test]
+        async fn unauthorized() {
+            let mocks = Mocks {
+                auth: Mock::once_with_args(|_| Err(ApiError::Unauthorized)),
+                ..Default::default()
+            };
+            let resp = run(mocks).await;
+            resp.assert_status_unauthorized();
+            assert!(resp.as_bytes().is_empty());
+        }
+
+        #[tokio::test]
+        async fn forbidden() {
+            let mocks = Mocks {
+                auth: Mock::once_with_args(|usr| {
+                    Ok(User {
+                        role: Role::User,
+                        ..usr
+                    })
+                }),
+                ..Default::default()
+            };
+            let resp = run(mocks).await;
+            resp.assert_status(StatusCode::FORBIDDEN);
+            assert!(resp.as_bytes().is_empty());
+        }
+
+        #[tokio::test]
+        async fn not_found() {
+            let mocks = Mocks {
+                auth: Mock::once_with_args(Ok),
+                del: Mock::once(|| false),
+            };
+            let resp = run(mocks).await;
+            resp.assert_status(StatusCode::NOT_FOUND);
+            assert!(resp.as_bytes().is_empty());
+        }
+
+        #[tokio::test]
+        async fn no_content() {
+            let mocks = Mocks {
+                auth: Mock::once_with_args(Ok),
+                del: Mock::once(|| true),
             };
             let resp = run(mocks).await;
             resp.assert_status(StatusCode::NO_CONTENT);

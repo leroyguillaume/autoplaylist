@@ -85,6 +85,10 @@ macro_rules! mock_client_impl {
                 self.$attr.delete_source(id).await
             }
 
+            async fn delete_track(&mut self, id: Uuid) -> DatabaseResult<bool> {
+                self.$attr.delete_track(id).await
+            }
+
             async fn delete_tracks_from_playlist(&mut self, id: Uuid) -> DatabaseResult<u64> {
                 self.$attr.delete_tracks_from_playlist(id).await
             }
@@ -417,6 +421,8 @@ pub trait DatabaseClient: Send + Sync {
     async fn delete_playlist(&mut self, id: Uuid) -> DatabaseResult<bool>;
 
     async fn delete_source(&mut self, id: Uuid) -> DatabaseResult<bool>;
+
+    async fn delete_track(&mut self, id: Uuid) -> DatabaseResult<bool>;
 
     async fn delete_tracks_from_playlist(&mut self, id: Uuid) -> DatabaseResult<u64>;
 
