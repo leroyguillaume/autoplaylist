@@ -103,12 +103,35 @@ pub trait ApiClient: Send + Sync {
         token: &str,
     ) -> ApiResult<Page<PlaylistResponse>>;
 
+    async fn search_playlist_tracks_by_title_artists_album(
+        &self,
+        id: Uuid,
+        params: &SearchQueryParam,
+        req: PageRequestQueryParams<25>,
+        token: &str,
+    ) -> ApiResult<Page<Track>>;
+
     async fn search_playlists_by_name(
         &self,
         params: &SearchQueryParam,
         req: PageRequestQueryParams<25>,
         token: &str,
     ) -> ApiResult<Page<PlaylistResponse>>;
+
+    async fn search_source_tracks_by_title_artists_album(
+        &self,
+        id: Uuid,
+        params: &SearchQueryParam,
+        req: PageRequestQueryParams<25>,
+        token: &str,
+    ) -> ApiResult<Page<Track>>;
+
+    async fn search_tracks_by_title_artists_album(
+        &self,
+        params: &SearchQueryParam,
+        req: PageRequestQueryParams<25>,
+        token: &str,
+    ) -> ApiResult<Page<Track>>;
 
     async fn search_users_by_email(
         &self,
@@ -455,6 +478,36 @@ impl ApiClient for DefaultApiClient {
         .await
     }
 
+    async fn search_playlist_tracks_by_title_artists_album(
+        &self,
+        id: Uuid,
+        params: &SearchQueryParam,
+        req: PageRequestQueryParams<25>,
+        token: &str,
+    ) -> ApiResult<Page<Track>> {
+        let span = debug_span!(
+            "search_playlist_tracks_by_title_artists_album",
+            params.limit = req.limit,
+            params.offset = req.offset,
+            params.q = params.q,
+            playlist.id = %id,
+        );
+        async {
+            let req = Client::new()
+                .get(format!(
+                    "{}{PATH_PLAYLIST}/{id}{PATH_TRACK}{PATH_SEARCH}",
+                    self.base_url
+                ))
+                .bearer_auth(token)
+                .query(&params)
+                .query(&req)
+                .build()?;
+            Self::send_and_parse_json_response(req).await
+        }
+        .instrument(span)
+        .await
+    }
+
     async fn search_playlists_by_name(
         &self,
         params: &SearchQueryParam,
@@ -470,6 +523,61 @@ impl ApiClient for DefaultApiClient {
         async {
             let req = Client::new()
                 .get(format!("{}{PATH_PLAYLIST}{PATH_SEARCH}", self.base_url))
+                .bearer_auth(token)
+                .query(&params)
+                .query(&req)
+                .build()?;
+            Self::send_and_parse_json_response(req).await
+        }
+        .instrument(span)
+        .await
+    }
+
+    async fn search_source_tracks_by_title_artists_album(
+        &self,
+        id: Uuid,
+        params: &SearchQueryParam,
+        req: PageRequestQueryParams<25>,
+        token: &str,
+    ) -> ApiResult<Page<Track>> {
+        let span = debug_span!(
+            "search_source_tracks_by_title_artists_album",
+            params.limit = req.limit,
+            params.offset = req.offset,
+            params.q = params.q,
+            src.id = %id,
+        );
+        async {
+            let req = Client::new()
+                .get(format!(
+                    "{}{PATH_SRC}/{id}{PATH_TRACK}{PATH_SEARCH}",
+                    self.base_url
+                ))
+                .bearer_auth(token)
+                .query(&params)
+                .query(&req)
+                .build()?;
+            Self::send_and_parse_json_response(req).await
+        }
+        .instrument(span)
+        .await
+    }
+
+    async fn search_tracks_by_title_artists_album(
+        &self,
+        params: &SearchQueryParam,
+        req: PageRequestQueryParams<25>,
+        token: &str,
+    ) -> ApiResult<Page<Track>> {
+        let span = debug_span!(
+            "search_tracks_by_title_artists_album",
+            params.limit = req.limit,
+            params.offset = req.offset,
+            params.q = params.q,
+        );
+        async {
+            let req = Client::new()
+                .get(format!("{}{PATH_TRACK}{PATH_SEARCH}", self.base_url))
                 .bearer_auth(token)
                 .query(&params)
                 .query(&req)
@@ -1133,6 +1241,32 @@ mod test {
             }
         }
 
+        mod search_playlist_tracks_by_title_artists_album {
+            use super::*;
+
+            // Tests
+
+            #[tokio::test]
+            async fn page() {
+                let id = Uuid::from_u128(0xf28c11c3bfeb4583ba1646797f662b9a);
+                let expected = Page {
+                    first: true,
+                    items: vec![],
+                    last: true,
+                    req: PageRequest::new(10, 0),
+                    total: 0,
+                };
+                let params = SearchQueryParam { q: "name".into() };
+                let req = PageRequestQueryParams::from(expected.req);
+                let client = init();
+                let resp = client
+                    .search_playlist_tracks_by_title_artists_album(id, &params, req, "jwt")
+                    .await
+                    .expect("failed to get tracks");
+                assert_eq!(resp, expected);
+            }
+        }
+
         mod search_playlists_by_name {
             use super::*;
 
@@ -1154,6 +1288,57 @@ mod test {
                     .search_playlists_by_name(&params, req, "jwt")
                     .await
                     .expect("failed to get playlists");
+                assert_eq!(resp, expected);
+            }
+        }
+
+        mod search_source_tracks_by_title_artists_album {
+            use super::*;
+
+            // Tests
+
+            #[tokio::test]
+            async fn page() {
+                let id = Uuid::from_u128(0xf28c11c3bfeb4583ba1646797f662b9a);
+                let expected = Page {
+                    first: true,
+                    items: vec![],
+                    last: true,
+                    req: PageRequest::new(10, 0),
+                    total: 0,
+                };
+                let params = SearchQueryParam { q: "name".into() };
+                let req = PageRequestQueryParams::from(expected.req);
+                let client = init();
+                let resp = client
+                    .search_source_tracks_by_title_artists_album(id, &params, req, "jwt")
+                    .await
+                    .expect("failed to get tracks");
+                assert_eq!(resp, expected);
+            }
+        }
+
+        mod search_tracks_by_title_artists_album {
+            use super::*;
+
+            // Tests
+
+            #[tokio::test]
+            async fn page() {
+                let expected = Page {
+                    first: true,
+                    items: vec![],
+                    last: true,
+                    req: PageRequest::new(10, 0),
+                    total: 0,
+                };
+                let params = SearchQueryParam { q: "name".into() };
+                let req = PageRequestQueryParams::from(expected.req);
+                let client = init();
+                let resp = client
+                    .search_tracks_by_title_artists_album(&params, req, "jwt")
+                    .await
+                    .expect("failed to get tracks");
                 assert_eq!(resp, expected);
             }
         }

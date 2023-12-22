@@ -296,10 +296,10 @@ struct PlaylistListCommandArgs {
     api_base_url: ApiBaseUrlArg,
     #[command(flatten)]
     api_token: TokenArg,
-    #[arg(short, long, help = "Search by name")]
-    name: Option<String>,
     #[command(flatten)]
     req: PageRequestArgs<25>,
+    #[arg(short, long, help = "Search by name")]
+    search: Option<String>,
 }
 
 // PlaylistSynchronizeCommandArgs
@@ -326,6 +326,8 @@ struct PlaylistTracksCommandArgs {
     id: Uuid,
     #[command(flatten)]
     req: PageRequestArgs<25>,
+    #[arg(short, long, help = "Search by title, artists or album")]
+    search: Option<String>,
 }
 
 // PlaylistUpdateCommandArgs
@@ -420,6 +422,8 @@ struct SourceTracksCommandArgs {
     id: Uuid,
     #[command(flatten)]
     req: PageRequestArgs<25>,
+    #[arg(short, long, help = "Search by title, artists or album")]
+    search: Option<String>,
 }
 
 // TokenArg
@@ -470,6 +474,8 @@ struct TrackListCommandArgs {
     api_token: TokenArg,
     #[command(flatten)]
     req: PageRequestArgs<25>,
+    #[arg(short, long, help = "Search by title, artists or album")]
+    search: Option<String>,
 }
 
 // TrackUpdateCommandArgs
@@ -537,10 +543,10 @@ struct UserListCommandArgs {
     api_base_url: ApiBaseUrlArg,
     #[command(flatten)]
     api_token: TokenArg,
-    #[arg(short, long, help = "Search by email")]
-    email: Option<String>,
     #[command(flatten)]
     req: PageRequestArgs<25>,
+    #[arg(short, long, help = "Search by email")]
+    search: Option<String>,
 }
 
 // UserPlaylistsCommandArgs
@@ -795,13 +801,13 @@ impl<
                     params.all = args.all,
                     params.limit = args.req.limit,
                     params.offset = args.req.offset,
-                    params.name = args.name,
+                    params.search = args.search,
                 );
                 async {
                     let api = self.svc.api(args.api_base_url.value);
                     let req = PageRequestQueryParams::from(args.req);
-                    let resp = if let Some(name) = args.name {
-                        let params = SearchQueryParam { q: name };
+                    let resp = if let Some(q) = args.search {
+                        let params = SearchQueryParam { q };
                         if args.all {
                             api.search_playlists_by_name(&params, req, &args.api_token.value)
                                 .await?
@@ -845,14 +851,25 @@ impl<
                     api_base_url = %args.api_base_url.value,
                     params.limit = args.req.limit,
                     params.offset = args.req.offset,
+                    params.search = args.search,
                     playlist.id = %args.id,
                 );
                 async {
                     let api = self.svc.api(args.api_base_url.value);
                     let req = PageRequestQueryParams::from(args.req);
-                    let resp = api
-                        .playlist_tracks(args.id, req, &args.api_token.value)
-                        .await?;
+                    let resp = if let Some(q) = args.search {
+                        let params = SearchQueryParam { q };
+                        api.search_playlist_tracks_by_title_artists_album(
+                            args.id,
+                            &params,
+                            req,
+                            &args.api_token.value,
+                        )
+                        .await?
+                    } else {
+                        api.playlist_tracks(args.id, req, &args.api_token.value)
+                            .await?
+                    };
                     Self::write_to_output(out, &resp)
                 }
                 .instrument(span)
@@ -936,14 +953,25 @@ impl<
                     api_base_url = %args.api_base_url.value,
                     params.limit = args.req.limit,
                     params.offset = args.req.offset,
+                    params.search = args.search,
                     src.id = %args.id,
                 );
                 async {
                     let api = self.svc.api(args.api_base_url.value);
                     let req = PageRequestQueryParams::from(args.req);
-                    let resp = api
-                        .source_tracks(args.id, req, &args.api_token.value)
-                        .await?;
+                    let resp = if let Some(q) = args.search {
+                        let params = SearchQueryParam { q };
+                        api.search_source_tracks_by_title_artists_album(
+                            args.id,
+                            &params,
+                            req,
+                            &args.api_token.value,
+                        )
+                        .await?
+                    } else {
+                        api.source_tracks(args.id, req, &args.api_token.value)
+                            .await?
+                    };
                     Self::write_to_output(out, &resp)
                 }
                 .instrument(span)
@@ -969,11 +997,22 @@ impl<
                     api_base_url = %args.api_base_url.value,
                     params.limit = args.req.limit,
                     params.offset = args.req.offset,
+                    params.search = args.search,
                 );
                 async {
                     let api = self.svc.api(args.api_base_url.value);
                     let req = PageRequestQueryParams::from(args.req);
-                    let resp = api.tracks(req, &args.api_token.value).await?;
+                    let resp = if let Some(q) = args.search {
+                        let params = SearchQueryParam { q };
+                        api.search_tracks_by_title_artists_album(
+                            &params,
+                            req,
+                            &args.api_token.value,
+                        )
+                        .await?
+                    } else {
+                        api.tracks(req, &args.api_token.value).await?
+                    };
                     Self::write_to_output(out, &resp)
                 }
                 .instrument(span)
@@ -1031,13 +1070,13 @@ impl<
                     api_base_url = %args.api_base_url.value,
                     params.limit = args.req.limit,
                     params.offset = args.req.offset,
-                    params.email = args.email,
+                    params.search = args.search,
                 );
                 async {
                     let api = self.svc.api(args.api_base_url.value);
                     let req = PageRequestQueryParams::from(args.req);
-                    let resp = if let Some(email) = args.email {
-                        let params = SearchQueryParam { q: email };
+                    let resp = if let Some(q) = args.search {
+                        let params = SearchQueryParam { q };
                         api.search_users_by_email(&params, args.req.into(), &args.api_token.value)
                             .await?
                     } else {
@@ -1317,7 +1356,10 @@ mod test {
                 playlist_tracks: Mock<Page<Track>>,
                 playlists: Mock<Page<PlaylistResponse>>,
                 search_auth_usr_plalists: Mock<Page<PlaylistResponse>>,
+                search_playlist_tracks: Mock<Page<Track>>,
                 search_plalists: Mock<Page<PlaylistResponse>>,
+                search_src_tracks: Mock<Page<Track>>,
+                search_tracks: Mock<Page<Track>>,
                 search_usrs: Mock<Page<UserResponse>>,
                 spotify_authorize_url: Mock<()>,
                 src_by_id: Mock<SourceResponse>,
@@ -1446,7 +1488,7 @@ mod test {
                                 move |_, _| Ok(mock.call())
                             });
                         api.expect_search_users_by_email()
-                            .with(eq(params), eq(req), eq(data.api_token))
+                            .with(eq(params.clone()), eq(req), eq(data.api_token))
                             .times(mocks.search_usrs.times())
                             .returning({
                                 let mock = mocks.search_usrs.clone();
@@ -1561,6 +1603,27 @@ mod test {
                             .times(mocks.update_playlist.times())
                             .returning({
                                 let mock = mocks.update_playlist.clone();
+                                move |_, _, _| Ok(mock.call())
+                            });
+                        api.expect_search_playlist_tracks_by_title_artists_album()
+                            .with(eq(data.id), eq(params.clone()), eq(req), eq(data.api_token))
+                            .times(mocks.search_playlist_tracks.times())
+                            .returning({
+                                let mock = mocks.search_playlist_tracks.clone();
+                                move |_, _, _, _| Ok(mock.call())
+                            });
+                        api.expect_search_source_tracks_by_title_artists_album()
+                            .with(eq(data.id), eq(params.clone()), eq(req), eq(data.api_token))
+                            .times(mocks.search_src_tracks.times())
+                            .returning({
+                                let mock = mocks.search_src_tracks.clone();
+                                move |_, _, _, _| Ok(mock.call())
+                            });
+                        api.expect_search_tracks_by_title_artists_album()
+                            .with(eq(params.clone()), eq(req), eq(data.api_token))
+                            .times(mocks.search_tracks.times())
+                            .returning({
+                                let mock = mocks.search_tracks.clone();
                                 move |_, _, _| Ok(mock.call())
                             });
                         api
@@ -1824,7 +1887,7 @@ mod test {
                         api_token: TokenArg {
                             value: "jwt".into(),
                         },
-                        name: None,
+                        search: None,
                         req,
                     })),
                     create_playlist_req: CreatePlaylistRequest {
@@ -2335,6 +2398,7 @@ mod test {
                         },
                         id,
                         req,
+                        search: None,
                     })),
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
@@ -2408,7 +2472,7 @@ mod test {
                         api_token: TokenArg {
                             value: "jwt".into(),
                         },
-                        name: None,
+                        search: None,
                         req,
                     })),
                     create_playlist_req: CreatePlaylistRequest {
@@ -2484,7 +2548,7 @@ mod test {
                         api_token: TokenArg {
                             value: "jwt".into(),
                         },
-                        name: Some(q.into()),
+                        search: Some(q.into()),
                         req,
                     })),
                     create_playlist_req: CreatePlaylistRequest {
@@ -2534,6 +2598,83 @@ mod test {
             }
 
             #[tokio::test]
+            async fn search_playlist_tracks_by_title_artists_album() {
+                let resp = Page {
+                    first: true,
+                    items: vec![],
+                    last: true,
+                    req: PageRequest::new(25, 0),
+                    total: 0,
+                };
+                let api_base_url = "http://localhost:8000";
+                let port = 3000;
+                let req = PageRequestArgs::<25> {
+                    limit: 25,
+                    offset: 0,
+                };
+                let id = Uuid::new_v4();
+                let q = "name";
+                let data = Data {
+                    api_base_url,
+                    api_token: "jwt",
+                    cmd: Command::Playlist(PlaylistCommand::Tracks(PlaylistTracksCommandArgs {
+                        api_base_url: ApiBaseUrlArg {
+                            value: api_base_url.into(),
+                        },
+                        api_token: TokenArg {
+                            value: "jwt".into(),
+                        },
+                        id,
+                        req,
+                        search: Some(q.into()),
+                    })),
+                    create_playlist_req: CreatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearIs(1993),
+                        src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
+                    },
+                    db: DatabaseArgs {
+                        host: "host".into(),
+                        name: "name".into(),
+                        password: "password".into(),
+                        port: 5432,
+                        secret: "secret".into(),
+                        user: "user".into(),
+                    },
+                    id,
+                    q,
+                    port,
+                    req,
+                    role: Role::Admin,
+                    update_playlist_req: UpdatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearIs(1993),
+                    },
+                    update_track_req: UpdateTrackRequest {
+                        album: Album {
+                            compil: false,
+                            name: "album".into(),
+                        },
+                        artists: Default::default(),
+                        title: "title".into(),
+                        year: 2020,
+                    },
+                    update_usr_req: UpdateUserRequest { role: Role::Admin },
+                };
+                let mocks = Mocks {
+                    search_playlist_tracks: Mock::once({
+                        let resp = resp.clone();
+                        move || resp.clone()
+                    }),
+                    ..Default::default()
+                };
+                let expected = serde_json::to_string(&resp).expect("failed to serialize");
+                let expected = format!("{expected}\n");
+                let out = run(data, mocks).await;
+                assert_eq!(out, expected);
+            }
+
+            #[tokio::test]
             async fn search_playlists_by_name() {
                 let resp = Page {
                     first: true,
@@ -2560,7 +2701,7 @@ mod test {
                         api_token: TokenArg {
                             value: "jwt".into(),
                         },
-                        name: Some(q.into()),
+                        search: Some(q.into()),
                         req,
                     })),
                     create_playlist_req: CreatePlaylistRequest {
@@ -2610,6 +2751,158 @@ mod test {
             }
 
             #[tokio::test]
+            async fn search_source_tracks() {
+                let resp = Page {
+                    first: true,
+                    items: vec![],
+                    last: true,
+                    req: PageRequest::new(25, 0),
+                    total: 0,
+                };
+                let api_base_url = "http://localhost:8000";
+                let port = 3000;
+                let req = PageRequestArgs::<25> {
+                    limit: 25,
+                    offset: 0,
+                };
+                let q = "name";
+                let id = Uuid::new_v4();
+                let data = Data {
+                    api_base_url,
+                    api_token: "jwt",
+                    cmd: Command::Source(SourceCommand::Tracks(SourceTracksCommandArgs {
+                        api_base_url: ApiBaseUrlArg {
+                            value: api_base_url.into(),
+                        },
+                        api_token: TokenArg {
+                            value: "jwt".into(),
+                        },
+                        id,
+                        req,
+                        search: Some(q.into()),
+                    })),
+                    create_playlist_req: CreatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearIs(1993),
+                        src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
+                    },
+                    db: DatabaseArgs {
+                        host: "host".into(),
+                        name: "name".into(),
+                        password: "password".into(),
+                        port: 5432,
+                        secret: "secret".into(),
+                        user: "user".into(),
+                    },
+                    id,
+                    q,
+                    port,
+                    req,
+                    role: Role::Admin,
+                    update_playlist_req: UpdatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearIs(1993),
+                    },
+                    update_track_req: UpdateTrackRequest {
+                        album: Album {
+                            compil: false,
+                            name: "album".into(),
+                        },
+                        artists: Default::default(),
+                        title: "title".into(),
+                        year: 2020,
+                    },
+                    update_usr_req: UpdateUserRequest { role: Role::Admin },
+                };
+                let mocks = Mocks {
+                    search_src_tracks: Mock::once({
+                        let resp = resp.clone();
+                        move || resp.clone()
+                    }),
+                    ..Default::default()
+                };
+                let expected = serde_json::to_string(&resp).expect("failed to serialize");
+                let expected = format!("{expected}\n");
+                let out = run(data, mocks).await;
+                assert_eq!(out, expected);
+            }
+
+            #[tokio::test]
+            async fn search_tracks() {
+                let resp = Page {
+                    first: true,
+                    items: vec![],
+                    last: true,
+                    req: PageRequest::new(25, 0),
+                    total: 0,
+                };
+                let api_base_url = "http://localhost:8000";
+                let port = 3000;
+                let q = "name";
+                let req = PageRequestArgs::<25> {
+                    limit: 25,
+                    offset: 0,
+                };
+                let data = Data {
+                    api_base_url,
+                    api_token: "jwt",
+                    cmd: Command::Track(TrackCommand::List(TrackListCommandArgs {
+                        api_base_url: ApiBaseUrlArg {
+                            value: api_base_url.into(),
+                        },
+                        api_token: TokenArg {
+                            value: "jwt".into(),
+                        },
+                        req,
+                        search: Some(q.into()),
+                    })),
+                    create_playlist_req: CreatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearIs(1993),
+                        src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
+                    },
+                    db: DatabaseArgs {
+                        host: "host".into(),
+                        name: "name".into(),
+                        password: "password".into(),
+                        port: 5432,
+                        secret: "secret".into(),
+                        user: "user".into(),
+                    },
+                    id: Uuid::new_v4(),
+                    q,
+                    port,
+                    req,
+                    role: Role::Admin,
+                    update_playlist_req: UpdatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearIs(1993),
+                    },
+                    update_track_req: UpdateTrackRequest {
+                        album: Album {
+                            compil: false,
+                            name: "album".into(),
+                        },
+                        artists: Default::default(),
+                        title: "title".into(),
+                        year: 2020,
+                    },
+                    update_usr_req: UpdateUserRequest { role: Role::Admin },
+                };
+                let mocks = Mocks {
+                    search_tracks: Mock::once({
+                        let resp = resp.clone();
+                        move || resp.clone()
+                    }),
+                    ..Default::default()
+                };
+                let expected = serde_json::to_string(&resp).expect("failed to serialize");
+                let expected = format!("{expected}\n");
+                let out = run(data, mocks).await;
+                assert_eq!(out, expected);
+            }
+
+            #[tokio::test]
             async fn search_users_by_email() {
                 let resp = Page {
                     first: true,
@@ -2635,7 +2928,7 @@ mod test {
                         api_token: TokenArg {
                             value: "jwt".into(),
                         },
-                        email: Some(q.into()),
+                        search: Some(q.into()),
                         req,
                     })),
                     create_playlist_req: CreatePlaylistRequest {
@@ -2790,6 +3083,7 @@ mod test {
                         },
                         id,
                         req,
+                        search: None,
                     })),
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
@@ -3142,6 +3436,7 @@ mod test {
                             value: "jwt".into(),
                         },
                         req,
+                        search: None,
                     })),
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
@@ -3672,7 +3967,7 @@ mod test {
                         api_token: TokenArg {
                             value: "jwt".into(),
                         },
-                        email: None,
+                        search: None,
                         req,
                     })),
                     create_playlist_req: CreatePlaylistRequest {

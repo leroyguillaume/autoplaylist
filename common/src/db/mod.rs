@@ -135,12 +135,44 @@ macro_rules! mock_client_impl {
                 self.$attr.playlists(req).await
             }
 
+            async fn search_playlist_tracks_by_title_artists_album(
+                &mut self,
+                id: Uuid,
+                q: &str,
+                req: PageRequest,
+            ) -> DatabaseResult<Page<Track>> {
+                self.$attr
+                    .search_playlist_tracks_by_title_artists_album(id, q, req)
+                    .await
+            }
+
             async fn search_playlists_by_name(
                 &mut self,
                 q: &str,
                 req: PageRequest,
             ) -> DatabaseResult<Page<Playlist>> {
                 self.$attr.search_playlists_by_name(q, req).await
+            }
+
+            async fn search_source_tracks_by_title_artists_album(
+                &mut self,
+                id: Uuid,
+                q: &str,
+                req: PageRequest,
+            ) -> DatabaseResult<Page<Track>> {
+                self.$attr
+                    .search_source_tracks_by_title_artists_album(id, q, req)
+                    .await
+            }
+
+            async fn search_tracks_by_title_artists_album(
+                &mut self,
+                q: &str,
+                req: PageRequest,
+            ) -> DatabaseResult<Page<Track>> {
+                self.$attr
+                    .search_tracks_by_title_artists_album(q, req)
+                    .await
             }
 
             async fn search_user_playlists_by_name(
@@ -412,11 +444,31 @@ pub trait DatabaseClient: Send + Sync {
 
     async fn playlists(&mut self, req: PageRequest) -> DatabaseResult<Page<Playlist>>;
 
+    async fn search_playlist_tracks_by_title_artists_album(
+        &mut self,
+        id: Uuid,
+        q: &str,
+        req: PageRequest,
+    ) -> DatabaseResult<Page<Track>>;
+
     async fn search_playlists_by_name(
         &mut self,
         q: &str,
         req: PageRequest,
     ) -> DatabaseResult<Page<Playlist>>;
+
+    async fn search_source_tracks_by_title_artists_album(
+        &mut self,
+        id: Uuid,
+        q: &str,
+        req: PageRequest,
+    ) -> DatabaseResult<Page<Track>>;
+
+    async fn search_tracks_by_title_artists_album(
+        &mut self,
+        q: &str,
+        req: PageRequest,
+    ) -> DatabaseResult<Page<Track>>;
 
     async fn search_user_playlists_by_name(
         &mut self,

@@ -151,12 +151,44 @@ macro_rules! client_impl {
                 Ok(page)
             }
 
+            async fn search_playlist_tracks_by_title_artists_album(
+                &mut self,
+                id: Uuid,
+                q: &str,
+                req: PageRequest,
+            ) -> DatabaseResult<Page<Track>> {
+                let page =
+                    search_playlist_tracks_by_title_artists_album(id, q, req, &mut self.conn)
+                        .await?;
+                Ok(page)
+            }
+
             async fn search_playlists_by_name(
                 &mut self,
                 name: &str,
                 req: PageRequest,
             ) -> DatabaseResult<Page<Playlist>> {
                 let page = search_playlists_by_name(name, req, &self.key, &mut self.conn).await?;
+                Ok(page)
+            }
+
+            async fn search_source_tracks_by_title_artists_album(
+                &mut self,
+                id: Uuid,
+                q: &str,
+                req: PageRequest,
+            ) -> DatabaseResult<Page<Track>> {
+                let page =
+                    search_source_tracks_by_title_artists_album(id, q, req, &mut self.conn).await?;
+                Ok(page)
+            }
+
+            async fn search_tracks_by_title_artists_album(
+                &mut self,
+                q: &str,
+                req: PageRequest,
+            ) -> DatabaseResult<Page<Track>> {
+                let page = search_tracks_by_title_artists_album(q, req, &mut self.conn).await?;
                 Ok(page)
             }
 
@@ -1357,6 +1389,65 @@ async fn playlists<'a, A: Acquire<'a, Database = Postgres, Connection = &'a mut 
     .await
 }
 
+// search_playlist_tracks_by_title_artists_album
+
+#[inline]
+async fn search_playlist_tracks_by_title_artists_album<
+    'a,
+    A: Acquire<'a, Database = Postgres, Connection = &'a mut PgConnection>,
+>(
+    id: Uuid,
+    q: &str,
+    req: PageRequest,
+    conn: A,
+) -> PostgresResult<Page<Track>> {
+    let span = info_span!(
+        "search_playlist_tracks_by_title_artists_album",
+        params.limit = req.limit,
+        params.offset = req.offset,
+        params.q = q,
+        playlist.id = %id,
+    );
+    async {
+        let limit: i64 = req.limit.into();
+        let offset: i64 = req.offset.into();
+        trace!("acquiring database connection");
+        let conn = conn.acquire().await?;
+        debug!("counting playlist tracks matching query");
+        let record = query_file!(
+            "resources/main/db/pg/queries/count-search-playlist-tracks-by-title-artists-album.sql",
+            id,
+            q
+        )
+        .fetch_one(&mut *conn)
+        .await?;
+        let total = record.count.unwrap_or(0).try_into()?;
+        debug!("fetching playlist tracks matching query");
+        let records = query_file_as!(
+            TrackRecord,
+            "resources/main/db/pg/queries/search-playlist-tracks-by-title-artists-album.sql",
+            id,
+            q,
+            limit,
+            offset,
+        )
+        .fetch_all(&mut *conn)
+        .await?;
+        Ok(Page {
+            first: req.offset == 0,
+            items: records
+                .into_iter()
+                .map(|record| record.into_entity())
+                .collect::<PostgresResult<Vec<_>>>()?,
+            last: (req.offset + req.limit) >= total,
+            req,
+            total,
+        })
+    }
+    .instrument(span)
+    .await
+}
+
 // search_playlists_by_name
 
 #[inline]
@@ -1382,7 +1473,7 @@ async fn search_playlists_by_name<
         let conn = conn.acquire().await?;
         debug!("counting playlists matching query");
         let record = query_file!(
-            "resources/main/db/pg/queries/count-playlists-by-name-rows.sql",
+            "resources/main/db/pg/queries/count-search-playlists-by-name.sql",
             q
         )
         .fetch_one(&mut *conn)
@@ -1403,6 +1494,120 @@ async fn search_playlists_by_name<
             items: records
                 .into_iter()
                 .map(|record| record.into_entity(key))
+                .collect::<PostgresResult<Vec<_>>>()?,
+            last: (req.offset + req.limit) >= total,
+            req,
+            total,
+        })
+    }
+    .instrument(span)
+    .await
+}
+
+// search_source_tracks_by_title_artists_album
+
+#[inline]
+async fn search_source_tracks_by_title_artists_album<
+    'a,
+    A: Acquire<'a, Database = Postgres, Connection = &'a mut PgConnection>,
+>(
+    id: Uuid,
+    q: &str,
+    req: PageRequest,
+    conn: A,
+) -> PostgresResult<Page<Track>> {
+    let span = info_span!(
+        "search_playlist_tracks_by_title_artists_album",
+        params.limit = req.limit,
+        params.offset = req.offset,
+        params.q = q,
+        src.id = %id,
+    );
+    async {
+        let limit: i64 = req.limit.into();
+        let offset: i64 = req.offset.into();
+        trace!("acquiring database connection");
+        let conn = conn.acquire().await?;
+        debug!("counting source tracks matching query");
+        let record = query_file!(
+            "resources/main/db/pg/queries/count-search-source-tracks-by-title-artists-album.sql",
+            id,
+            q
+        )
+        .fetch_one(&mut *conn)
+        .await?;
+        let total = record.count.unwrap_or(0).try_into()?;
+        debug!("fetching source tracks matching query");
+        let records = query_file_as!(
+            TrackRecord,
+            "resources/main/db/pg/queries/search-source-tracks-by-title-artists-album.sql",
+            id,
+            q,
+            limit,
+            offset,
+        )
+        .fetch_all(&mut *conn)
+        .await?;
+        Ok(Page {
+            first: req.offset == 0,
+            items: records
+                .into_iter()
+                .map(|record| record.into_entity())
+                .collect::<PostgresResult<Vec<_>>>()?,
+            last: (req.offset + req.limit) >= total,
+            req,
+            total,
+        })
+    }
+    .instrument(span)
+    .await
+}
+
+// search_tracks_by_title_artists_album
+
+#[inline]
+async fn search_tracks_by_title_artists_album<
+    'a,
+    A: Acquire<'a, Database = Postgres, Connection = &'a mut PgConnection>,
+>(
+    q: &str,
+    req: PageRequest,
+    conn: A,
+) -> PostgresResult<Page<Track>> {
+    let span = info_span!(
+        "search_tracks_by_title_artists_album",
+        params.limit = req.limit,
+        params.offset = req.offset,
+        params.q = q,
+    );
+    async {
+        let limit: i64 = req.limit.into();
+        let offset: i64 = req.offset.into();
+        trace!("acquiring database connection");
+        let conn = conn.acquire().await?;
+        debug!("counting tracks matching query");
+        let record = query_file!(
+            "resources/main/db/pg/queries/count-search-tracks-by-title-artists-album.sql",
+            q
+        )
+        .fetch_one(&mut *conn)
+        .await?;
+        let total = record.count.unwrap_or(0).try_into()?;
+        debug!("fetching tracks matching query");
+        let records = query_file_as!(
+            TrackRecord,
+            "resources/main/db/pg/queries/search-tracks-by-title-artists-album.sql",
+            q,
+            limit,
+            offset,
+        )
+        .fetch_all(&mut *conn)
+        .await?;
+        Ok(Page {
+            first: req.offset == 0,
+            items: records
+                .into_iter()
+                .map(|record| record.into_entity())
                 .collect::<PostgresResult<Vec<_>>>()?,
             last: (req.offset + req.limit) >= total,
             req,
@@ -1439,7 +1644,7 @@ async fn search_user_playlists_by_name<
         let conn = conn.acquire().await?;
         debug!("counting user playlists matching query");
         let record = query_file!(
-            "resources/main/db/pg/queries/count-user-playlists-by-name-rows.sql",
+            "resources/main/db/pg/queries/count-search-user-playlists-by-name.sql",
             id,
             q
         )
@@ -1497,7 +1702,7 @@ async fn search_users_by_email<
         let conn = conn.acquire().await?;
         debug!("counting users matching query");
         let record = query_file!(
-            "resources/main/db/pg/queries/count-users-by-email-rows.sql",
+            "resources/main/db/pg/queries/count-search-users-by-email.sql",
             q
         )
         .fetch_one(&mut *conn)
@@ -2371,7 +2576,7 @@ mod test {
                     name: "the letter/neon rainbow".into(),
                 },
                 artists: BTreeSet::from_iter(["the box tops".into()]),
-                creation: DateTime::parse_from_rfc3339("2023-01-02T00:01:00Z")
+                creation: DateTime::parse_from_rfc3339("2023-01-02T00:02:00Z")
                     .expect("failed to parse date")
                     .into(),
                 id: Uuid::from_u128(0xf747ca3a0cc74d9fb38adc506f99f5df),
@@ -2379,6 +2584,21 @@ mod test {
                 platform_id: "track_3".into(),
                 title: "the letter".into(),
                 year: 1967,
+            };
+            let track_4 = Track {
+                album: Album {
+                    compil: false,
+                    name: "i/o".into(),
+                },
+                artists: BTreeSet::from_iter(["peter gabriel".into()]),
+                creation: DateTime::parse_from_rfc3339("2023-01-02T00:03:00Z")
+                    .expect("failed to parse date")
+                    .into(),
+                id: Uuid::from_u128(0x38ac42e015794f3f9816081f4df0210a),
+                platform: Platform::Spotify,
+                platform_id: "track_4".into(),
+                title: "panopticom".into(),
+                year: 2023,
             };
             let usr_1 = User {
                 creation: DateTime::parse_from_rfc3339("2023-01-01T00:00:00Z")
@@ -2582,7 +2802,7 @@ mod test {
                     },
                 ],
                 srcs: vec![src_1, src_2, src_3, src_4],
-                tracks: vec![track_1, track_2, track_3],
+                tracks: vec![track_1, track_2, track_3, track_4],
                 usrs: vec![usr_1, usr_2, usr_3, usr_4, usr_5],
             }
         }
@@ -2889,7 +3109,7 @@ mod test {
                     },
                     artists: vec!["Pink Floyd".into()].into_iter().collect(),
                     platform: Platform::Spotify,
-                    platform_id: "track_4".into(),
+                    platform_id: "track_5".into(),
                     title: "Time".into(),
                     year: 1973,
                 };
@@ -3051,7 +3271,7 @@ mod test {
                     .await
                     .expect("failed to fetch tracks");
                 assert_eq!(page.total, 0);
-                assert_eq!(count, 1);
+                assert_eq!(count, 3);
             }
         }
 
@@ -3075,7 +3295,7 @@ mod test {
                     .await
                     .expect("failed to fetch tracks");
                 assert_eq!(page.total, 0);
-                assert_eq!(count, 1);
+                assert_eq!(count, 3);
             }
         }
 
@@ -3169,7 +3389,7 @@ mod test {
             async fn false_when_track_doesnt_match(db: PgPool) {
                 let data = Data::new();
                 let playlist_id = data.playlists[0].id;
-                let track_id = data.tracks[1].id;
+                let track_id = data.tracks[3].id;
                 run(playlist_id, track_id, false, db).await;
             }
 
@@ -3312,6 +3532,93 @@ mod test {
             }
         }
 
+        mod search_playlist_tracks_by_title_artists_album {
+            use super::*;
+
+            // run
+
+            async fn run(id: Uuid, q: &str, expected: Page<Track>, db: PgPool) {
+                let db = init(db).await;
+                let mut conn = db.acquire().await.expect("failed to acquire connection");
+                let page = conn
+                    .search_playlist_tracks_by_title_artists_album(id, q, expected.req)
+                    .await
+                    .expect("failed to fetch tracks");
+                assert_eq!(page, expected);
+            }
+
+            // Tests
+
+            #[sqlx::test]
+            async fn first_and_last_with_title(db: PgPool) {
+                let data = Data::new();
+                let expected = Page {
+                    first: true,
+                    items: vec![data.tracks[1].clone()],
+                    last: true,
+                    req: PageRequest::new(100, 0),
+                    total: 1,
+                };
+                run(data.playlists[0].id, "nEvEr", expected, db).await;
+            }
+
+            #[sqlx::test]
+            async fn first_and_last_with_artists(db: PgPool) {
+                let data = Data::new();
+                let expected = Page {
+                    first: true,
+                    items: vec![data.tracks[1].clone()],
+                    last: true,
+                    req: PageRequest::new(100, 0),
+                    total: 1,
+                };
+                run(data.playlists[0].id, "cHuCk", expected, db).await;
+            }
+
+            #[sqlx::test]
+            async fn first_and_last_with_album(db: PgPool) {
+                let data = Data::new();
+                let expected = Page {
+                    first: true,
+                    items: vec![data.tracks[1].clone()],
+                    last: true,
+                    req: PageRequest::new(100, 0),
+                    total: 1,
+                };
+                run(data.playlists[0].id, "lOuIs", expected, db).await;
+            }
+
+            #[sqlx::test]
+            async fn first_and_last_with_all(db: PgPool) {
+                let data = Data::new();
+                let expected = Page {
+                    first: true,
+                    items: vec![
+                        data.tracks[0].clone(),
+                        data.tracks[1].clone(),
+                        data.tracks[2].clone(),
+                    ],
+                    last: true,
+                    req: PageRequest::new(100, 0),
+                    total: 3,
+                };
+                run(data.playlists[0].id, "n", expected, db).await;
+            }
+
+            #[sqlx::test]
+            async fn middle(db: PgPool) {
+                let data = Data::new();
+                let expected = Page {
+                    first: false,
+                    items: vec![data.tracks[1].clone()],
+                    last: false,
+                    req: PageRequest::new(1, 1),
+                    total: 3,
+                };
+                run(data.playlists[0].id, "n", expected, db).await;
+            }
+        }
+
         mod search_playlists_by_name {
             use super::*;
 
@@ -3358,6 +3665,181 @@ mod test {
                     total: 4,
                 };
                 run("PlAyLiSt", expected, db).await;
+            }
+        }
+
+        mod search_source_tracks_by_title_artists_album {
+            use super::*;
+
+            // run
+
+            async fn run(id: Uuid, q: &str, expected: Page<Track>, db: PgPool) {
+                let db = init(db).await;
+                let mut conn = db.acquire().await.expect("failed to acquire connection");
+                let page = conn
+                    .search_source_tracks_by_title_artists_album(id, q, expected.req)
+                    .await
+                    .expect("failed to fetch tracks");
+                assert_eq!(page, expected);
+            }
+
+            // Tests
+
+            #[sqlx::test]
+            async fn first_and_last_with_title(db: PgPool) {
+                let data = Data::new();
+                let expected = Page {
+                    first: true,
+                    items: vec![data.tracks[1].clone()],
+                    last: true,
+                    req: PageRequest::new(100, 0),
+                    total: 1,
+                };
+                run(data.srcs[0].id, "nEvEr", expected, db).await;
+            }
+
+            #[sqlx::test]
+            async fn first_and_last_with_artists(db: PgPool) {
+                let data = Data::new();
+                let expected = Page {
+                    first: true,
+                    items: vec![data.tracks[1].clone()],
+                    last: true,
+                    req: PageRequest::new(100, 0),
+                    total: 1,
+                };
+                run(data.srcs[0].id, "cHuCk", expected, db).await;
+            }
+
+            #[sqlx::test]
+            async fn first_and_last_with_album(db: PgPool) {
+                let data = Data::new();
+                let expected = Page {
+                    first: true,
+                    items: vec![data.tracks[1].clone()],
+                    last: true,
+                    req: PageRequest::new(100, 0),
+                    total: 1,
+                };
+                run(data.srcs[0].id, "lOuIs", expected, db).await;
+            }
+
+            #[sqlx::test]
+            async fn first_and_last_with_all(db: PgPool) {
+                let data = Data::new();
+                let expected = Page {
+                    first: true,
+                    items: vec![
+                        data.tracks[0].clone(),
+                        data.tracks[1].clone(),
+                        data.tracks[2].clone(),
+                    ],
+                    last: true,
+                    req: PageRequest::new(100, 0),
+                    total: 3,
+                };
+                run(data.srcs[0].id, "n", expected, db).await;
+            }
+
+            #[sqlx::test]
+            async fn middle(db: PgPool) {
+                let data = Data::new();
+                let expected = Page {
+                    first: false,
+                    items: vec![data.tracks[1].clone()],
+                    last: false,
+                    req: PageRequest::new(1, 1),
+                    total: 3,
+                };
+                run(data.srcs[0].id, "n", expected, db).await;
+            }
+        }
+
+        mod search_tracks_by_title_artists_album {
+            use super::*;
+
+            // run
+
+            async fn run(q: &str, expected: Page<Track>, db: PgPool) {
+                let db = init(db).await;
+                let mut conn = db.acquire().await.expect("failed to acquire connection");
+                let page = conn
+                    .search_tracks_by_title_artists_album(q, expected.req)
+                    .await
+                    .expect("failed to fetch tracks");
+                assert_eq!(page, expected);
+            }
+
+            // Tests
+
+            #[sqlx::test]
+            async fn first_and_last_with_title(db: PgPool) {
+                let data = Data::new();
+                let expected = Page {
+                    first: true,
+                    items: vec![data.tracks[1].clone()],
+                    last: true,
+                    req: PageRequest::new(100, 0),
+                    total: 1,
+                };
+                run("nEvEr", expected, db).await;
+            }
+
+            #[sqlx::test]
+            async fn first_and_last_with_artists(db: PgPool) {
+                let data = Data::new();
+                let expected = Page {
+                    first: true,
+                    items: vec![data.tracks[1].clone()],
+                    last: true,
+                    req: PageRequest::new(100, 0),
+                    total: 1,
+                };
+                run("cHuCk", expected, db).await;
+            }
+
+            #[sqlx::test]
+            async fn first_and_last_with_album(db: PgPool) {
+                let data = Data::new();
+                let expected = Page {
+                    first: true,
+                    items: vec![data.tracks[1].clone()],
+                    last: true,
+                    req: PageRequest::new(100, 0),
+                    total: 1,
+                };
+                run("lOuIs", expected, db).await;
+            }
+
+            #[sqlx::test]
+            async fn first_and_last_with_all(db: PgPool) {
+                let data = Data::new();
+                let expected = Page {
+                    first: true,
+                    items: vec![
+                        data.tracks[0].clone(),
+                        data.tracks[1].clone(),
+                        data.tracks[2].clone(),
+                        data.tracks[3].clone(),
+                    ],
+                    last: true,
+                    req: PageRequest::new(100, 0),
+                    total: 4,
+                };
+                run("n", expected, db).await;
+            }
+
+            #[sqlx::test]
+            async fn middle(db: PgPool) {
+                let data = Data::new();
+                let expected = Page {
+                    first: false,
+                    items: vec![data.tracks[1].clone()],
+                    last: false,
+                    req: PageRequest::new(1, 1),
+                    total: 4,
+                };
+                run("n", expected, db).await;
             }
         }
 
@@ -3550,7 +4032,7 @@ mod test {
             async fn false_when_track_doesnt_match(db: PgPool) {
                 let data = Data::new();
                 let src_id = data.srcs[0].id;
-                let track_id = data.tracks[1].id;
+                let track_id = data.tracks[3].id;
                 run(src_id, track_id, false, db).await;
             }
 
