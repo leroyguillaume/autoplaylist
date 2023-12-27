@@ -20,6 +20,13 @@
             "equalTo": "0"
           }
         ]
+      },
+      "q": {
+        "hasExactly": [
+          {
+            "equalTo": "q"
+          }
+        ]
       }
     },
     "urlPath": "/autoplaylist/user"

@@ -12,8 +12,8 @@ use autoplaylist_common::{
         AuthenticateViaSpotifyQueryParams, CreatePlaylistRequest, JwtResponse,
         PageRequestQueryParams, PreconditionFailedResponse, RedirectUriQueryParam,
         SearchQueryParam, UpdatePlaylistRequest, UpdateTrackRequest, UpdateUserRequest, Validate,
-        ValidationErrorResponse, PATH_AUTH, PATH_HEALTH, PATH_PLAYLIST, PATH_REFRESH, PATH_SEARCH,
-        PATH_SPOTIFY, PATH_SRC, PATH_SYNC, PATH_TOKEN, PATH_TRACK, PATH_USR,
+        ValidationErrorResponse, PATH_AUTH, PATH_HEALTH, PATH_PLAYLIST, PATH_REFRESH, PATH_SPOTIFY,
+        PATH_SRC, PATH_SYNC, PATH_TOKEN, PATH_TRACK, PATH_USR,
     },
     broker::{
         rabbitmq::{RabbitMqClient, RabbitMqConfig},
@@ -386,6 +386,7 @@ fn create_app<
             routing::get(
                 |headers: HeaderMap,
                  State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
+                 params: Option<Query<SearchQueryParam>>,
                  Query(req): Query<PageRequestQueryParams<25>>| async move {
                     handling_error(async {
                         let mut db_conn = state.db.acquire().await?;
@@ -394,15 +395,22 @@ fn create_app<
                             .auth()
                             .authenticate(&headers, &mut db_conn)
                             .await?;
+                        let q = params.map(|Query(params)| params.q);
                         let span = info_span!(
                             "playlists",
                             auth.usr.id = %auth_usr.id,
                             params.limit = req.limit,
                             params.offset = req.offset,
+                            params.q = q,
                         );
                         async {
                             ensure_user_is_admin!(auth_usr);
-                            let page = db_conn.playlists(req.into()).await?.map(|playlist| {
+                            let page = if let Some(q) = q {
+                                db_conn.search_playlists_by_name(&q, req.into()).await?
+                            } else {
+                                db_conn.playlists(req.into()).await?
+                            };
+                            let page = page.map(|playlist| {
                                 state.svc.converter().convert_playlist(playlist, &auth_usr)
                             });
                             Ok((StatusCode::OK, Json(page)))
@@ -657,45 +665,6 @@ fn create_app<
                 },
             ),
         )
-        // search_playlists_by_name
-        .route(
-            &format!("{PATH_PLAYLIST}{PATH_SEARCH}"),
-            routing::get(
-                |headers: HeaderMap,
-                 State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
-                 Query(params): Query<SearchQueryParam>,
-                 Query(req): Query<PageRequestQueryParams<25>>| async move {
-                    handling_error(async {
-                        let mut db_conn = state.db.acquire().await?;
-                        let auth_usr = state
-                            .svc
-                            .auth()
-                            .authenticate(&headers, &mut db_conn)
-                            .await?;
-                        let span = info_span!(
-                            "search_playlists_by_name",
-                            auth.usr.id = %auth_usr.id,
-                            params.limit = req.limit,
-                            params.offset = req.offset,
-                            params.q = params.q,
-                        );
-                        async {
-                            ensure_user_is_admin!(auth_usr);
-                            let page = db_conn
-                                .search_playlists_by_name(&params.q, req.into())
-                                .await?
-                                .map(|playlist| {
-                                    state.svc.converter().convert_playlist(playlist, &auth_usr)
-                                });
-                            Ok((StatusCode::OK, Json(page)))
-                        }
-                        .instrument(span)
-                        .await
-                    })
-                    .await
-                },
-            ),
-        )
         // start_playlist_synchronization
         .route(
             &format!("{PATH_PLAYLIST}/:id{PATH_SYNC}"),
@@ -742,6 +711,7 @@ fn create_app<
                 |Path(id): Path<Uuid>,
                  headers: HeaderMap,
                  State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
+                 params: Option<Query<SearchQueryParam>>,
                  Query(req): Query<PageRequestQueryParams<25>>| async move {
                     handling_error(async {
                         let mut db_conn = state.db.acquire().await?;
@@ -750,11 +720,13 @@ fn create_app<
                             .auth()
                             .authenticate(&headers, &mut db_conn)
                             .await?;
+                        let q = params.map(|Query(params)| params.q);
                         let span = info_span!(
                             "playlist_tracks",
                             auth.usr.id = %auth_usr.id,
                             params.limit = req.limit,
                             params.offset = req.offset,
+                            params.q = q,
                             playlist.id = %id,
                         );
                         async {
@@ -763,54 +735,18 @@ fn create_app<
                                 .await?
                                 .ok_or(ApiError::NotFound)?;
                             ensure_user_is_admin_or_owner!(auth_usr, playlist.src.owner);
-                            let page = db_conn.playlist_tracks(id, req.into()).await?;
+                            let page = if let Some(q) = q {
+                                db_conn
+                                    .search_playlist_tracks_by_title_artists_album(
+                                        id,
+                                        &q,
+                                        req.into(),
+                                    )
+                                    .await?
+                            } else {
+                                db_conn.playlist_tracks(id, req.into()).await?
+                            };
                             Ok((StatusCode::OK, Json(page)).into_response())
-                        }
-                        .instrument(span)
-                        .await
-                    })
-                    .await
-                },
-            ),
-        )
-        // search_playlist_tracks_by_title_artists_album
-        .route(
-            &format!("{PATH_PLAYLIST}/:id{PATH_TRACK}{PATH_SEARCH}"),
-            routing::get(
-                |Path(id): Path<Uuid>,
-                 headers: HeaderMap,
-                 State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
-                 Query(params): Query<SearchQueryParam>,
-                 Query(req): Query<PageRequestQueryParams<25>>| async move {
-                    handling_error(async {
-                        let mut db_conn = state.db.acquire().await?;
-                        let auth_usr = state
-                            .svc
-                            .auth()
-                            .authenticate(&headers, &mut db_conn)
-                            .await?;
-                        let span = info_span!(
-                            "search_playlist_tracks_by_title_artists_album",
-                            auth.usr.id = %auth_usr.id,
-                            params.limit = req.limit,
-                            params.offset = req.offset,
-                            params.q = params.q,
-                            playlist.id = %id,
-                        );
-                        async {
-                            let playlist = db_conn
-                                .playlist_by_id(id)
-                                .await?
-                                .ok_or(ApiError::NotFound)?;
-                            ensure_user_is_admin_or_owner!(auth_usr, playlist.src.owner);
-                            let page = db_conn
-                                .search_playlist_tracks_by_title_artists_album(
-                                    id,
-                                    &params.q,
-                                    req.into(),
-                                )
-                                .await?;
-                            Ok((StatusCode::OK, Json(page)))
                         }
                         .instrument(span)
                         .await
@@ -893,6 +829,7 @@ fn create_app<
                 |Path(id): Path<Uuid>,
                  headers: HeaderMap,
                  State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
+                 params: Option<Query<SearchQueryParam>>,
                  Query(req): Query<PageRequestQueryParams<25>>| async move {
                     handling_error(async {
                         let mut db_conn = state.db.acquire().await?;
@@ -901,61 +838,26 @@ fn create_app<
                             .auth()
                             .authenticate(&headers, &mut db_conn)
                             .await?;
+                        let q = params.map(|Query(params)| params.q);
                         let span = info_span!(
                             "source_tracks",
                             auth.usr.id = %auth_usr.id,
                             params.limit = req.limit,
                             params.offset = req.offset,
+                            params.q = q,
                             src.id = %id,
                         );
                         async {
                             let src = db_conn.source_by_id(id).await?.ok_or(ApiError::NotFound)?;
                             ensure_user_is_admin_or_owner!(auth_usr, src.owner);
-                            let page = db_conn.source_tracks(id, req.into()).await?;
+                            let page = if let Some(q) = q {
+                                db_conn
+                                    .search_source_tracks_by_title_artists_album(id, &q, req.into())
+                                    .await?
+                            } else {
+                                db_conn.source_tracks(id, req.into()).await?
+                            };
                             Ok((StatusCode::OK, Json(page)).into_response())
-                        }
-                        .instrument(span)
-                        .await
-                    })
-                    .await
-                },
-            ),
-        )
-        // search_source_tracks_by_title_artists_album
-        .route(
-            &format!("{PATH_SRC}/:id{PATH_TRACK}{PATH_SEARCH}"),
-            routing::get(
-                |Path(id): Path<Uuid>,
-                 headers: HeaderMap,
-                 State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
-                 Query(params): Query<SearchQueryParam>,
-                 Query(req): Query<PageRequestQueryParams<25>>| async move {
-                    handling_error(async {
-                        let mut db_conn = state.db.acquire().await?;
-                        let auth_usr = state
-                            .svc
-                            .auth()
-                            .authenticate(&headers, &mut db_conn)
-                            .await?;
-                        let span = info_span!(
-                            "search_source_tracks_by_title_artists_album",
-                            auth.usr.id = %auth_usr.id,
-                            params.limit = req.limit,
-                            params.offset = req.offset,
-                            params.q = params.q,
-                            src.id = %id,
-                        );
-                        async {
-                            let src = db_conn.source_by_id(id).await?.ok_or(ApiError::NotFound)?;
-                            ensure_user_is_admin_or_owner!(auth_usr, src.owner);
-                            let page = db_conn
-                                .search_source_tracks_by_title_artists_album(
-                                    id,
-                                    &params.q,
-                                    req.into(),
-                                )
-                                .await?;
-                            Ok((StatusCode::OK, Json(page)))
                         }
                         .instrument(span)
                         .await
@@ -1009,6 +911,7 @@ fn create_app<
             routing::get(
                 |headers: HeaderMap,
                  State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
+                 params: Option<Query<SearchQueryParam>>,
                  Query(req): Query<PageRequestQueryParams<25>>| async move {
                     handling_error(async {
                         let mut db_conn = state.db.acquire().await?;
@@ -1017,14 +920,22 @@ fn create_app<
                             .auth()
                             .authenticate(&headers, &mut db_conn)
                             .await?;
+                        let q = params.map(|Query(params)| params.q);
                         let span = info_span!(
                             "tracks",
                             auth.usr.id = %auth_usr.id,
                             params.limit = req.limit,
                             params.offset = req.offset,
+                            params.q = q,
                         );
                         async {
-                            let page = db_conn.tracks(req.into()).await?;
+                            let page = if let Some(q) = q {
+                                db_conn
+                                    .search_tracks_by_title_artists_album(&q, req.into())
+                                    .await?
+                            } else {
+                                db_conn.tracks(req.into()).await?
+                            };
                             Ok((StatusCode::OK, Json(page)))
                         }
                         .instrument(span)
@@ -1144,47 +1055,13 @@ fn create_app<
                 },
             ),
         )
-        // search_tracks_by_title_artists_album
-        .route(
-            &format!("{PATH_TRACK}{PATH_SEARCH}"),
-            routing::get(
-                |headers: HeaderMap,
-                 State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
-                 Query(params): Query<SearchQueryParam>,
-                 Query(req): Query<PageRequestQueryParams<25>>| async move {
-                    handling_error(async {
-                        let mut db_conn = state.db.acquire().await?;
-                        let auth_usr = state
-                            .svc
-                            .auth()
-                            .authenticate(&headers, &mut db_conn)
-                            .await?;
-                        let span = info_span!(
-                            "search_tracks_by_title_artists_album",
-                            auth.usr.id = %auth_usr.id,
-                            params.limit = req.limit,
-                            params.offset = req.offset,
-                            params.q = params.q,
-                        );
-                        async {
-                            let page = db_conn
-                                .search_tracks_by_title_artists_album(&params.q, req.into())
-                                .await?;
-                            Ok((StatusCode::OK, Json(page)))
-                        }
-                        .instrument(span)
-                        .await
-                    })
-                    .await
-                },
-            ),
-        )
         // users
         .route(
             PATH_USR,
             routing::get(
                 |headers: HeaderMap,
                  State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
+                 params: Option<Query<SearchQueryParam>>,
                  Query(req): Query<PageRequestQueryParams<25>>| async move {
                     handling_error(async {
                         let mut db_conn = state.db.acquire().await?;
@@ -1193,18 +1070,22 @@ fn create_app<
                             .auth()
                             .authenticate(&headers, &mut db_conn)
                             .await?;
+                        let q = params.map(|Query(params)| params.q);
                         let span = info_span!(
                             "users",
                             auth.usr.id = %auth_usr.id,
                             params.limit = req.limit,
                             params.offset = req.offset,
+                            params.q = q,
                         );
                         async {
                             ensure_user_is_admin!(auth_usr);
-                            let page = db_conn
-                                .users(req.into())
-                                .await?
-                                .map(|usr| state.svc.converter().convert_user(usr));
+                            let page = if let Some(q) = q {
+                                db_conn.search_users_by_email(&q, req.into()).await?
+                            } else {
+                                db_conn.users(req.into()).await?
+                            };
+                            let page = page.map(|usr| state.svc.converter().convert_user(usr));
                             Ok((StatusCode::OK, Json(page)))
                         }
                         .instrument(span)
@@ -1450,43 +1331,6 @@ fn create_app<
                                     .await?;
                                 Ok(StatusCode::NO_CONTENT.into_response())
                             })
-                        }
-                        .instrument(span)
-                        .await
-                    })
-                    .await
-                },
-            ),
-        )
-        // search_users_by_email
-        .route(
-            &format!("{PATH_USR}{PATH_SEARCH}"),
-            routing::get(
-                |headers: HeaderMap,
-                 State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
-                 Query(params): Query<SearchQueryParam>,
-                 Query(req): Query<PageRequestQueryParams<25>>| async move {
-                    handling_error(async {
-                        let mut db_conn = state.db.acquire().await?;
-                        let auth_usr = state
-                            .svc
-                            .auth()
-                            .authenticate(&headers, &mut db_conn)
-                            .await?;
-                        let span = info_span!(
-                            "search_users_by_email",
-                            auth.usr.id = %auth_usr.id,
-                            params.limit = req.limit,
-                            params.offset = req.offset,
-                            params.q = params.q,
-                        );
-                        async {
-                            ensure_user_is_admin!(auth_usr);
-                            let page = db_conn
-                                .search_users_by_email(&params.q, req.into())
-                                .await?
-                                .map(|usr| state.svc.converter().convert_user(usr));
-                            Ok((StatusCode::OK, Json(page)))
                         }
                         .instrument(span)
                         .await
@@ -2916,18 +2760,26 @@ mod test {
     mod playlist_tracks {
         use super::*;
 
+        // Data
+
+        struct Data {
+            q: &'static str,
+            params: Option<SearchQueryParam>,
+        }
+
         // Mocks
 
         #[derive(Clone, Default)]
         struct Mocks {
             auth: Mock<ApiResult<User>, User>,
             by_id: Mock<Option<Playlist>, Playlist>,
+            search: Mock<()>,
             tracks: Mock<()>,
         }
 
         // Tests
 
-        async fn run(mocks: Mocks) -> (TestResponse, Page<Track>) {
+        async fn run(data: Data, mocks: Mocks) -> (TestResponse, Page<Track>) {
             let playlist = Playlist {
                 creation: Utc::now(),
                 id: Uuid::new_v4(),
@@ -2994,6 +2846,14 @@ mod test {
                                 let page = page.clone();
                                 move |_, _| Ok(page.clone())
                             });
+                        conn.0
+                            .expect_search_playlist_tracks_by_title_artists_album()
+                            .with(eq(playlist.id), eq(data.q), eq(page.req))
+                            .times(mocks.search.times())
+                            .returning({
+                                let page = page.clone();
+                                move |_, _, _| Ok(page.clone())
+                            });
                         conn
                     }
                 }),
@@ -3012,6 +2872,7 @@ mod test {
             let resp = server
                 .get(&format!("{PATH_PLAYLIST}/{}{PATH_TRACK}", playlist.id))
                 .add_query_params(req)
+                .add_query_params(data.params)
                 .await;
             (resp, page)
         }
@@ -3020,17 +2881,25 @@ mod test {
 
         #[tokio::test]
         async fn unauthorized() {
+            let data = Data {
+                q: "q",
+                params: None,
+            };
             let mocks = Mocks {
                 auth: Mock::once_with_args(|_| Err(ApiError::Unauthorized)),
                 ..Default::default()
             };
-            let (resp, _) = run(mocks).await;
+            let (resp, _) = run(data, mocks).await;
             resp.assert_status_unauthorized();
             assert!(resp.as_bytes().is_empty());
         }
 
         #[tokio::test]
         async fn forbidden() {
+            let data = Data {
+                q: "q",
+                params: None,
+            };
             let mocks = Mocks {
                 auth: Mock::once_with_args(|usr| {
                     Ok(User {
@@ -3042,36 +2911,50 @@ mod test {
                 by_id: Mock::once_with_args(Some),
                 ..Default::default()
             };
-            let (resp, _) = run(mocks).await;
+            let (resp, _) = run(data, mocks).await;
             resp.assert_status(StatusCode::FORBIDDEN);
             assert!(resp.as_bytes().is_empty());
         }
 
         #[tokio::test]
         async fn not_found() {
+            let data = Data {
+                q: "q",
+                params: None,
+            };
             let mocks = Mocks {
                 auth: Mock::once_with_args(Ok),
                 by_id: Mock::once_with_args(|_| None),
                 ..Default::default()
             };
-            let (resp, _) = run(mocks).await;
+            let (resp, _) = run(data, mocks).await;
             assert!(resp.as_bytes().is_empty());
         }
 
         #[tokio::test]
         async fn ok_when_user_is_owner() {
+            let data = Data {
+                q: "q",
+                params: None,
+            };
             let mocks = Mocks {
                 auth: Mock::once_with_args(Ok),
                 by_id: Mock::once_with_args(Some),
                 tracks: Mock::once(|| ()),
+                ..Default::default()
             };
-            let (resp, expected) = run(mocks).await;
+            let (resp, expected) = run(data, mocks).await;
             resp.assert_status_ok();
             resp.assert_json(&expected);
         }
 
         #[tokio::test]
         async fn ok_when_user_is_admin() {
+            let q = "q";
+            let data = Data {
+                q,
+                params: Some(SearchQueryParam { q: q.into() }),
+            };
             let mocks = Mocks {
                 auth: Mock::once_with_args(|usr| {
                     Ok(User {
@@ -3080,9 +2963,10 @@ mod test {
                     })
                 }),
                 by_id: Mock::once_with_args(Some),
-                tracks: Mock::once(|| ()),
+                search: Mock::once(|| ()),
+                ..Default::default()
             };
-            let (resp, expected) = run(mocks).await;
+            let (resp, expected) = run(data, mocks).await;
             resp.assert_status_ok();
             resp.assert_json(&expected);
         }
@@ -3091,6 +2975,13 @@ mod test {
     mod playlists {
         use super::*;
 
+        // Data
+
+        struct Data {
+            q: &'static str,
+            params: Option<SearchQueryParam>,
+        }
+
         // Mocks
 
         #[derive(Clone, Default)]
@@ -3098,11 +2989,12 @@ mod test {
             auth: Mock<ApiResult<User>, User>,
             convert: Mock<()>,
             playlists: Mock<()>,
+            search: Mock<()>,
         }
 
         // Tests
 
-        async fn run(mocks: Mocks) -> (TestResponse, Page<PlaylistResponse>) {
+        async fn run(data: Data, mocks: Mocks) -> (TestResponse, Page<PlaylistResponse>) {
             let auth_usr = User {
                 creation: Utc::now(),
                 creds: Default::default(),
@@ -3162,6 +3054,14 @@ mod test {
                                 let page = page.clone();
                                 move |_| Ok(page.clone())
                             });
+                        conn.0
+                            .expect_search_playlists_by_name()
+                            .with(eq(data.q), eq(page.req))
+                            .times(mocks.search.times())
+                            .returning({
+                                let page = page.clone();
+                                move |_, _| Ok(page.clone())
+                            });
                         conn
                     }
                 }),
@@ -3186,7 +3086,11 @@ mod test {
                 _dbtx: PhantomData,
             };
             let server = init(state);
-            let resp = server.get(PATH_PLAYLIST).add_query_params(req).await;
+            let resp = server
+                .get(PATH_PLAYLIST)
+                .add_query_params(req)
+                .add_query_params(&data.params)
+                .await;
             (resp, expected)
         }
 
@@ -3194,17 +3098,25 @@ mod test {
 
         #[tokio::test]
         async fn unauthorized() {
+            let data = Data {
+                q: "q",
+                params: None,
+            };
             let mocks = Mocks {
                 auth: Mock::once_with_args(|_| Err(ApiError::Unauthorized)),
                 ..Default::default()
             };
-            let (resp, _) = run(mocks).await;
+            let (resp, _) = run(data, mocks).await;
             resp.assert_status_unauthorized();
             assert!(resp.as_bytes().is_empty());
         }
 
         #[tokio::test]
         async fn forbidden() {
+            let data = Data {
+                q: "q",
+                params: None,
+            };
             let mocks = Mocks {
                 auth: Mock::once_with_args(|usr| {
                     Ok(User {
@@ -3214,19 +3126,42 @@ mod test {
                 }),
                 ..Default::default()
             };
-            let (resp, _) = run(mocks).await;
+            let (resp, _) = run(data, mocks).await;
             resp.assert_status(StatusCode::FORBIDDEN);
             assert!(resp.as_bytes().is_empty());
         }
 
         #[tokio::test]
-        async fn ok() {
+        async fn ok_without_search() {
+            let data = Data {
+                q: "q",
+                params: None,
+            };
             let mocks = Mocks {
                 auth: Mock::once_with_args(Ok),
                 convert: Mock::once(|| ()),
                 playlists: Mock::once(|| ()),
+                ..Default::default()
             };
-            let (resp, expected) = run(mocks).await;
+            let (resp, expected) = run(data, mocks).await;
+            resp.assert_status_ok();
+            resp.assert_json(&expected);
+        }
+
+        #[tokio::test]
+        async fn ok_with_search() {
+            let q = "q";
+            let data = Data {
+                q,
+                params: Some(SearchQueryParam { q: q.into() }),
+            };
+            let mocks = Mocks {
+                auth: Mock::once_with_args(Ok),
+                convert: Mock::once(|| ()),
+                search: Mock::once(|| ()),
+                ..Default::default()
+            };
+            let (resp, expected) = run(data, mocks).await;
             resp.assert_status_ok();
             resp.assert_json(&expected);
         }
@@ -3418,756 +3353,6 @@ mod test {
             let resp: TestResponse = run(auth_usr, usr, mocks).await;
             resp.assert_status(StatusCode::NO_CONTENT);
             assert!(resp.as_bytes().is_empty());
-        }
-    }
-
-    mod search_playlist_tracks_by_title_artists_album {
-        use super::*;
-
-        // Mocks
-
-        #[derive(Clone, Default)]
-        struct Mocks {
-            auth: Mock<ApiResult<User>, User>,
-            by_id: Mock<Option<Playlist>, Playlist>,
-            search: Mock<()>,
-        }
-
-        // Tests
-
-        async fn run(mocks: Mocks) -> (TestResponse, Page<Track>) {
-            let params = SearchQueryParam { q: "name".into() };
-            let auth_usr = User {
-                creation: Utc::now(),
-                creds: Default::default(),
-                id: Uuid::new_v4(),
-                role: Role::User,
-            };
-            let playlist = Playlist {
-                creation: Utc::now(),
-                id: Uuid::new_v4(),
-                name: "name".into(),
-                predicate: Predicate::YearIs(1993),
-                src: Source {
-                    creation: Utc::now(),
-                    id: Uuid::new_v4(),
-                    kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
-                    owner: auth_usr.clone(),
-                    sync: Synchronization::Pending,
-                },
-                sync: Synchronization::Pending,
-                tgt: Target::Spotify("id".into()),
-            };
-            let page = Page {
-                first: true,
-                items: vec![],
-                last: true,
-                req: PageRequest::new(10, 0),
-                total: 0,
-            };
-            let req = PageRequestQueryParams::<25>::from(page.req);
-            let mut auth = MockAuthenticator::new();
-            auth.expect_authenticate()
-                .times(mocks.auth.times())
-                .returning({
-                    let usr = auth_usr.clone();
-                    let mock = mocks.auth.clone();
-                    move |_, _| {
-                        Box::pin({
-                            let usr = usr.clone();
-                            let mock = mock.clone();
-                            Box::pin(async move { mock.call_with_args(usr.clone()) })
-                        })
-                    }
-                });
-            let db = MockDatabasePool {
-                acquire: Mock::once({
-                    let params = params.clone();
-                    let playlist = playlist.clone();
-                    let page = page.clone();
-                    let mocks = mocks.clone();
-                    move || {
-                        let mut conn = MockDatabaseConnection::new();
-                        conn.0
-                            .expect_playlist_by_id()
-                            .with(eq(playlist.id))
-                            .times(mocks.by_id.times())
-                            .returning({
-                                let playlist = playlist.clone();
-                                let mock = mocks.by_id.clone();
-                                move |_| Ok(mock.call_with_args(playlist.clone()))
-                            });
-                        conn.0
-                            .expect_search_playlist_tracks_by_title_artists_album()
-                            .with(eq(playlist.id), eq(params.q.clone()), eq(page.req))
-                            .times(mocks.search.times())
-                            .returning({
-                                let page = page.clone();
-                                move |_, _, _| Ok(page.clone())
-                            });
-                        conn
-                    }
-                }),
-                ..Default::default()
-            };
-            let state = AppState {
-                db,
-                svc: MockServices {
-                    auth,
-                    ..Default::default()
-                },
-                _dbconn: PhantomData,
-                _dbtx: PhantomData,
-            };
-            let server = init(state);
-            let resp = server
-                .get(&format!(
-                    "{PATH_PLAYLIST}/{}{PATH_TRACK}{PATH_SEARCH}",
-                    playlist.id
-                ))
-                .add_query_params(params)
-                .add_query_params(req)
-                .await;
-            (resp, page)
-        }
-
-        // Tests
-
-        #[tokio::test]
-        async fn unauthorized() {
-            let mocks = Mocks {
-                auth: Mock::once_with_args(|_| Err(ApiError::Unauthorized)),
-                ..Default::default()
-            };
-            let (resp, _) = run(mocks).await;
-            resp.assert_status_unauthorized();
-            assert!(resp.as_bytes().is_empty());
-        }
-
-        #[tokio::test]
-        async fn forbidden() {
-            let mocks = Mocks {
-                auth: Mock::once_with_args(|usr| {
-                    Ok(User {
-                        id: Uuid::new_v4(),
-                        ..usr
-                    })
-                }),
-                by_id: Mock::once_with_args(Some),
-                ..Default::default()
-            };
-            let (resp, _) = run(mocks).await;
-            resp.assert_status(StatusCode::FORBIDDEN);
-            assert!(resp.as_bytes().is_empty());
-        }
-
-        #[tokio::test]
-        async fn not_found() {
-            let mocks = Mocks {
-                auth: Mock::once_with_args(Ok),
-                by_id: Mock::once_with_args(|_| None),
-                ..Default::default()
-            };
-            let (resp, _) = run(mocks).await;
-            resp.assert_status_not_found();
-            assert!(resp.as_bytes().is_empty());
-        }
-
-        #[tokio::test]
-        async fn ok_when_user_is_owner() {
-            let mocks = Mocks {
-                auth: Mock::once_with_args(Ok),
-                by_id: Mock::once_with_args(Some),
-                search: Mock::once(|| ()),
-            };
-            let (resp, expected) = run(mocks).await;
-            resp.assert_status_ok();
-            resp.assert_json(&expected);
-        }
-
-        #[tokio::test]
-        async fn ok_when_user_is_admin() {
-            let mocks = Mocks {
-                auth: Mock::once_with_args(|usr| {
-                    Ok(User {
-                        role: Role::Admin,
-                        ..usr
-                    })
-                }),
-                by_id: Mock::once_with_args(Some),
-                search: Mock::once(|| ()),
-            };
-            let (resp, expected) = run(mocks).await;
-            resp.assert_status_ok();
-            resp.assert_json(&expected);
-        }
-    }
-
-    mod search_playlists_by_name {
-        use super::*;
-
-        // Mocks
-
-        #[derive(Clone, Default)]
-        struct Mocks {
-            auth: Mock<ApiResult<User>, User>,
-            convert: Mock<()>,
-            search: Mock<()>,
-        }
-
-        // Tests
-
-        async fn run(mocks: Mocks) -> (TestResponse, Page<PlaylistResponse>) {
-            let params = SearchQueryParam { q: "name".into() };
-            let auth_usr = User {
-                creation: Utc::now(),
-                creds: Default::default(),
-                id: Uuid::new_v4(),
-                role: Role::Admin,
-            };
-            let playlist = Playlist {
-                creation: Utc::now(),
-                id: Uuid::new_v4(),
-                name: "name".into(),
-                predicate: Predicate::YearIs(1993),
-                src: Source {
-                    creation: Utc::now(),
-                    id: Uuid::new_v4(),
-                    kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
-                    owner: auth_usr.clone(),
-                    sync: Synchronization::Pending,
-                },
-                sync: Synchronization::Pending,
-                tgt: Target::Spotify("id".into()),
-            };
-            let playlist_resp = DefaultConverter.convert_playlist(playlist.clone(), &auth_usr);
-            let page = Page {
-                first: true,
-                items: vec![],
-                last: true,
-                req: PageRequest::new(10, 0),
-                total: 0,
-            };
-            let req = PageRequestQueryParams::<25>::from(page.req);
-            let expected = page.clone().map(|_| playlist_resp.clone());
-            let mut auth = MockAuthenticator::new();
-            auth.expect_authenticate()
-                .times(mocks.auth.times())
-                .returning({
-                    let usr = auth_usr.clone();
-                    let mock = mocks.auth.clone();
-                    move |_, _| {
-                        Box::pin({
-                            let usr = usr.clone();
-                            let mock = mock.clone();
-                            Box::pin(async move { mock.call_with_args(usr.clone()) })
-                        })
-                    }
-                });
-            let db = MockDatabasePool {
-                acquire: Mock::once({
-                    let params = params.clone();
-                    let page = page.clone();
-                    let mocks = mocks.clone();
-                    move || {
-                        let mut conn = MockDatabaseConnection::new();
-                        conn.0
-                            .expect_search_playlists_by_name()
-                            .with(eq(params.q.clone()), eq(page.req))
-                            .times(mocks.search.times())
-                            .returning({
-                                let page = page.clone();
-                                move |_, _| Ok(page.clone())
-                            });
-                        conn
-                    }
-                }),
-                ..Default::default()
-            };
-            let mut conv = MockConverter::new();
-            conv.expect_convert_playlist()
-                .with(eq(playlist.clone()), eq(auth_usr.clone()))
-                .times(mocks.convert.times())
-                .returning({
-                    let playlist_resp = playlist_resp.clone();
-                    move |_, _| playlist_resp.clone()
-                });
-            let state = AppState {
-                db,
-                svc: MockServices {
-                    auth,
-                    conv,
-                    ..Default::default()
-                },
-                _dbconn: PhantomData,
-                _dbtx: PhantomData,
-            };
-            let server = init(state);
-            let resp = server
-                .get(&format!("{PATH_PLAYLIST}{PATH_SEARCH}"))
-                .add_query_params(params)
-                .add_query_params(req)
-                .await;
-            (resp, expected)
-        }
-
-        // Tests
-
-        #[tokio::test]
-        async fn unauthorized() {
-            let mocks = Mocks {
-                auth: Mock::once_with_args(|_| Err(ApiError::Unauthorized)),
-                ..Default::default()
-            };
-            let (resp, _) = run(mocks).await;
-            resp.assert_status_unauthorized();
-            assert!(resp.as_bytes().is_empty());
-        }
-
-        #[tokio::test]
-        async fn forbidden() {
-            let mocks = Mocks {
-                auth: Mock::once_with_args(|usr| {
-                    Ok(User {
-                        role: Role::User,
-                        ..usr
-                    })
-                }),
-                ..Default::default()
-            };
-            let (resp, _) = run(mocks).await;
-            resp.assert_status(StatusCode::FORBIDDEN);
-            assert!(resp.as_bytes().is_empty());
-        }
-
-        #[tokio::test]
-        async fn ok() {
-            let mocks = Mocks {
-                auth: Mock::once_with_args(Ok),
-                convert: Mock::once(|| ()),
-                search: Mock::once(|| ()),
-            };
-            let (resp, expected) = run(mocks).await;
-            resp.assert_status_ok();
-            resp.assert_json(&expected);
-        }
-    }
-
-    mod search_source_tracks_by_title_artists_album {
-        use super::*;
-
-        // Mocks
-
-        #[derive(Clone, Default)]
-        struct Mocks {
-            auth: Mock<ApiResult<User>, User>,
-            by_id: Mock<Option<Source>, Source>,
-            search: Mock<()>,
-        }
-
-        // Tests
-
-        async fn run(mocks: Mocks) -> (TestResponse, Page<Track>) {
-            let params = SearchQueryParam { q: "name".into() };
-            let auth_usr = User {
-                creation: Utc::now(),
-                creds: Default::default(),
-                id: Uuid::new_v4(),
-                role: Role::User,
-            };
-            let src = Source {
-                creation: Utc::now(),
-                id: Uuid::new_v4(),
-                kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
-                owner: auth_usr.clone(),
-                sync: Synchronization::Pending,
-            };
-            let page = Page {
-                first: true,
-                items: vec![],
-                last: true,
-                req: PageRequest::new(10, 0),
-                total: 0,
-            };
-            let req = PageRequestQueryParams::<25>::from(page.req);
-            let mut auth = MockAuthenticator::new();
-            auth.expect_authenticate()
-                .times(mocks.auth.times())
-                .returning({
-                    let usr = auth_usr.clone();
-                    let mock = mocks.auth.clone();
-                    move |_, _| {
-                        Box::pin({
-                            let usr = usr.clone();
-                            let mock = mock.clone();
-                            Box::pin(async move { mock.call_with_args(usr.clone()) })
-                        })
-                    }
-                });
-            let db = MockDatabasePool {
-                acquire: Mock::once({
-                    let params = params.clone();
-                    let src = src.clone();
-                    let page = page.clone();
-                    let mocks = mocks.clone();
-                    move || {
-                        let mut conn = MockDatabaseConnection::new();
-                        conn.0
-                            .expect_source_by_id()
-                            .with(eq(src.id))
-                            .times(mocks.by_id.times())
-                            .returning({
-                                let src = src.clone();
-                                let mock = mocks.by_id.clone();
-                                move |_| Ok(mock.call_with_args(src.clone()))
-                            });
-                        conn.0
-                            .expect_search_source_tracks_by_title_artists_album()
-                            .with(eq(src.id), eq(params.q.clone()), eq(page.req))
-                            .times(mocks.search.times())
-                            .returning({
-                                let page = page.clone();
-                                move |_, _, _| Ok(page.clone())
-                            });
-                        conn
-                    }
-                }),
-                ..Default::default()
-            };
-            let state = AppState {
-                db,
-                svc: MockServices {
-                    auth,
-                    ..Default::default()
-                },
-                _dbconn: PhantomData,
-                _dbtx: PhantomData,
-            };
-            let server = init(state);
-            let resp = server
-                .get(&format!("{PATH_SRC}/{}{PATH_TRACK}{PATH_SEARCH}", src.id))
-                .add_query_params(params)
-                .add_query_params(req)
-                .await;
-            (resp, page)
-        }
-
-        // Tests
-
-        #[tokio::test]
-        async fn unauthorized() {
-            let mocks = Mocks {
-                auth: Mock::once_with_args(|_| Err(ApiError::Unauthorized)),
-                ..Default::default()
-            };
-            let (resp, _) = run(mocks).await;
-            resp.assert_status_unauthorized();
-            assert!(resp.as_bytes().is_empty());
-        }
-
-        #[tokio::test]
-        async fn forbidden() {
-            let mocks = Mocks {
-                auth: Mock::once_with_args(|usr| {
-                    Ok(User {
-                        id: Uuid::new_v4(),
-                        ..usr
-                    })
-                }),
-                by_id: Mock::once_with_args(Some),
-                ..Default::default()
-            };
-            let (resp, _) = run(mocks).await;
-            resp.assert_status(StatusCode::FORBIDDEN);
-            assert!(resp.as_bytes().is_empty());
-        }
-
-        #[tokio::test]
-        async fn not_found() {
-            let mocks = Mocks {
-                auth: Mock::once_with_args(Ok),
-                by_id: Mock::once_with_args(|_| None),
-                ..Default::default()
-            };
-            let (resp, _) = run(mocks).await;
-            resp.assert_status_not_found();
-            assert!(resp.as_bytes().is_empty());
-        }
-
-        #[tokio::test]
-        async fn ok_when_user_is_owner() {
-            let mocks = Mocks {
-                auth: Mock::once_with_args(Ok),
-                by_id: Mock::once_with_args(Some),
-                search: Mock::once(|| ()),
-            };
-            let (resp, expected) = run(mocks).await;
-            resp.assert_status_ok();
-            resp.assert_json(&expected);
-        }
-
-        #[tokio::test]
-        async fn ok_when_user_is_admin() {
-            let mocks = Mocks {
-                auth: Mock::once_with_args(|usr| {
-                    Ok(User {
-                        role: Role::Admin,
-                        ..usr
-                    })
-                }),
-                by_id: Mock::once_with_args(Some),
-                search: Mock::once(|| ()),
-            };
-            let (resp, expected) = run(mocks).await;
-            resp.assert_status_ok();
-            resp.assert_json(&expected);
-        }
-    }
-
-    mod search_tracks_by_title_artists_album {
-        use super::*;
-
-        // Mocks
-
-        #[derive(Clone, Default)]
-        struct Mocks {
-            auth: Mock<ApiResult<User>, User>,
-            search: Mock<()>,
-        }
-
-        // Tests
-
-        async fn run(mocks: Mocks) -> (TestResponse, Page<Track>) {
-            let params = SearchQueryParam { q: "name".into() };
-            let auth_usr = User {
-                creation: Utc::now(),
-                creds: Default::default(),
-                id: Uuid::new_v4(),
-                role: Role::Admin,
-            };
-            let page = Page {
-                first: true,
-                items: vec![],
-                last: true,
-                req: PageRequest::new(10, 0),
-                total: 0,
-            };
-            let req = PageRequestQueryParams::<25>::from(page.req);
-            let mut auth = MockAuthenticator::new();
-            auth.expect_authenticate()
-                .times(mocks.auth.times())
-                .returning({
-                    let usr = auth_usr.clone();
-                    let mock = mocks.auth.clone();
-                    move |_, _| {
-                        Box::pin({
-                            let usr = usr.clone();
-                            let mock = mock.clone();
-                            Box::pin(async move { mock.call_with_args(usr.clone()) })
-                        })
-                    }
-                });
-            let db = MockDatabasePool {
-                acquire: Mock::once({
-                    let params = params.clone();
-                    let page = page.clone();
-                    let mocks = mocks.clone();
-                    move || {
-                        let mut conn = MockDatabaseConnection::new();
-                        conn.0
-                            .expect_search_tracks_by_title_artists_album()
-                            .with(eq(params.q.clone()), eq(page.req))
-                            .times(mocks.search.times())
-                            .returning({
-                                let page = page.clone();
-                                move |_, _| Ok(page.clone())
-                            });
-                        conn
-                    }
-                }),
-                ..Default::default()
-            };
-            let state = AppState {
-                db,
-                svc: MockServices {
-                    auth,
-                    ..Default::default()
-                },
-                _dbconn: PhantomData,
-                _dbtx: PhantomData,
-            };
-            let server = init(state);
-            let resp = server
-                .get(&format!("{PATH_TRACK}{PATH_SEARCH}"))
-                .add_query_params(params)
-                .add_query_params(req)
-                .await;
-            (resp, page)
-        }
-
-        // Tests
-
-        #[tokio::test]
-        async fn unauthorized() {
-            let mocks = Mocks {
-                auth: Mock::once_with_args(|_| Err(ApiError::Unauthorized)),
-                ..Default::default()
-            };
-            let (resp, _) = run(mocks).await;
-            resp.assert_status_unauthorized();
-            assert!(resp.as_bytes().is_empty());
-        }
-
-        #[tokio::test]
-        async fn ok() {
-            let mocks = Mocks {
-                auth: Mock::once_with_args(Ok),
-                search: Mock::once(|| ()),
-            };
-            let (resp, expected) = run(mocks).await;
-            resp.assert_status_ok();
-            resp.assert_json(&expected);
-        }
-    }
-
-    mod search_users_by_email {
-        use super::*;
-
-        // Mocks
-
-        #[derive(Clone, Default)]
-        struct Mocks {
-            auth: Mock<ApiResult<User>, User>,
-            convert: Mock<()>,
-            search: Mock<()>,
-        }
-
-        // Tests
-
-        async fn run(mocks: Mocks) -> (TestResponse, Page<UserResponse>) {
-            let params = SearchQueryParam { q: "name".into() };
-            let auth_usr = User {
-                creation: Utc::now(),
-                creds: Default::default(),
-                id: Uuid::new_v4(),
-                role: Role::Admin,
-            };
-            let usr = User {
-                creation: Utc::now(),
-                creds: Default::default(),
-                id: Uuid::new_v4(),
-                role: Role::User,
-            };
-            let usr_resp = DefaultConverter.convert_user(usr.clone());
-            let page = Page {
-                first: true,
-                items: vec![usr.clone()],
-                last: true,
-                req: PageRequest::new(10, 0),
-                total: 1,
-            };
-            let req = PageRequestQueryParams::<25>::from(page.req);
-            let expected = page.clone().map(|_| usr_resp.clone());
-            let mut auth = MockAuthenticator::new();
-            auth.expect_authenticate()
-                .times(mocks.auth.times())
-                .returning({
-                    let usr = auth_usr.clone();
-                    let mock = mocks.auth.clone();
-                    move |_, _| {
-                        Box::pin({
-                            let usr = usr.clone();
-                            let mock = mock.clone();
-                            Box::pin(async move { mock.call_with_args(usr.clone()) })
-                        })
-                    }
-                });
-            let db = MockDatabasePool {
-                acquire: Mock::once({
-                    let params = params.clone();
-                    let page = page.clone();
-                    let mocks = mocks.clone();
-                    move || {
-                        let mut conn = MockDatabaseConnection::new();
-                        conn.0
-                            .expect_search_users_by_email()
-                            .with(eq(params.q.clone()), eq(page.req))
-                            .times(mocks.search.times())
-                            .returning({
-                                let page = page.clone();
-                                move |_, _| Ok(page.clone())
-                            });
-                        conn
-                    }
-                }),
-                ..Default::default()
-            };
-            let mut conv = MockConverter::new();
-            conv.expect_convert_user()
-                .with(eq(usr.clone()))
-                .times(mocks.convert.times())
-                .returning({
-                    let usr_resp = usr_resp.clone();
-                    move |_| usr_resp.clone()
-                });
-            let state = AppState {
-                db,
-                svc: MockServices {
-                    auth,
-                    conv,
-                    ..Default::default()
-                },
-                _dbconn: PhantomData,
-                _dbtx: PhantomData,
-            };
-            let server = init(state);
-            let resp = server
-                .get(&format!("{PATH_USR}{PATH_SEARCH}"))
-                .add_query_params(params)
-                .add_query_params(req)
-                .await;
-            (resp, expected)
-        }
-
-        // Tests
-
-        #[tokio::test]
-        async fn unauthorized() {
-            let mocks = Mocks {
-                auth: Mock::once_with_args(|_| Err(ApiError::Unauthorized)),
-                ..Default::default()
-            };
-            let (resp, _) = run(mocks).await;
-            resp.assert_status_unauthorized();
-            assert!(resp.as_bytes().is_empty());
-        }
-
-        #[tokio::test]
-        async fn forbidden() {
-            let mocks = Mocks {
-                auth: Mock::once_with_args(|usr| {
-                    Ok(User {
-                        role: Role::User,
-                        ..usr
-                    })
-                }),
-                ..Default::default()
-            };
-            let (resp, _) = run(mocks).await;
-            resp.assert_status(StatusCode::FORBIDDEN);
-            assert!(resp.as_bytes().is_empty());
-        }
-
-        #[tokio::test]
-        async fn ok() {
-            let mocks = Mocks {
-                auth: Mock::once_with_args(Ok),
-                convert: Mock::once(|| ()),
-                search: Mock::once(|| ()),
-            };
-            let (resp, expected) = run(mocks).await;
-            resp.assert_status_ok();
-            resp.assert_json(&expected);
         }
     }
 
@@ -4394,18 +3579,26 @@ mod test {
     mod source_tracks {
         use super::*;
 
+        // Data
+
+        struct Data {
+            q: &'static str,
+            params: Option<SearchQueryParam>,
+        }
+
         // Mocks
 
         #[derive(Clone, Default)]
         struct Mocks {
             auth: Mock<ApiResult<User>, User>,
             by_id: Mock<Option<Source>, Source>,
+            search: Mock<()>,
             tracks: Mock<()>,
         }
 
         // Tests
 
-        async fn run(mocks: Mocks) -> (TestResponse, Page<Track>) {
+        async fn run(data: Data, mocks: Mocks) -> (TestResponse, Page<Track>) {
             let src = Source {
                 creation: Utc::now(),
                 id: Uuid::new_v4(),
@@ -4464,6 +3657,14 @@ mod test {
                                 let page = page.clone();
                                 move |_, _| Ok(page.clone())
                             });
+                        conn.0
+                            .expect_search_source_tracks_by_title_artists_album()
+                            .with(eq(src.id), eq(data.q), eq(page.req))
+                            .times(mocks.search.times())
+                            .returning({
+                                let page = page.clone();
+                                move |_, _, _| Ok(page.clone())
+                            });
                         conn
                     }
                 }),
@@ -4482,6 +3683,7 @@ mod test {
             let resp = server
                 .get(&format!("{PATH_SRC}/{}{PATH_TRACK}", src.id))
                 .add_query_params(req)
+                .add_query_params(&data.params)
                 .await;
             (resp, page)
         }
@@ -4490,17 +3692,25 @@ mod test {
 
         #[tokio::test]
         async fn unauthorized() {
+            let data = Data {
+                q: "q",
+                params: None,
+            };
             let mocks = Mocks {
                 auth: Mock::once_with_args(|_| Err(ApiError::Unauthorized)),
                 ..Default::default()
             };
-            let (resp, _) = run(mocks).await;
+            let (resp, _) = run(data, mocks).await;
             resp.assert_status_unauthorized();
             assert!(resp.as_bytes().is_empty());
         }
 
         #[tokio::test]
         async fn forbidden() {
+            let data = Data {
+                q: "q",
+                params: None,
+            };
             let mocks = Mocks {
                 auth: Mock::once_with_args(|usr| {
                     Ok(User {
@@ -4512,36 +3722,50 @@ mod test {
                 by_id: Mock::once_with_args(Some),
                 ..Default::default()
             };
-            let (resp, _) = run(mocks).await;
+            let (resp, _) = run(data, mocks).await;
             resp.assert_status(StatusCode::FORBIDDEN);
             assert!(resp.as_bytes().is_empty());
         }
 
         #[tokio::test]
         async fn not_found() {
+            let data = Data {
+                q: "q",
+                params: None,
+            };
             let mocks = Mocks {
                 auth: Mock::once_with_args(Ok),
                 by_id: Mock::once_with_args(|_| None),
                 ..Default::default()
             };
-            let (resp, _) = run(mocks).await;
+            let (resp, _) = run(data, mocks).await;
             assert!(resp.as_bytes().is_empty());
         }
 
         #[tokio::test]
         async fn ok_when_user_is_owner() {
+            let data = Data {
+                q: "q",
+                params: None,
+            };
             let mocks = Mocks {
                 auth: Mock::once_with_args(Ok),
                 by_id: Mock::once_with_args(Some),
                 tracks: Mock::once(|| ()),
+                ..Default::default()
             };
-            let (resp, expected) = run(mocks).await;
+            let (resp, expected) = run(data, mocks).await;
             resp.assert_status_ok();
             resp.assert_json(&expected);
         }
 
         #[tokio::test]
         async fn ok_when_user_is_admin() {
+            let q = "q";
+            let data = Data {
+                q,
+                params: Some(SearchQueryParam { q: q.into() }),
+            };
             let mocks = Mocks {
                 auth: Mock::once_with_args(|usr| {
                     Ok(User {
@@ -4550,9 +3774,10 @@ mod test {
                     })
                 }),
                 by_id: Mock::once_with_args(Some),
-                tracks: Mock::once(|| ()),
+                search: Mock::once(|| ()),
+                ..Default::default()
             };
-            let (resp, expected) = run(mocks).await;
+            let (resp, expected) = run(data, mocks).await;
             resp.assert_status_ok();
             resp.assert_json(&expected);
         }
@@ -5120,17 +4345,25 @@ mod test {
     mod tracks {
         use super::*;
 
+        // Data
+
+        struct Data {
+            q: &'static str,
+            params: Option<SearchQueryParam>,
+        }
+
         // Mocks
 
         #[derive(Clone, Default)]
         struct Mocks {
             auth: Mock<ApiResult<User>, User>,
+            search: Mock<()>,
             tracks: Mock<()>,
         }
 
         // Tests
 
-        async fn run(mocks: Mocks) -> (TestResponse, Page<Track>) {
+        async fn run(data: Data, mocks: Mocks) -> (TestResponse, Page<Track>) {
             let auth_usr = User {
                 creation: Utc::now(),
                 creds: Default::default(),
@@ -5173,6 +4406,14 @@ mod test {
                                 let page = page.clone();
                                 move |_| Ok(page.clone())
                             });
+                        conn.0
+                            .expect_search_tracks_by_title_artists_album()
+                            .with(eq(data.q), eq(page.req))
+                            .times(mocks.search.times())
+                            .returning({
+                                let page = page.clone();
+                                move |_, _| Ok(page.clone())
+                            });
                         conn
                     }
                 }),
@@ -5188,7 +4429,11 @@ mod test {
                 _dbtx: PhantomData,
             };
             let server = init(state);
-            let resp = server.get(PATH_TRACK).add_query_params(req).await;
+            let resp = server
+                .get(PATH_TRACK)
+                .add_query_params(req)
+                .add_query_params(&data.params)
+                .await;
             (resp, page)
         }
 
@@ -5196,22 +4441,48 @@ mod test {
 
         #[tokio::test]
         async fn unauthorized() {
+            let data = Data {
+                q: "q",
+                params: None,
+            };
             let mocks = Mocks {
                 auth: Mock::once_with_args(|_| Err(ApiError::Unauthorized)),
                 ..Default::default()
             };
-            let (resp, _) = run(mocks).await;
+            let (resp, _) = run(data, mocks).await;
             resp.assert_status_unauthorized();
             assert!(resp.as_bytes().is_empty());
         }
 
         #[tokio::test]
-        async fn ok() {
+        async fn ok_without_search() {
+            let data = Data {
+                q: "q",
+                params: None,
+            };
             let mocks = Mocks {
                 auth: Mock::once_with_args(Ok),
                 tracks: Mock::once(|| ()),
+                ..Default::default()
             };
-            let (resp, expected) = run(mocks).await;
+            let (resp, expected) = run(data, mocks).await;
+            resp.assert_status_ok();
+            resp.assert_json(&expected);
+        }
+
+        #[tokio::test]
+        async fn ok_with_search() {
+            let q = "q";
+            let data = Data {
+                q,
+                params: Some(SearchQueryParam { q: q.into() }),
+            };
+            let mocks = Mocks {
+                auth: Mock::once_with_args(Ok),
+                search: Mock::once(|| ()),
+                ..Default::default()
+            };
+            let (resp, expected) = run(data, mocks).await;
             resp.assert_status_ok();
             resp.assert_json(&expected);
         }
@@ -7020,18 +6291,26 @@ mod test {
     mod users {
         use super::*;
 
+        // Data
+
+        struct Data {
+            q: &'static str,
+            params: Option<SearchQueryParam>,
+        }
+
         // Mocks
 
         #[derive(Clone, Default)]
         struct Mocks {
             auth: Mock<ApiResult<User>, User>,
             convert: Mock<()>,
+            search: Mock<()>,
             usrs: Mock<()>,
         }
 
         // Tests
 
-        async fn run(mocks: Mocks) -> (TestResponse, Page<UserResponse>) {
+        async fn run(data: Data, mocks: Mocks) -> (TestResponse, Page<UserResponse>) {
             let auth_usr = User {
                 creation: Utc::now(),
                 creds: Default::default(),
@@ -7082,6 +6361,14 @@ mod test {
                                 let page = page.clone();
                                 move |_| Ok(page.clone())
                             });
+                        conn.0
+                            .expect_search_users_by_email()
+                            .with(eq(data.q), eq(page.req))
+                            .times(mocks.search.times())
+                            .returning({
+                                let page = page.clone();
+                                move |_, _| Ok(page.clone())
+                            });
                         conn
                     }
                 }),
@@ -7106,7 +6393,11 @@ mod test {
                 _dbtx: PhantomData,
             };
             let server = init(state);
-            let resp = server.get(PATH_USR).add_query_params(req).await;
+            let resp = server
+                .get(PATH_USR)
+                .add_query_params(req)
+                .add_query_params(&data.params)
+                .await;
             (resp, expected)
         }
 
@@ -7114,17 +6405,25 @@ mod test {
 
         #[tokio::test]
         async fn unauthorized() {
+            let data = Data {
+                q: "q",
+                params: None,
+            };
             let mocks = Mocks {
                 auth: Mock::once_with_args(|_| Err(ApiError::Unauthorized)),
                 ..Default::default()
             };
-            let (resp, _) = run(mocks).await;
+            let (resp, _) = run(data, mocks).await;
             resp.assert_status_unauthorized();
             assert!(resp.as_bytes().is_empty());
         }
 
         #[tokio::test]
         async fn forbidden() {
+            let data = Data {
+                q: "q",
+                params: None,
+            };
             let mocks = Mocks {
                 auth: Mock::once_with_args(|usr| {
                     Ok(User {
@@ -7134,19 +6433,42 @@ mod test {
                 }),
                 ..Default::default()
             };
-            let (resp, _) = run(mocks).await;
+            let (resp, _) = run(data, mocks).await;
             resp.assert_status(StatusCode::FORBIDDEN);
             assert!(resp.as_bytes().is_empty());
         }
 
         #[tokio::test]
-        async fn ok() {
+        async fn ok_without_search() {
+            let data = Data {
+                q: "q",
+                params: None,
+            };
             let mocks = Mocks {
                 auth: Mock::once_with_args(Ok),
                 convert: Mock::once(|| ()),
                 usrs: Mock::once(|| ()),
+                ..Default::default()
             };
-            let (resp, expected) = run(mocks).await;
+            let (resp, expected) = run(data, mocks).await;
+            resp.assert_status_ok();
+            resp.assert_json(&expected);
+        }
+
+        #[tokio::test]
+        async fn ok_with_search() {
+            let q = "q";
+            let data = Data {
+                q,
+                params: Some(SearchQueryParam { q: q.into() }),
+            };
+            let mocks = Mocks {
+                auth: Mock::once_with_args(Ok),
+                convert: Mock::once(|| ()),
+                search: Mock::once(|| ()),
+                ..Default::default()
+            };
+            let (resp, expected) = run(data, mocks).await;
             resp.assert_status_ok();
             resp.assert_json(&expected);
         }
