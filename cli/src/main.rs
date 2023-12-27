@@ -533,6 +533,8 @@ enum UserCommand {
     Playlists(UserPlaylistsCommandArgs),
     #[command(about = "List user sources")]
     Sources(UserSourcesCommandArgs),
+    #[command(about = "List user Spotify playlists")]
+    SpotifyPlaylists(UserSpotifyPlaylistsCommandArgs),
     #[command(about = "Update user")]
     Update(UserUpdateCommandArgs),
 }
@@ -589,6 +591,22 @@ struct UserSourcesCommandArgs {
     id: Uuid,
     #[command(flatten)]
     req: PageRequestArgs<25>,
+}
+
+// UserSpotifyPlaylistsCommandArgs
+
+#[derive(clap::Args, Clone, Debug, Eq, PartialEq)]
+struct UserSpotifyPlaylistsCommandArgs {
+    #[command(flatten)]
+    api_base_url: ApiBaseUrlArg,
+    #[command(flatten)]
+    api_token: TokenArg,
+    #[arg(help = "User ID")]
+    id: Uuid,
+    #[command(flatten)]
+    req: PageRequestArgs<25>,
+    #[arg(short, long, help = "Search by name")]
+    search: Option<String>,
 }
 
 // UserUpdateCommandArgs
@@ -1153,6 +1171,31 @@ impl<
                 .instrument(span)
                 .await
             }
+            Command::User(UserCommand::SpotifyPlaylists(args)) => {
+                let span = info_span!(
+                    "user_spotify_playlists",
+                    api_base_url = %args.api_base_url.value,
+                    params.limit = args.req.limit,
+                    params.offset = args.req.offset,
+                    params.search = args.search,
+                    usr.id = %args.id,
+                );
+                async {
+                    let api = self.svc.api(args.api_base_url.value);
+                    let req = PageRequestQueryParams::from(args.req);
+                    let resp = api
+                        .user_spotify_playlists(
+                            args.id,
+                            req,
+                            args.search.map(|q| SearchQueryParam { q }),
+                            &args.api_token.value,
+                        )
+                        .await?;
+                    Self::write_to_output(out, &resp)
+                }
+                .instrument(span)
+                .await
+            }
             Command::User(UserCommand::Update(args)) => {
                 let span = info_span!(
                     "update_user",
@@ -1283,8 +1326,8 @@ mod test {
         },
         db::{MockDatabaseConnection, MockDatabasePool, MockDatabaseTransaction},
         model::{
-            Album, PageRequest, Platform, Predicate, SourceKind, SpotifySourceKind, Target, Track,
-            User,
+            Album, PageRequest, Platform, PlatformPlaylist, Predicate, SourceKind,
+            SpotifySourceKind, Target, Track, User,
         },
     };
     use chrono::Utc;
@@ -1403,6 +1446,7 @@ mod test {
                 update_usr: Mock<UserResponse>,
                 usr_by_id: Mock<UserResponse>,
                 usr_playlists: Mock<Page<PlaylistResponse>>,
+                usr_spotify_playlists: Mock<Page<PlatformPlaylist>>,
                 usr_srcs: Mock<Page<SourceResponse>>,
                 usrs: Mock<Page<UserResponse>>,
             }
@@ -1659,6 +1703,18 @@ mod test {
                             .with(eq(data.id), eq(data.api_token))
                             .times(mocks.delete_track.times())
                             .returning(|_, _| Ok(()));
+                        api.expect_user_spotify_playlists()
+                            .with(
+                                eq(data.id),
+                                eq(req),
+                                eq(Some(params.clone())),
+                                eq(data.api_token),
+                            )
+                            .times(mocks.usr_spotify_playlists.times())
+                            .returning({
+                                let mock = mocks.usr_spotify_playlists.clone();
+                                move |_, _, _, _| Ok(mock.call())
+                            });
                         api
                     }
                 });
@@ -4025,6 +4081,85 @@ mod test {
                 };
                 let mocks = Mocks {
                     usr_srcs: Mock::once({
+                        let resp = resp.clone();
+                        move || resp.clone()
+                    }),
+                    ..Default::default()
+                };
+                let expected = serde_json::to_string(&resp).expect("failed to serialize");
+                let expected = format!("{expected}\n");
+                let out = run(data, mocks).await;
+                assert_eq!(out, expected);
+            }
+
+            #[tokio::test]
+            async fn user_spotify_playlists() {
+                let resp = Page {
+                    first: true,
+                    items: vec![],
+                    last: true,
+                    req: PageRequest::new(25, 0),
+                    total: 0,
+                };
+                let api_base_url = "http://localhost:8000";
+                let port = 3000;
+                let req = PageRequestArgs::<25> {
+                    limit: 25,
+                    offset: 0,
+                };
+                let id = Uuid::new_v4();
+                let q = "q";
+                let data = Data {
+                    api_base_url,
+                    api_token: "jwt",
+                    cmd: Command::User(UserCommand::SpotifyPlaylists(
+                        UserSpotifyPlaylistsCommandArgs {
+                            api_base_url: ApiBaseUrlArg {
+                                value: api_base_url.into(),
+                            },
+                            api_token: TokenArg {
+                                value: "jwt".into(),
+                            },
+                            id,
+                            req,
+                            search: Some(q.into()),
+                        },
+                    )),
+                    create_playlist_req: CreatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearIs(1993),
+                        src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
+                    },
+                    db: DatabaseArgs {
+                        host: "host".into(),
+                        name: "name".into(),
+                        password: "password".into(),
+                        port: 5432,
+                        secret: "secret".into(),
+                        user: "user".into(),
+                    },
+                    id,
+                    q,
+                    port,
+                    req,
+                    role: Role::Admin,
+                    update_playlist_req: UpdatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearIs(1993),
+                    },
+                    update_track_req: UpdateTrackRequest {
+                        album: Album {
+                            compil: false,
+                            name: "album".into(),
+                        },
+                        artists: Default::default(),
+                        title: "title".into(),
+                        year: 2020,
+                    },
+                    update_usr_req: UpdateUserRequest { role: Role::Admin },
+                };
+                let mocks = Mocks {
+                    usr_spotify_playlists: Mock::once({
                         let resp = resp.clone();
                         move || resp.clone()
                     }),

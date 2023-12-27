@@ -151,6 +151,16 @@ pub enum Platform {
     Spotify,
 }
 
+// PlatformPlaylist
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlatformPlaylist {
+    pub id: String,
+    pub name: String,
+    pub platform: Platform,
+}
+
 // Playlist
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

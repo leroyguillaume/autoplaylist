@@ -24,7 +24,7 @@ use crate::model::{
 
 use super::{
     DatabaseClient, DatabaseConnection, DatabaseError, DatabasePool, DatabaseResult,
-    DatabaseTransaction, PlaylistCreation, SourceCreation, TrackCreation,
+    DatabaseTransaction, PlatformPlaylist, PlaylistCreation, SourceCreation, TrackCreation,
 };
 
 // Macros
@@ -113,6 +113,15 @@ macro_rules! client_impl {
                 Ok(deleted)
             }
 
+            async fn delete_user_platform_playlists(
+                &mut self,
+                id: Uuid,
+                platform: Platform,
+            ) -> DatabaseResult<u64> {
+                let count = delete_user_platform_playlists(id, platform, &mut self.conn).await?;
+                Ok(count)
+            }
+
             async fn playlist_by_id(&mut self, id: Uuid) -> DatabaseResult<Option<Playlist>> {
                 let playlist = playlist_by_id(id, &self.key, &mut self.conn).await?;
                 Ok(playlist)
@@ -156,6 +165,15 @@ macro_rules! client_impl {
                 Ok(page)
             }
 
+            async fn save_user_platform_playlist(
+                &mut self,
+                id: Uuid,
+                playlist: &PlatformPlaylist,
+            ) -> DatabaseResult<()> {
+                save_user_platform_playlist(id, playlist, &mut self.conn).await?;
+                Ok(())
+            }
+
             async fn search_playlist_tracks_by_title_artists_album(
                 &mut self,
                 id: Uuid,
@@ -194,6 +212,19 @@ macro_rules! client_impl {
                 req: PageRequest,
             ) -> DatabaseResult<Page<Track>> {
                 let page = search_tracks_by_title_artists_album(q, req, &mut self.conn).await?;
+                Ok(page)
+            }
+
+            async fn search_user_platform_playlists_by_name(
+                &mut self,
+                id: Uuid,
+                platform: Platform,
+                q: &str,
+                req: PageRequest,
+            ) -> DatabaseResult<Page<PlatformPlaylist>> {
+                let page =
+                    search_user_platform_playlists_by_name(id, platform, q, req, &mut self.conn)
+                        .await?;
                 Ok(page)
             }
 
@@ -324,6 +355,16 @@ macro_rules! client_impl {
             async fn user_exists(&mut self, id: Uuid) -> DatabaseResult<bool> {
                 let exists = user_exists(id, &mut self.conn).await?;
                 Ok(exists)
+            }
+
+            async fn user_platform_playlists(
+                &mut self,
+                id: Uuid,
+                platform: Platform,
+                req: PageRequest,
+            ) -> DatabaseResult<Page<PlatformPlaylist>> {
+                let page = user_platform_playlists(id, platform, req, &mut self.conn).await?;
+                Ok(page)
             }
 
             async fn user_playlists(
@@ -569,6 +610,24 @@ impl From<PostgresError> for DatabaseError {
 impl From<sqlx::Error> for DatabaseError {
     fn from(err: sqlx::Error) -> Self {
         Self(Box::new(PostgresError::Client(err)))
+    }
+}
+
+// PlatformPlaylistRecord
+
+struct PlatformPlaylistRecord {
+    platform_playlist_id: String,
+    platform_playlist_name: String,
+    platform_playlist_platform: Platform,
+}
+
+impl PlatformPlaylistRecord {
+    fn into_entity(self) -> PlatformPlaylist {
+        PlatformPlaylist {
+            id: self.platform_playlist_id,
+            name: self.platform_playlist_name,
+            platform: self.platform_playlist_platform,
+        }
     }
 }
 
@@ -1171,6 +1230,41 @@ async fn delete_user<'a, A: Acquire<'a, Database = Postgres, Connection = &'a mu
     .await
 }
 
+// delete_user_platform_playlists
+
+#[inline]
+async fn delete_user_platform_playlists<
+    'a,
+    A: Acquire<'a, Database = Postgres, Connection = &'a mut PgConnection>,
+>(
+    id: Uuid,
+    platform: Platform,
+    conn: A,
+) -> PostgresResult<u64> {
+    let span = info_span!(
+        "delete_user_platform_playlists",
+        platform_playlist.platform = %platform,
+        usr.id = %id,
+    );
+    async {
+        trace!("acquiring database connection");
+        let conn = conn.acquire().await?;
+        debug!("deleting user platform playlists");
+        let res = query_file!(
+            "resources/main/db/pg/queries/delete-user-platform-playlists.sql",
+            id,
+            platform as _,
+        )
+        .execute(&mut *conn)
+        .await?;
+        let count = res.rows_affected();
+        debug!(count, "user platform playlists deleted");
+        Ok(count)
+    }
+    .instrument(span)
+    .await
+}
+
 // encrypt_credentials
 
 #[inline]
@@ -1425,6 +1519,43 @@ async fn playlists<'a, A: Acquire<'a, Database = Postgres, Connection = &'a mut 
     .await
 }
 
+// save_user_platform_playlist
+
+#[inline]
+async fn save_user_platform_playlist<
+    'a,
+    A: Acquire<'a, Database = Postgres, Connection = &'a mut PgConnection>,
+>(
+    id: Uuid,
+    playlist: &PlatformPlaylist,
+    conn: A,
+) -> PostgresResult<()> {
+    let span = info_span!(
+        "save_user_platform_playlist",
+        platform_playlist.id = playlist.id,
+        platform_playlist.name = playlist.name,
+        platform_playlist.platform = %playlist.platform,
+        usr.id = %id,
+    );
+    async {
+        trace!("acquiring database connection");
+        let conn = conn.acquire().await?;
+        debug!("saving user platform playlist");
+        query_file!(
+            "resources/main/db/pg/queries/save-user-platform-playlist.sql",
+            playlist.id,
+            id,
+            playlist.name,
+            playlist.platform as _,
+        )
+        .execute(&mut *conn)
+        .await?;
+        Ok(())
+    }
+    .instrument(span)
+    .await
+}
+
 // search_playlist_tracks_by_title_artists_album
 
 #[inline]
@@ -1645,6 +1776,69 @@ async fn search_tracks_by_title_artists_album<
                 .into_iter()
                 .map(|record| record.into_entity())
                 .collect::<PostgresResult<Vec<_>>>()?,
+            last: (req.offset + req.limit) >= total,
+            req,
+            total,
+        })
+    }
+    .instrument(span)
+    .await
+}
+
+// search_user_platform_playlists_by_name
+
+#[inline]
+async fn search_user_platform_playlists_by_name<
+    'a,
+    A: Acquire<'a, Database = Postgres, Connection = &'a mut PgConnection>,
+>(
+    id: Uuid,
+    platform: Platform,
+    q: &str,
+    req: PageRequest,
+    conn: A,
+) -> PostgresResult<Page<PlatformPlaylist>> {
+    let span = info_span!(
+        "search_user_platform_playlists_by_name",
+        params.limit = req.limit,
+        params.offset = req.offset,
+        params.q = q,
+        playlist.platform = %platform,
+        usr.id = %id,
+    );
+    async {
+        let limit: i64 = req.limit.into();
+        let offset: i64 = req.offset.into();
+        trace!("acquiring database connection");
+        let conn = conn.acquire().await?;
+        debug!("counting user platform playlists matching query");
+        let record = query_file!(
+            "resources/main/db/pg/queries/count-search-user-platform-playlists-by-name.sql",
+            &id,
+            platform as _,
+            q
+        )
+        .fetch_one(&mut *conn)
+        .await?;
+        let total = record.count.unwrap_or(0).try_into()?;
+        debug!("fetching user platform playlists matching query");
+        let records = query_file_as!(
+            PlatformPlaylistRecord,
+            "resources/main/db/pg/queries/search-user-platform-playlists-by-name.sql",
+            &id,
+            platform as _,
+            q,
+            limit,
+            offset,
+        )
+        .fetch_all(&mut *conn)
+        .await?;
+        Ok(Page {
+            first: req.offset == 0,
+            items: records
+                .into_iter()
+                .map(|record| record.into_entity())
+                .collect(),
             last: (req.offset + req.limit) >= total,
             req,
             total,
@@ -2393,6 +2587,65 @@ async fn user_exists<'a, A: Acquire<'a, Database = Postgres, Connection = &'a mu
     .await
 }
 
+// user_platform_playlists
+
+#[inline]
+async fn user_platform_playlists<
+    'a,
+    A: Acquire<'a, Database = Postgres, Connection = &'a mut PgConnection>,
+>(
+    id: Uuid,
+    platform: Platform,
+    req: PageRequest,
+    conn: A,
+) -> PostgresResult<Page<PlatformPlaylist>> {
+    let span = info_span!(
+        "user_platform_playlists",
+        params.limit = req.limit,
+        params.offset = req.offset,
+        playlist_platform.platform = %platform,
+        usr.id = %id,
+    );
+    async {
+        let limit: i64 = req.limit.into();
+        let offset: i64 = req.offset.into();
+        trace!("acquiring database connection");
+        let conn = conn.acquire().await?;
+        debug!("counting user platform playlists");
+        let record = query_file!(
+            "resources/main/db/pg/queries/count-user-platform-playlists.sql",
+            id,
+            platform as _,
+        )
+        .fetch_one(&mut *conn)
+        .await?;
+        let total = record.count.unwrap_or(0).try_into()?;
+        debug!("fetching user platform playlists");
+        let records = query_file_as!(
+            PlatformPlaylistRecord,
+            "resources/main/db/pg/queries/user-platform-playlists.sql",
+            id,
+            platform as _,
+            limit,
+            offset,
+        )
+        .fetch_all(&mut *conn)
+        .await?;
+        Ok(Page {
+            first: req.offset == 0,
+            items: records
+                .into_iter()
+                .map(|record| record.into_entity())
+                .collect(),
+            last: (req.offset + req.limit) >= total,
+            req,
+            total,
+        })
+    }
+    .instrument(span)
+    .await
+}
+
 // user_playlists
 
 #[inline]
@@ -2571,7 +2824,7 @@ mod test {
         playlists: Vec<Playlist>,
         srcs: Vec<Source>,
         tracks: Vec<Track>,
-        usrs: Vec<User>,
+        usrs: Vec<FullUser>,
     }
 
     impl Data {
@@ -2636,93 +2889,133 @@ mod test {
                 title: "panopticom".into(),
                 year: 2023,
             };
-            let usr_1 = User {
-                creation: DateTime::parse_from_rfc3339("2023-01-01T00:00:00Z")
-                    .expect("failed to parse date")
-                    .into(),
-                creds: Credentials {
-                    spotify: Some(SpotifyCredentials {
-                        email: "user_1@test".into(),
-                        id: "user_1".into(),
-                        token: SpotifyToken {
-                            access: "access".into(),
-                            expiration: DateTime::parse_from_rfc3339("2023-01-01T03:00:00Z")
-                                .expect("failed to parse date")
-                                .into(),
-                            refresh: "refresh".into(),
-                        },
-                    }),
+            let usr_1 = FullUser {
+                usr: User {
+                    creation: DateTime::parse_from_rfc3339("2023-01-01T00:00:00Z")
+                        .expect("failed to parse date")
+                        .into(),
+                    creds: Credentials {
+                        spotify: Some(SpotifyCredentials {
+                            email: "user_1@test".into(),
+                            id: "user_1".into(),
+                            token: SpotifyToken {
+                                access: "access".into(),
+                                expiration: DateTime::parse_from_rfc3339("2023-01-01T03:00:00Z")
+                                    .expect("failed to parse date")
+                                    .into(),
+                                refresh: "refresh".into(),
+                            },
+                        }),
+                    },
+                    id: Uuid::from_u128(0xee21186a990c42e9bcd269f9090a7736),
+                    role: Role::Admin,
                 },
-                id: Uuid::from_u128(0xee21186a990c42e9bcd269f9090a7736),
-                role: Role::Admin,
+                spotify_playlists: vec![
+                    PlatformPlaylist {
+                        id: "playlist_1".into(),
+                        name: "playlist_1".into(),
+                        platform: Platform::Spotify,
+                    },
+                    PlatformPlaylist {
+                        id: "playlist_2".into(),
+                        name: "playlist_2".into(),
+                        platform: Platform::Spotify,
+                    },
+                    PlatformPlaylist {
+                        id: "playlist_3".into(),
+                        name: "playlist_3".into(),
+                        platform: Platform::Spotify,
+                    },
+                    PlatformPlaylist {
+                        id: "test".into(),
+                        name: "test".into(),
+                        platform: Platform::Spotify,
+                    },
+                ],
             };
-            let usr_2 = User {
-                creation: DateTime::parse_from_rfc3339("2023-02-01T00:00:00Z")
-                    .expect("failed to parse date")
-                    .into(),
-                creds: Credentials {
-                    spotify: Some(SpotifyCredentials {
-                        email: "user_2@test".into(),
-                        id: "user_2".into(),
-                        token: SpotifyToken {
-                            access: "access".into(),
-                            expiration: DateTime::parse_from_rfc3339("2023-01-01T03:00:00Z")
-                                .expect("failed to parse date")
-                                .into(),
-                            refresh: "refresh".into(),
-                        },
-                    }),
+            let usr_2 = FullUser {
+                usr: User {
+                    creation: DateTime::parse_from_rfc3339("2023-02-01T00:00:00Z")
+                        .expect("failed to parse date")
+                        .into(),
+                    creds: Credentials {
+                        spotify: Some(SpotifyCredentials {
+                            email: "user_2@test".into(),
+                            id: "user_2".into(),
+                            token: SpotifyToken {
+                                access: "access".into(),
+                                expiration: DateTime::parse_from_rfc3339("2023-01-01T03:00:00Z")
+                                    .expect("failed to parse date")
+                                    .into(),
+                                refresh: "refresh".into(),
+                            },
+                        }),
+                    },
+                    id: Uuid::from_u128(0xec1ca9f93c4744a295c7a13ff6de852d),
+                    role: Role::User,
                 },
-                id: Uuid::from_u128(0xec1ca9f93c4744a295c7a13ff6de852d),
-                role: Role::User,
+                spotify_playlists: vec![PlatformPlaylist {
+                    id: "playlist_4".into(),
+                    name: "playlist_4".into(),
+                    platform: Platform::Spotify,
+                }],
             };
-            let usr_3 = User {
-                creation: DateTime::parse_from_rfc3339("2023-03-01T00:00:00Z")
-                    .expect("failed to parse date")
-                    .into(),
-                creds: Credentials {
-                    spotify: Some(SpotifyCredentials {
-                        email: "test_3@test".into(),
-                        id: "user_3".into(),
-                        token: SpotifyToken {
-                            access: "access".into(),
-                            expiration: DateTime::parse_from_rfc3339("2023-01-01T03:00:00Z")
-                                .expect("failed to parse date")
-                                .into(),
-                            refresh: "refresh".into(),
-                        },
-                    }),
+            let usr_3 = FullUser {
+                usr: User {
+                    creation: DateTime::parse_from_rfc3339("2023-03-01T00:00:00Z")
+                        .expect("failed to parse date")
+                        .into(),
+                    creds: Credentials {
+                        spotify: Some(SpotifyCredentials {
+                            email: "test_3@test".into(),
+                            id: "user_3".into(),
+                            token: SpotifyToken {
+                                access: "access".into(),
+                                expiration: DateTime::parse_from_rfc3339("2023-01-01T03:00:00Z")
+                                    .expect("failed to parse date")
+                                    .into(),
+                                refresh: "refresh".into(),
+                            },
+                        }),
+                    },
+                    id: Uuid::from_u128(0x8fc899c5f25449669b5ae8f1c4f97f7c),
+                    role: Role::User,
                 },
-                id: Uuid::from_u128(0x8fc899c5f25449669b5ae8f1c4f97f7c),
-                role: Role::User,
+                spotify_playlists: vec![],
             };
-            let usr_4 = User {
-                creation: DateTime::parse_from_rfc3339("2023-04-01T00:00:00Z")
-                    .expect("failed to parse date")
-                    .into(),
-                creds: Default::default(),
-                id: Uuid::from_u128(0x83e3a7ed9d6c4e4fb7328a00cab3fcb5),
-                role: Role::User,
-            };
-            let usr_5 = User {
-                creation: DateTime::parse_from_rfc3339("2023-05-01T00:00:00Z")
-                    .expect("failed to parse date")
-                    .into(),
-                creds: Credentials {
-                    spotify: Some(SpotifyCredentials {
-                        email: "user_5@test".into(),
-                        id: "user_5".into(),
-                        token: SpotifyToken {
-                            access: "access".into(),
-                            expiration: DateTime::parse_from_rfc3339("2023-01-01T03:00:00Z")
-                                .expect("failed to parse date")
-                                .into(),
-                            refresh: "refresh".into(),
-                        },
-                    }),
+            let usr_4 = FullUser {
+                usr: User {
+                    creation: DateTime::parse_from_rfc3339("2023-04-01T00:00:00Z")
+                        .expect("failed to parse date")
+                        .into(),
+                    creds: Default::default(),
+                    id: Uuid::from_u128(0x83e3a7ed9d6c4e4fb7328a00cab3fcb5),
+                    role: Role::User,
                 },
-                id: Uuid::from_u128(0xee187392847143f4a3cde541fd7640f4),
-                role: Role::User,
+                spotify_playlists: vec![],
+            };
+            let usr_5 = FullUser {
+                usr: User {
+                    creation: DateTime::parse_from_rfc3339("2023-05-01T00:00:00Z")
+                        .expect("failed to parse date")
+                        .into(),
+                    creds: Credentials {
+                        spotify: Some(SpotifyCredentials {
+                            email: "user_5@test".into(),
+                            id: "user_5".into(),
+                            token: SpotifyToken {
+                                access: "access".into(),
+                                expiration: DateTime::parse_from_rfc3339("2023-01-01T03:00:00Z")
+                                    .expect("failed to parse date")
+                                    .into(),
+                                refresh: "refresh".into(),
+                            },
+                        }),
+                    },
+                    id: Uuid::from_u128(0xee187392847143f4a3cde541fd7640f4),
+                    role: Role::User,
+                },
+                spotify_playlists: vec![],
             };
             let src_1 = Source {
                 creation: DateTime::parse_from_rfc3339("2023-01-05T01:00:00Z")
@@ -2730,7 +3023,7 @@ mod test {
                     .into(),
                 id: Uuid::from_u128(0x911ca8e748744bf4b8e11ddd1b6cee41),
                 kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
-                owner: usr_1.clone(),
+                owner: usr_1.usr.clone(),
                 sync: Synchronization::Pending,
             };
             let src_2 = Source {
@@ -2739,7 +3032,7 @@ mod test {
                     .into(),
                 id: Uuid::from_u128(0xf1c418db13c047a79ecb9aa4cf4995eb),
                 kind: SourceKind::Spotify(SpotifySourceKind::Playlist("src_2".into())),
-                owner: usr_1.clone(),
+                owner: usr_1.usr.clone(),
                 sync: Synchronization::Running(
                     DateTime::parse_from_rfc3339("2023-02-05T00:00:10Z")
                         .expect("failed to parse date")
@@ -2752,7 +3045,7 @@ mod test {
                     .into(),
                 id: Uuid::from_u128(0x12d423d13bc04eefb0c66748beb7d52e),
                 kind: SourceKind::Spotify(SpotifySourceKind::Playlist("src_3".into())),
-                owner: usr_1.clone(),
+                owner: usr_1.usr.clone(),
                 sync: Synchronization::Pending,
             };
             let src_4 = Source {
@@ -2761,7 +3054,7 @@ mod test {
                     .into(),
                 id: Uuid::from_u128(0xa23c9cc92b7246db9a52922f1c09db01),
                 kind: SourceKind::Spotify(SpotifySourceKind::Playlist("src_4".into())),
-                owner: usr_2.clone(),
+                owner: usr_2.usr.clone(),
                 sync: Synchronization::Pending,
             };
             Self {
@@ -2848,6 +3141,14 @@ mod test {
         fn default() -> Self {
             Self::new()
         }
+    }
+
+    // FullUser
+
+    #[derive(Debug, Clone)]
+    struct FullUser {
+        spotify_playlists: Vec<PlatformPlaylist>,
+        usr: User,
     }
 
     // init
@@ -3112,7 +3413,7 @@ mod test {
                 let mut conn = db.acquire().await.expect("failed to acquire connection");
                 let creation = SourceCreation {
                     kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
-                    owner: data.usrs[1].clone(),
+                    owner: data.usrs[1].usr.clone(),
                 };
                 let src = conn
                     .create_source(&creation)
@@ -3324,7 +3625,7 @@ mod test {
             // Tests
 
             #[sqlx::test]
-            async fn unit(db: PgPool) {
+            async fn count(db: PgPool) {
                 let data = Data::new();
                 let id = data.playlists[0].id;
                 let db = init(db).await;
@@ -3348,7 +3649,7 @@ mod test {
             // Tests
 
             #[sqlx::test]
-            async fn unit(db: PgPool) {
+            async fn count(db: PgPool) {
                 let data = Data::new();
                 let id = data.srcs[0].id;
                 let db = init(db).await;
@@ -3391,9 +3692,28 @@ mod test {
             #[sqlx::test]
             async fn yes(db: PgPool) {
                 let data = Data::new();
-                let id = data.usrs[0].id;
+                let id = data.usrs[0].usr.id;
                 let deleted = run(id, db).await;
                 assert!(deleted);
+            }
+        }
+
+        mod delete_platform_spotify_playlists {
+            use super::*;
+
+            // Tests
+
+            #[sqlx::test]
+            async fn count(db: PgPool) {
+                let data = Data::new();
+                let db = init(db).await;
+                let id = data.usrs[0].usr.id;
+                let mut conn = db.acquire().await.expect("failed to acquire connection");
+                let count = conn
+                    .delete_user_platform_playlists(id, Platform::Spotify)
+                    .await
+                    .expect("failed to delete user platform playlists");
+                assert_eq!(count, 4);
             }
         }
 
@@ -3599,6 +3919,33 @@ mod test {
             }
         }
 
+        mod save_user_platform_playlist {
+            use super::*;
+
+            // Tests
+
+            #[sqlx::test]
+            async fn unit(db: PgPool) {
+                let data = Data::new();
+                let id = data.usrs[0].usr.id;
+                let playlist = PlatformPlaylist {
+                    id: "playlist_5".into(),
+                    name: "playlist_5".into(),
+                    platform: Platform::Spotify,
+                };
+                let db = init(db).await;
+                let mut conn = db.acquire().await.expect("failed to acquire connection");
+                conn.save_user_platform_playlist(id, &playlist)
+                    .await
+                    .expect("failed to save user platform playlist");
+                let playlists = conn
+                    .user_platform_playlists(id, playlist.platform, PageRequest::new(100, 0))
+                    .await
+                    .expect("failed to fetch user platform playlists");
+                assert!(playlists.items.contains(&playlist));
+            }
+        }
+
         mod search_playlist_tracks_by_title_artists_album {
             use super::*;
 
@@ -3626,7 +3973,7 @@ mod test {
                     req: PageRequest::new(100, 0),
                     total: 1,
                 };
-                run(data.playlists[0].id, "nEvEr", expected, db).await;
+                run(data.playlists[0].id, "EvEr", expected, db).await;
             }
 
             #[sqlx::test]
@@ -3639,7 +3986,7 @@ mod test {
                     req: PageRequest::new(100, 0),
                     total: 1,
                 };
-                run(data.playlists[0].id, "cHuCk", expected, db).await;
+                run(data.playlists[0].id, "HuCk", expected, db).await;
             }
 
             #[sqlx::test]
@@ -3652,7 +3999,7 @@ mod test {
                     req: PageRequest::new(100, 0),
                     total: 1,
                 };
-                run(data.playlists[0].id, "lOuIs", expected, db).await;
+                run(data.playlists[0].id, "OuIs", expected, db).await;
             }
 
             #[sqlx::test]
@@ -3718,7 +4065,7 @@ mod test {
                     req: PageRequest::new(100, 0),
                     total: 4,
                 };
-                run("PlAyLiSt", expected, db).await;
+                run("lAyLiSt", expected, db).await;
             }
 
             #[sqlx::test]
@@ -3731,7 +4078,7 @@ mod test {
                     req: PageRequest::new(1, 1),
                     total: 4,
                 };
-                run("PlAyLiSt", expected, db).await;
+                run("lAyLiSt", expected, db).await;
             }
         }
 
@@ -3762,7 +4109,7 @@ mod test {
                     req: PageRequest::new(100, 0),
                     total: 1,
                 };
-                run(data.srcs[0].id, "nEvEr", expected, db).await;
+                run(data.srcs[0].id, "EvEr", expected, db).await;
             }
 
             #[sqlx::test]
@@ -3775,7 +4122,7 @@ mod test {
                     req: PageRequest::new(100, 0),
                     total: 1,
                 };
-                run(data.srcs[0].id, "cHuCk", expected, db).await;
+                run(data.srcs[0].id, "HuCk", expected, db).await;
             }
 
             #[sqlx::test]
@@ -3788,7 +4135,7 @@ mod test {
                     req: PageRequest::new(100, 0),
                     total: 1,
                 };
-                run(data.srcs[0].id, "lOuIs", expected, db).await;
+                run(data.srcs[0].id, "OuIs", expected, db).await;
             }
 
             #[sqlx::test]
@@ -3849,7 +4196,7 @@ mod test {
                     req: PageRequest::new(100, 0),
                     total: 1,
                 };
-                run("nEvEr", expected, db).await;
+                run("EvEr", expected, db).await;
             }
 
             #[sqlx::test]
@@ -3862,7 +4209,7 @@ mod test {
                     req: PageRequest::new(100, 0),
                     total: 1,
                 };
-                run("cHuCk", expected, db).await;
+                run("HuCk", expected, db).await;
             }
 
             #[sqlx::test]
@@ -3875,7 +4222,7 @@ mod test {
                     req: PageRequest::new(100, 0),
                     total: 1,
                 };
-                run("lOuIs", expected, db).await;
+                run("OuIs", expected, db).await;
             }
 
             #[sqlx::test]
@@ -3910,6 +4257,56 @@ mod test {
             }
         }
 
+        mod search_user_platform_playlists_by_name {
+            use super::*;
+
+            // run
+
+            async fn run(id: Uuid, q: &str, expected: Page<PlatformPlaylist>, db: PgPool) {
+                let db = init(db).await;
+                let mut conn = db.acquire().await.expect("failed to acquire connection");
+                let page = conn
+                    .search_user_platform_playlists_by_name(id, Platform::Spotify, q, expected.req)
+                    .await
+                    .expect("failed to fetch playlists");
+                assert_eq!(page, expected);
+            }
+
+            // Tests
+
+            #[sqlx::test]
+            async fn first_and_last(db: PgPool) {
+                let data = Data::new();
+                let usr = &data.usrs[0];
+                let expected = Page {
+                    first: true,
+                    items: vec![
+                        usr.spotify_playlists[0].clone(),
+                        usr.spotify_playlists[1].clone(),
+                        usr.spotify_playlists[2].clone(),
+                    ],
+                    last: true,
+                    req: PageRequest::new(100, 0),
+                    total: 3,
+                };
+                run(usr.usr.id, "lAyLiSt", expected, db).await;
+            }
+
+            #[sqlx::test]
+            async fn middle(db: PgPool) {
+                let data = Data::new();
+                let usr = &data.usrs[0];
+                let expected = Page {
+                    first: false,
+                    items: vec![usr.spotify_playlists[1].clone()],
+                    last: false,
+                    req: PageRequest::new(1, 1),
+                    total: 3,
+                };
+                run(usr.usr.id, "lAyLiSt", expected, db).await;
+            }
+        }
+
         mod search_user_playlists_by_name {
             use super::*;
 
@@ -3941,7 +4338,7 @@ mod test {
                     req: PageRequest::new(100, 0),
                     total: 3,
                 };
-                run(data.usrs[0].id, "PlAyLiSt", expected, db).await;
+                run(data.usrs[0].usr.id, "lAyLiSt", expected, db).await;
             }
 
             #[sqlx::test]
@@ -3954,7 +4351,7 @@ mod test {
                     req: PageRequest::new(1, 1),
                     total: 3,
                 };
-                run(data.usrs[0].id, "PlAyLiSt", expected, db).await;
+                run(data.usrs[0].usr.id, "lAyLiSt", expected, db).await;
             }
         }
 
@@ -3981,15 +4378,15 @@ mod test {
                 let expected = Page {
                     first: true,
                     items: vec![
-                        data.usrs[0].clone(),
-                        data.usrs[1].clone(),
-                        data.usrs[4].clone(),
+                        data.usrs[0].usr.clone(),
+                        data.usrs[1].usr.clone(),
+                        data.usrs[4].usr.clone(),
                     ],
                     last: true,
                     req: PageRequest::new(100, 0),
                     total: 3,
                 };
-                run("UsEr", expected, db).await;
+                run("sEr", expected, db).await;
             }
 
             #[sqlx::test]
@@ -3997,12 +4394,12 @@ mod test {
                 let data = Data::new();
                 let expected = Page {
                     first: false,
-                    items: vec![data.usrs[1].clone()],
+                    items: vec![data.usrs[1].usr.clone()],
                     last: false,
                     req: PageRequest::new(1, 1),
                     total: 3,
                 };
-                run("UsEr", expected, db).await;
+                run("sEr", expected, db).await;
             }
         }
 
@@ -4441,7 +4838,7 @@ mod test {
                     creation: Utc::now(),
                     id,
                     kind: SourceKind::Spotify(SpotifySourceKind::Playlist("id".into())),
-                    owner: data.usrs[1].clone(),
+                    owner: data.usrs[1].usr.clone(),
                     sync: src_expected.sync.clone(),
                 };
                 let updated = conn
@@ -4494,7 +4891,7 @@ mod test {
                     creation: Utc::now(),
                     id,
                     kind: SourceKind::Spotify(SpotifySourceKind::Playlist("id".into())),
-                    owner: data.usrs[1].clone(),
+                    owner: data.usrs[1].usr.clone(),
                     sync: src_expected.sync.clone(),
                 };
                 let updated = conn
@@ -4662,13 +5059,13 @@ mod test {
             #[sqlx::test]
             async fn no(db: PgPool) {
                 let data = Data::new();
-                run(Uuid::new_v4(), &data.usrs[0], false, db).await;
+                run(Uuid::new_v4(), &data.usrs[0].usr, false, db).await;
             }
 
             #[sqlx::test]
             async fn yes(db: PgPool) {
                 let data = Data::new();
-                let usr = &data.usrs[0];
+                let usr = &data.usrs[0].usr;
                 run(usr.id, usr, true, db).await;
             }
         }
@@ -4695,7 +5092,7 @@ mod test {
             #[sqlx::test]
             async fn user(db: PgPool) {
                 let data = Data::new();
-                let usr = &data.usrs[0];
+                let usr = &data.usrs[0].usr;
                 run(usr.id, Some(usr), db).await;
             }
         }
@@ -4725,7 +5122,7 @@ mod test {
             #[sqlx::test]
             async fn user(db: PgPool) {
                 let data = Data::new();
-                let usr = &data.usrs[0];
+                let usr = &data.usrs[0].usr;
                 run("user_1", Some(usr), db).await;
             }
         }
@@ -4755,7 +5152,7 @@ mod test {
             #[sqlx::test]
             async fn true_when_user_exists(db: PgPool) {
                 let data = Data::new();
-                let id = data.usrs[3].id;
+                let id = data.usrs[3].usr.id;
                 run(id, true, db).await;
             }
         }
@@ -4792,7 +5189,7 @@ mod test {
                     req: PageRequest::new(100, 0),
                     total: 4,
                 };
-                run(data.usrs[0].id, expected, db).await;
+                run(data.usrs[0].usr.id, expected, db).await;
             }
 
             #[sqlx::test]
@@ -4805,7 +5202,7 @@ mod test {
                     req: PageRequest::new(1, 1),
                     total: 4,
                 };
-                run(data.usrs[0].id, expected, db).await;
+                run(data.usrs[0].usr.id, expected, db).await;
             }
         }
 
@@ -4840,7 +5237,7 @@ mod test {
                     req: PageRequest::new(100, 0),
                     total: 3,
                 };
-                run(data.usrs[0].id, expected, db).await;
+                run(data.usrs[0].usr.id, expected, db).await;
             }
 
             #[sqlx::test]
@@ -4853,7 +5250,53 @@ mod test {
                     req: PageRequest::new(1, 1),
                     total: 3,
                 };
-                run(data.usrs[0].id, expected, db).await;
+                run(data.usrs[0].usr.id, expected, db).await;
+            }
+        }
+
+        mod user_platform_playlists {
+            use super::*;
+
+            // run
+
+            async fn run(id: Uuid, expected: Page<PlatformPlaylist>, db: PgPool) {
+                let db = init(db).await;
+                let mut conn = db.acquire().await.expect("failed to acquire connection");
+                let page = conn
+                    .user_platform_playlists(id, Platform::Spotify, expected.req)
+                    .await
+                    .expect("failed to fetch playlists");
+                assert_eq!(page, expected);
+            }
+
+            // Tests
+
+            #[sqlx::test]
+            async fn first_and_last(db: PgPool) {
+                let data = Data::new();
+                let usr = &data.usrs[0];
+                let expected = Page {
+                    first: true,
+                    items: usr.spotify_playlists.clone(),
+                    last: true,
+                    req: PageRequest::new(100, 0),
+                    total: 4,
+                };
+                run(usr.usr.id, expected, db).await;
+            }
+
+            #[sqlx::test]
+            async fn middle(db: PgPool) {
+                let data = Data::new();
+                let usr = &data.usrs[0];
+                let expected = Page {
+                    first: false,
+                    items: vec![usr.spotify_playlists[1].clone()],
+                    last: false,
+                    req: PageRequest::new(1, 1),
+                    total: 4,
+                };
+                run(usr.usr.id, expected, db).await;
             }
         }
 
@@ -4879,7 +5322,7 @@ mod test {
                 let data = Data::new();
                 let expected = Page {
                     first: true,
-                    items: data.usrs.clone(),
+                    items: data.usrs.clone().into_iter().map(|usr| usr.usr).collect(),
                     last: true,
                     req: PageRequest::new(100, 0),
                     total: 5,
@@ -4892,7 +5335,7 @@ mod test {
                 let data = Data::new();
                 let expected = Page {
                     first: false,
-                    items: vec![data.usrs[1].clone()],
+                    items: vec![data.usrs[1].usr.clone()],
                     last: false,
                     req: PageRequest::new(1, 1),
                     total: 5,

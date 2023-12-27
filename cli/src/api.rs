@@ -7,7 +7,7 @@ use autoplaylist_common::{
         PATH_AUTH, PATH_ME, PATH_PLAYLIST, PATH_SEARCH, PATH_SPOTIFY, PATH_SRC, PATH_SYNC,
         PATH_TOKEN, PATH_TRACK, PATH_USR,
     },
-    model::{Page, Track},
+    model::{Page, PlatformPlaylist, Track},
 };
 use reqwest::{
     header::{self, HeaderName, ToStrError},
@@ -203,6 +203,14 @@ pub trait ApiClient: Send + Sync {
         req: PageRequestQueryParams<25>,
         token: &str,
     ) -> ApiResult<Page<SourceResponse>>;
+
+    async fn user_spotify_playlists(
+        &self,
+        id: Uuid,
+        req: PageRequestQueryParams<25>,
+        params: Option<SearchQueryParam>,
+        token: &str,
+    ) -> ApiResult<Page<PlatformPlaylist>>;
 
     async fn users(
         &self,
@@ -888,6 +896,36 @@ impl ApiClient for DefaultApiClient {
                 .get(format!("{}{PATH_USR}/{id}{PATH_SRC}", self.base_url))
                 .bearer_auth(token)
                 .query(&req)
+                .build()?;
+            Self::send_and_parse_json_response(req).await
+        }
+        .instrument(span)
+        .await
+    }
+
+    async fn user_spotify_playlists(
+        &self,
+        id: Uuid,
+        req: PageRequestQueryParams<25>,
+        params: Option<SearchQueryParam>,
+        token: &str,
+    ) -> ApiResult<Page<PlatformPlaylist>> {
+        let span = debug_span!(
+            "user_spotify_playlists",
+            params.limit = req.limit,
+            params.offset = req.offset,
+            params.q = params.as_ref().map(|params| &params.q),
+            usr.id = %id,
+        );
+        async {
+            let req = Client::new()
+                .get(format!(
+                    "{}{PATH_USR}/{id}{PATH_PLAYLIST}{PATH_SPOTIFY}",
+                    self.base_url
+                ))
+                .bearer_auth(token)
+                .query(&req)
+                .query(&params)
                 .build()?;
             Self::send_and_parse_json_response(req).await
         }
@@ -1738,6 +1776,32 @@ mod test {
                 let client = init();
                 let resp = client
                     .user_playlists(id, req, "jwt")
+                    .await
+                    .expect("failed to get playlists");
+                assert_eq!(resp, expected);
+            }
+        }
+
+        mod user_spotify_playlists {
+            use super::*;
+
+            // Tests
+
+            #[tokio::test]
+            async fn page() {
+                let id = Uuid::from_u128(0xf28c11c3bfeb4583ba1646797f662b9a);
+                let expected = Page {
+                    first: true,
+                    items: vec![],
+                    last: true,
+                    req: PageRequest::new(10, 0),
+                    total: 0,
+                };
+                let params = SearchQueryParam { q: "name".into() };
+                let req = PageRequestQueryParams::from(expected.req);
+                let client = init();
+                let resp = client
+                    .user_spotify_playlists(id, req, Some(params), "jwt")
                     .await
                     .expect("failed to get playlists");
                 assert_eq!(resp, expected);

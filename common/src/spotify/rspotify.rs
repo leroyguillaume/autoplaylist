@@ -6,7 +6,7 @@ use mockable::Env;
 use rspotify::{
     model::{
         FullTrack, IdError, PlayableId, PlayableItem, PlaylistId, PlaylistItem, PrivateUser,
-        SavedTrack, TrackId, UserId,
+        SavedTrack, SimplifiedPlaylist, TrackId, UserId,
     },
     prelude::{BaseClient, Id, OAuthClient},
     scopes, AuthCodeSpotify, ClientError, Config, Credentials, OAuth, Token, DEFAULT_API_BASE_URL,
@@ -15,7 +15,9 @@ use rspotify::{
 use thiserror::Error;
 use tracing::{debug, info_span, trace, Instrument};
 
-use crate::model::{Album, Page, PageRequest, SpotifyCredentials, SpotifyToken};
+use crate::model::{
+    Album, Page, PageRequest, Platform, PlatformPlaylist, SpotifyCredentials, SpotifyToken,
+};
 
 use super::{SpotifyClient, SpotifyError, SpotifyResult, SpotifyTrack, SpotifyUser};
 
@@ -266,6 +268,38 @@ impl SpotifyClient for RSpotifyClient {
         .await
     }
 
+    async fn authenticated_user_playlists(
+        &self,
+        req: PageRequest,
+        token: &mut SpotifyToken,
+    ) -> SpotifyResult<Page<PlatformPlaylist>> {
+        let span = info_span!(
+            "authenticated_user_playlists",
+            params.limit = req.limit,
+            params.offset = req.offset
+        );
+        async {
+            let client = self.api_client(token).await?;
+            debug!("getting current user playlists");
+            let page = client
+                .current_user_playlists_manual(Some(req.limit), Some(req.offset))
+                .await?;
+            *token = self.token(&client).await?;
+            let items: Vec<PlatformPlaylist> =
+                page.items.into_iter().map(PlatformPlaylist::from).collect();
+            let page = Page {
+                first: page.previous.is_none(),
+                items,
+                last: page.next.is_none(),
+                req,
+                total: page.total,
+            };
+            Ok(page)
+        }
+        .instrument(span)
+        .await
+    }
+
     fn authorize_url(&self, redirect_uri: &str) -> SpotifyResult<String> {
         let client = self.auth_client(redirect_uri);
         let url = client.get_authorize_url(false)?;
@@ -420,6 +454,18 @@ impl From<RSpotifyError> for SpotifyError {
 impl From<RSpotifyMapError> for SpotifyError {
     fn from(err: RSpotifyMapError) -> Self {
         Self(Box::new(RSpotifyError::Mapping(err)))
+    }
+}
+
+// SpotifyPlaylist
+
+impl From<SimplifiedPlaylist> for PlatformPlaylist {
+    fn from(playlist: SimplifiedPlaylist) -> Self {
+        Self {
+            id: playlist.id.id().into(),
+            name: playlist.name,
+            platform: Platform::Spotify,
+        }
     }
 }
 
@@ -781,6 +827,57 @@ mod test {
                 };
                 assert_eq!(user, expected);
                 assert_token_updated(&token);
+            }
+        }
+
+        mod authenticated_user_playlists {
+            use super::*;
+
+            // run
+
+            async fn run(expected: Page<PlatformPlaylist>) {
+                let mut token = token();
+                let spotify = init();
+                let page = spotify
+                    .authenticated_user_playlists(expected.req, &mut token)
+                    .await
+                    .expect("failed to fetch playlists");
+                assert_eq!(page, expected);
+                assert_token_updated(&token);
+            }
+
+            // Tests
+
+            #[tokio::test]
+            async fn first_last() {
+                let expected = Page {
+                    first: true,
+                    items: vec![PlatformPlaylist {
+                        id: "62aRTcjmrblttnIqsDxk2H".into(),
+                        name: "nirvana".into(),
+                        platform: Platform::Spotify,
+                    }],
+                    last: true,
+                    req: PageRequest::new(50, 0),
+                    total: 22,
+                };
+                run(expected).await;
+            }
+
+            #[tokio::test]
+            async fn middle() {
+                let expected = Page {
+                    first: false,
+                    items: vec![PlatformPlaylist {
+                        id: "62aRTcjmrblttnIqsDxk2H".into(),
+                        name: "nirvana".into(),
+                        platform: Platform::Spotify,
+                    }],
+                    last: false,
+                    req: PageRequest::new(50, 50),
+                    total: 22,
+                };
+                run(expected).await;
             }
         }
 

@@ -204,5 +204,13 @@ BEGIN
         (playlist_1, track_1),
         (playlist_1, track_2),
         (playlist_1, track_3);
+
+    INSERT INTO user_platform_playlist
+    VALUES
+        ('playlist_1', usr_1, 'playlist_1', 'spotify'),
+        ('playlist_2', usr_1, 'playlist_2', 'spotify'),
+        ('playlist_3', usr_1, 'playlist_3', 'spotify'),
+        ('test', usr_1, 'test', 'spotify'),
+        ('playlist_4', usr_2, 'playlist_4', 'spotify');
 END;
 $$;

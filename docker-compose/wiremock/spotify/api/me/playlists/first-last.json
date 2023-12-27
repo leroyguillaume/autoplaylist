@@ -1,0 +1,76 @@
+{
+  "request": {
+    "headers": {
+      "Authorization": {
+        "equalTo": "Bearer access_2"
+      }
+    },
+    "method": "GET",
+    "queryParameters": {
+      "limit": {
+        "hasExactly": [
+          {
+            "equalTo": "50"
+          }
+        ]
+      },
+      "offset": {
+        "hasExactly": [
+          {
+            "equalTo": "0"
+          }
+        ]
+      }
+    },
+    "urlPath": "/spotify/api/me/playlists"
+  },
+  "response": {
+    "jsonBody": {
+      "href": "https://api.spotify.com/v1/users/216m62jtruqgd6iaqx224jiqi/playlists?offset=0&limit=20",
+      "items": [
+        {
+          "collaborative": false,
+          "description": "",
+          "external_urls": {
+            "spotify": "https://open.spotify.com/playlist/62aRTcjmrblttnIqsDxk2H"
+          },
+          "href": "https://api.spotify.com/v1/playlists/62aRTcjmrblttnIqsDxk2H",
+          "id": "62aRTcjmrblttnIqsDxk2H",
+          "images": [
+            {
+              "height": 640,
+              "url": "https://i.scdn.co/image/ab67616d0000b273fbc71c99f9c1296c56dd51b6",
+              "width": 640
+            }
+          ],
+          "name": "nirvana",
+          "owner": {
+            "display_name": "Francis",
+            "external_urls": {
+              "spotify": "https://open.spotify.com/user/216m62jtruqgd6iaqx224jiqi"
+            },
+            "href": "https://api.spotify.com/v1/users/216m62jtruqgd6iaqx224jiqi",
+            "id": "216m62jtruqgd6iaqx224jiqi",
+            "type": "user",
+            "uri": "spotify:user:216m62jtruqgd6iaqx224jiqi"
+          },
+          "primary_color": null,
+          "public": true,
+          "snapshot_id": "MyxmODI3ZTgzODRiMGEzNGNiZGIwNDVmNTQ0YWJkNTQzZTVlNjA5ZGFh",
+          "tracks": {
+            "href": "https://api.spotify.com/v1/playlists/62aRTcjmrblttnIqsDxk2H/tracks",
+            "total": 30
+          },
+          "type": "playlist",
+          "uri": "spotify:playlist:62aRTcjmrblttnIqsDxk2H"
+        }
+      ],
+      "limit": 20,
+      "next": null,
+      "offset": 0,
+      "previous": null,
+      "total": 22
+    },
+    "status": 200
+  }
+}

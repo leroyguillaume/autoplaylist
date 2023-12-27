@@ -75,3 +75,13 @@ CREATE TABLE playlist_track (
     track UUID NOT NULL REFERENCES track (id) ON DELETE CASCADE,
     PRIMARY KEY (playlist, track)
 );
+
+-- user_platform_playlist
+
+CREATE TABLE user_platform_playlist (
+    id VARCHAR (255) NOT NULL,
+    usr UUID NOT NULL REFERENCES "user" (id) ON DELETE CASCADE,
+    name VARCHAR (255) NOT NULL,
+    platform PLATFORM NOT NULL,
+    PRIMARY KEY (id, usr, platform)
+);

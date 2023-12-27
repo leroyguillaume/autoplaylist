@@ -1,0 +1,47 @@
+{
+  "request": {
+    "headers": {
+      "Authorization": {
+        "equalTo": "Bearer jwt"
+      }
+    },
+    "method": "GET",
+    "queryParameters": {
+      "limit": {
+        "hasExactly": [
+          {
+            "equalTo": "10"
+          }
+        ]
+      },
+      "offset": {
+        "hasExactly": [
+          {
+            "equalTo": "0"
+          }
+        ]
+      },
+      "q": {
+        "hasExactly": [
+          {
+            "equalTo": "name"
+          }
+        ]
+      }
+    },
+    "urlPath": "/autoplaylist/user/f28c11c3-bfeb-4583-ba16-46797f662b9a/playlist/spotify"
+  },
+  "response": {
+    "jsonBody": {
+      "first": true,
+      "items": [],
+      "last": true,
+      "req": {
+        "limit": 10,
+        "offset": 0
+      },
+      "total": 0
+    },
+    "status": 200
+  }
+}
