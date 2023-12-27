@@ -4,8 +4,8 @@ use autoplaylist_common::{
         AuthenticateViaSpotifyQueryParams, CreatePlaylistRequest, JwtResponse,
         PageRequestQueryParams, PlaylistResponse, RedirectUriQueryParam, SearchQueryParam,
         SourceResponse, UpdatePlaylistRequest, UpdateTrackRequest, UpdateUserRequest, UserResponse,
-        PATH_AUTH, PATH_PLAYLIST, PATH_SEARCH, PATH_SPOTIFY, PATH_SRC, PATH_SYNC, PATH_TOKEN,
-        PATH_TRACK, PATH_USR,
+        PATH_AUTH, PATH_PLAYLIST, PATH_SPOTIFY, PATH_SRC, PATH_SYNC, PATH_TOKEN, PATH_TRACK,
+        PATH_USR,
     },
     model::{Page, PlatformPlaylist, Track},
 };
@@ -73,51 +73,16 @@ pub trait ApiClient: Send + Sync {
         &self,
         id: Uuid,
         req: PageRequestQueryParams<25>,
+        params: Option<SearchQueryParam>,
         token: &str,
     ) -> ApiResult<Page<Track>>;
 
     async fn playlists(
         &self,
         req: PageRequestQueryParams<25>,
+        params: Option<SearchQueryParam>,
         token: &str,
     ) -> ApiResult<Page<PlaylistResponse>>;
-
-    async fn search_playlist_tracks_by_title_artists_album(
-        &self,
-        id: Uuid,
-        params: &SearchQueryParam,
-        req: PageRequestQueryParams<25>,
-        token: &str,
-    ) -> ApiResult<Page<Track>>;
-
-    async fn search_playlists_by_name(
-        &self,
-        params: &SearchQueryParam,
-        req: PageRequestQueryParams<25>,
-        token: &str,
-    ) -> ApiResult<Page<PlaylistResponse>>;
-
-    async fn search_source_tracks_by_title_artists_album(
-        &self,
-        id: Uuid,
-        params: &SearchQueryParam,
-        req: PageRequestQueryParams<25>,
-        token: &str,
-    ) -> ApiResult<Page<Track>>;
-
-    async fn search_tracks_by_title_artists_album(
-        &self,
-        params: &SearchQueryParam,
-        req: PageRequestQueryParams<25>,
-        token: &str,
-    ) -> ApiResult<Page<Track>>;
-
-    async fn search_users_by_email(
-        &self,
-        params: &SearchQueryParam,
-        req: PageRequestQueryParams<25>,
-        token: &str,
-    ) -> ApiResult<Page<UserResponse>>;
 
     async fn source_by_id(&self, id: Uuid, token: &str) -> ApiResult<SourceResponse>;
 
@@ -125,6 +90,7 @@ pub trait ApiClient: Send + Sync {
         &self,
         id: Uuid,
         req: PageRequestQueryParams<25>,
+        params: Option<SearchQueryParam>,
         token: &str,
     ) -> ApiResult<Page<Track>>;
 
@@ -142,7 +108,12 @@ pub trait ApiClient: Send + Sync {
 
     async fn track_by_id(&self, id: Uuid, token: &str) -> ApiResult<Track>;
 
-    async fn tracks(&self, req: PageRequestQueryParams<25>, token: &str) -> ApiResult<Page<Track>>;
+    async fn tracks(
+        &self,
+        req: PageRequestQueryParams<25>,
+        params: Option<SearchQueryParam>,
+        token: &str,
+    ) -> ApiResult<Page<Track>>;
 
     async fn update_playlist(
         &self,
@@ -192,7 +163,8 @@ pub trait ApiClient: Send + Sync {
 
     async fn users(
         &self,
-        params: PageRequestQueryParams<25>,
+        req: PageRequestQueryParams<25>,
+        params: Option<SearchQueryParam>,
         token: &str,
     ) -> ApiResult<Page<UserResponse>>;
 }
@@ -339,12 +311,14 @@ impl ApiClient for DefaultApiClient {
         &self,
         id: Uuid,
         req: PageRequestQueryParams<25>,
+        params: Option<SearchQueryParam>,
         token: &str,
     ) -> ApiResult<Page<Track>> {
         let span = debug_span!(
             "playlist_tracks",
             params.limit = req.limit,
             params.offset = req.offset,
+            params.q = params.as_ref().map(|params| &params.q),
             playlist.id = %id,
         );
         async {
@@ -352,6 +326,7 @@ impl ApiClient for DefaultApiClient {
                 .get(format!("{}{PATH_PLAYLIST}/{id}{PATH_TRACK}", self.base_url))
                 .bearer_auth(token)
                 .query(&req)
+                .query(&params)
                 .build()?;
             Self::send_and_parse_json_response(req).await
         }
@@ -362,153 +337,21 @@ impl ApiClient for DefaultApiClient {
     async fn playlists(
         &self,
         req: PageRequestQueryParams<25>,
+        params: Option<SearchQueryParam>,
         token: &str,
     ) -> ApiResult<Page<PlaylistResponse>> {
         let span = debug_span!(
             "playlists",
             params.limit = req.limit,
             params.offset = req.offset,
+            params.q = params.as_ref().map(|params| &params.q),
         );
         async {
             let req = Client::new()
                 .get(format!("{}{PATH_PLAYLIST}", self.base_url))
                 .bearer_auth(token)
                 .query(&req)
-                .build()?;
-            Self::send_and_parse_json_response(req).await
-        }
-        .instrument(span)
-        .await
-    }
-
-    async fn search_playlist_tracks_by_title_artists_album(
-        &self,
-        id: Uuid,
-        params: &SearchQueryParam,
-        req: PageRequestQueryParams<25>,
-        token: &str,
-    ) -> ApiResult<Page<Track>> {
-        let span = debug_span!(
-            "search_playlist_tracks_by_title_artists_album",
-            params.limit = req.limit,
-            params.offset = req.offset,
-            params.q = params.q,
-            playlist.id = %id,
-        );
-        async {
-            let req = Client::new()
-                .get(format!(
-                    "{}{PATH_PLAYLIST}/{id}{PATH_TRACK}{PATH_SEARCH}",
-                    self.base_url
-                ))
-                .bearer_auth(token)
                 .query(&params)
-                .query(&req)
-                .build()?;
-            Self::send_and_parse_json_response(req).await
-        }
-        .instrument(span)
-        .await
-    }
-
-    async fn search_playlists_by_name(
-        &self,
-        params: &SearchQueryParam,
-        req: PageRequestQueryParams<25>,
-        token: &str,
-    ) -> ApiResult<Page<PlaylistResponse>> {
-        let span = debug_span!(
-            "search_playlists_by_name",
-            params.limit = req.limit,
-            params.offset = req.offset,
-            params.q = params.q
-        );
-        async {
-            let req = Client::new()
-                .get(format!("{}{PATH_PLAYLIST}{PATH_SEARCH}", self.base_url))
-                .bearer_auth(token)
-                .query(&params)
-                .query(&req)
-                .build()?;
-            Self::send_and_parse_json_response(req).await
-        }
-        .instrument(span)
-        .await
-    }
-
-    async fn search_source_tracks_by_title_artists_album(
-        &self,
-        id: Uuid,
-        params: &SearchQueryParam,
-        req: PageRequestQueryParams<25>,
-        token: &str,
-    ) -> ApiResult<Page<Track>> {
-        let span = debug_span!(
-            "search_source_tracks_by_title_artists_album",
-            params.limit = req.limit,
-            params.offset = req.offset,
-            params.q = params.q,
-            src.id = %id,
-        );
-        async {
-            let req = Client::new()
-                .get(format!(
-                    "{}{PATH_SRC}/{id}{PATH_TRACK}{PATH_SEARCH}",
-                    self.base_url
-                ))
-                .bearer_auth(token)
-                .query(&params)
-                .query(&req)
-                .build()?;
-            Self::send_and_parse_json_response(req).await
-        }
-        .instrument(span)
-        .await
-    }
-
-    async fn search_tracks_by_title_artists_album(
-        &self,
-        params: &SearchQueryParam,
-        req: PageRequestQueryParams<25>,
-        token: &str,
-    ) -> ApiResult<Page<Track>> {
-        let span = debug_span!(
-            "search_tracks_by_title_artists_album",
-            params.limit = req.limit,
-            params.offset = req.offset,
-            params.q = params.q,
-        );
-        async {
-            let req = Client::new()
-                .get(format!("{}{PATH_TRACK}{PATH_SEARCH}", self.base_url))
-                .bearer_auth(token)
-                .query(&params)
-                .query(&req)
-                .build()?;
-            Self::send_and_parse_json_response(req).await
-        }
-        .instrument(span)
-        .await
-    }
-
-    async fn search_users_by_email(
-        &self,
-        params: &SearchQueryParam,
-        req: PageRequestQueryParams<25>,
-        token: &str,
-    ) -> ApiResult<Page<UserResponse>> {
-        let span = debug_span!(
-            "search_users_by_email",
-            params.limit = req.limit,
-            params.offset = req.offset,
-            params.q = params.q
-        );
-        async {
-            let req = Client::new()
-                .get(format!("{}{PATH_USR}{PATH_SEARCH}", self.base_url))
-                .bearer_auth(token)
-                .query(&params)
-                .query(&req)
                 .build()?;
             Self::send_and_parse_json_response(req).await
         }
@@ -533,12 +376,14 @@ impl ApiClient for DefaultApiClient {
         &self,
         id: Uuid,
         req: PageRequestQueryParams<25>,
+        params: Option<SearchQueryParam>,
         token: &str,
     ) -> ApiResult<Page<Track>> {
         let span = debug_span!(
             "source_tracks",
             params.limit = req.limit,
             params.offset = req.offset,
+            params.q = params.as_ref().map(|params| &params.q),
             src.id = %id,
         );
         async {
@@ -546,6 +391,7 @@ impl ApiClient for DefaultApiClient {
                 .get(format!("{}{PATH_SRC}/{id}{PATH_TRACK}", self.base_url))
                 .bearer_auth(token)
                 .query(&req)
+                .query(&params)
                 .build()?;
             Self::send_and_parse_json_response(req).await
         }
@@ -635,17 +481,24 @@ impl ApiClient for DefaultApiClient {
         .await
     }
 
-    async fn tracks(&self, req: PageRequestQueryParams<25>, token: &str) -> ApiResult<Page<Track>> {
+    async fn tracks(
+        &self,
+        req: PageRequestQueryParams<25>,
+        params: Option<SearchQueryParam>,
+        token: &str,
+    ) -> ApiResult<Page<Track>> {
         let span = debug_span!(
             "tracks",
             params.limit = req.limit,
             params.offset = req.offset,
+            params.q = params.as_ref().map(|params| &params.q),
         );
         async {
             let req = Client::new()
                 .get(format!("{}{PATH_TRACK}", self.base_url))
                 .bearer_auth(token)
                 .query(&req)
+                .query(&params)
                 .build()?;
             Self::send_and_parse_json_response(req).await
         }
@@ -818,18 +671,21 @@ impl ApiClient for DefaultApiClient {
     async fn users(
         &self,
         req: PageRequestQueryParams<25>,
+        params: Option<SearchQueryParam>,
         token: &str,
     ) -> ApiResult<Page<UserResponse>> {
         let span = debug_span!(
             "users",
             params.limit = req.limit,
             params.offset = req.offset,
+            params.q = params.as_ref().map(|params| &params.q),
         );
         async {
             let req = Client::new()
                 .get(format!("{}{PATH_USR}", self.base_url))
                 .bearer_auth(token)
                 .query(&req)
+                .query(&params)
                 .build()?;
             Self::send_and_parse_json_response(req).await
         }
@@ -1048,9 +904,10 @@ mod test {
                     total: 0,
                 };
                 let req = PageRequestQueryParams::from(expected.req);
+                let params = SearchQueryParam { q: "q".into() };
                 let client = init();
                 let resp = client
-                    .playlist_tracks(id, req, "jwt")
+                    .playlist_tracks(id, req, Some(params), "jwt")
                     .await
                     .expect("failed to get tracks");
                 assert_eq!(resp, expected);
@@ -1072,138 +929,12 @@ mod test {
                     total: 0,
                 };
                 let req = PageRequestQueryParams::from(expected.req);
+                let params = SearchQueryParam { q: "q".into() };
                 let client = init();
                 let resp = client
-                    .playlists(req, "jwt")
+                    .playlists(req, Some(params), "jwt")
                     .await
                     .expect("failed to get playlists");
-                assert_eq!(resp, expected);
-            }
-        }
-
-        mod search_playlist_tracks_by_title_artists_album {
-            use super::*;
-
-            // Tests
-
-            #[tokio::test]
-            async fn page() {
-                let id = Uuid::from_u128(0xf28c11c3bfeb4583ba1646797f662b9a);
-                let expected = Page {
-                    first: true,
-                    items: vec![],
-                    last: true,
-                    req: PageRequest::new(10, 0),
-                    total: 0,
-                };
-                let params = SearchQueryParam { q: "name".into() };
-                let req = PageRequestQueryParams::from(expected.req);
-                let client = init();
-                let resp = client
-                    .search_playlist_tracks_by_title_artists_album(id, &params, req, "jwt")
-                    .await
-                    .expect("failed to get tracks");
-                assert_eq!(resp, expected);
-            }
-        }
-
-        mod search_playlists_by_name {
-            use super::*;
-
-            // Tests
-
-            #[tokio::test]
-            async fn page() {
-                let expected = Page {
-                    first: true,
-                    items: vec![],
-                    last: true,
-                    req: PageRequest::new(10, 0),
-                    total: 0,
-                };
-                let params = SearchQueryParam { q: "name".into() };
-                let req = PageRequestQueryParams::from(expected.req);
-                let client = init();
-                let resp = client
-                    .search_playlists_by_name(&params, req, "jwt")
-                    .await
-                    .expect("failed to get playlists");
-                assert_eq!(resp, expected);
-            }
-        }
-
-        mod search_source_tracks_by_title_artists_album {
-            use super::*;
-
-            // Tests
-
-            #[tokio::test]
-            async fn page() {
-                let id = Uuid::from_u128(0xf28c11c3bfeb4583ba1646797f662b9a);
-                let expected = Page {
-                    first: true,
-                    items: vec![],
-                    last: true,
-                    req: PageRequest::new(10, 0),
-                    total: 0,
-                };
-                let params = SearchQueryParam { q: "name".into() };
-                let req = PageRequestQueryParams::from(expected.req);
-                let client = init();
-                let resp = client
-                    .search_source_tracks_by_title_artists_album(id, &params, req, "jwt")
-                    .await
-                    .expect("failed to get tracks");
-                assert_eq!(resp, expected);
-            }
-        }
-
-        mod search_tracks_by_title_artists_album {
-            use super::*;
-
-            // Tests
-
-            #[tokio::test]
-            async fn page() {
-                let expected = Page {
-                    first: true,
-                    items: vec![],
-                    last: true,
-                    req: PageRequest::new(10, 0),
-                    total: 0,
-                };
-                let params = SearchQueryParam { q: "name".into() };
-                let req = PageRequestQueryParams::from(expected.req);
-                let client = init();
-                let resp = client
-                    .search_tracks_by_title_artists_album(&params, req, "jwt")
-                    .await
-                    .expect("failed to get tracks");
-                assert_eq!(resp, expected);
-            }
-        }
-
-        mod search_users_by_email {
-            use super::*;
-
-            // Tests
-
-            #[tokio::test]
-            async fn page() {
-                let expected = Page {
-                    first: true,
-                    items: vec![],
-                    last: true,
-                    req: PageRequest::new(10, 0),
-                    total: 0,
-                };
-                let params = SearchQueryParam { q: "name".into() };
-                let req = PageRequestQueryParams::from(expected.req);
-                let client = init();
-                let resp = client
-                    .search_users_by_email(&params, req, "jwt")
-                    .await
-                    .expect("failed to get users");
                 assert_eq!(resp, expected);
             }
         }
@@ -1256,9 +987,10 @@ mod test {
                     total: 0,
                 };
                 let req = PageRequestQueryParams::from(expected.req);
+                let params = SearchQueryParam { q: "q".into() };
                 let client = init();
                 let resp = client
-                    .source_tracks(id, req, "jwt")
+                    .source_tracks(id, req, Some(params), "jwt")
                     .await
                     .expect("failed to get tracks");
                 assert_eq!(resp, expected);
@@ -1386,9 +1118,10 @@ mod test {
                     total: 0,
                 };
                 let req = PageRequestQueryParams::from(expected.req);
+                let params = SearchQueryParam { q: "q".into() };
                 let client = init();
                 let resp = client
-                    .tracks(req, "jwt")
+                    .tracks(req, Some(params), "jwt")
                     .await
                     .expect("failed to get tracks");
                 assert_eq!(resp, expected);
@@ -1619,8 +1352,12 @@ mod test {
                     total: 0,
                 };
                 let req = PageRequestQueryParams::from(expected.req);
+                let params = SearchQueryParam { q: "q".into() };
                 let client = init();
-                let resp = client.users(req, "jwt").await.expect("failed to get users");
+                let resp = client
+                    .users(req, Some(params), "jwt")
+                    .await
+                    .expect("failed to get users");
                 assert_eq!(resp, expected);
             }
         }
