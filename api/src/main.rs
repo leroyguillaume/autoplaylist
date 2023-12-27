@@ -70,7 +70,7 @@ async fn main() -> anyhow::Result<()> {
     let broker_cfg = RabbitMqConfig::from_env(&env);
     let spotify_cfg = RSpotifyConfig::from_env(&env)?;
     let jwt_cfg = JwtConfig::from_env(&env)?;
-    let jwt_prov = DefaultJwtProvider::init(jwt_cfg)?;
+    let jwt_prov = DefaultJwtProvider::new(jwt_cfg);
     let svc = DefaultServices {
         auth: DefaultAuthenticator::new(jwt_prov),
         broker: RabbitMqClient::init(broker_cfg).await?,
@@ -164,11 +164,11 @@ pub enum ApiError {
     ),
     #[error("user doesn't habe enough permissions")]
     Forbidden,
-    #[error("failed to generate JWT: {0}")]
-    JwtGeneration(
+    #[error("failed to encode JWT: {0}")]
+    JwtEncoding(
         #[from]
         #[source]
-        ::jwt::Error,
+        jsonwebtoken::errors::Error,
     ),
     #[error("user doesn't have Sotify credentials")]
     NoSpotifyCredentials,

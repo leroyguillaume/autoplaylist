@@ -105,6 +105,16 @@ pub struct PreconditionFailedResponse {
     pub details: String,
 }
 
+// JwtClaims
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JwtClaims {
+    pub sub: Uuid,
+    pub exp: i64,
+    pub role: Role,
+}
+
 // JwtResponse
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
