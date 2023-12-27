@@ -63,7 +63,7 @@ impl<JWT: JwtProvider> Authenticator for DefaultAuthenticator<JWT> {
                 .and_then(|captures| captures.get(1))
                 .ok_or(ApiError::Unauthorized)?
                 .as_str();
-            let id = self.0.verify(jwt)?;
+            let id = self.0.decode(jwt)?;
             db_conn.user_by_id(id).await?.ok_or(ApiError::Unauthorized)
         })
     }
@@ -101,7 +101,7 @@ mod test {
         #[derive(Clone, Default)]
         struct Mocks {
             usr_by_id: Mock<Option<User>, User>,
-            verify: Mock<()>,
+            decode: Mock<()>,
         }
 
         // run
@@ -115,9 +115,9 @@ mod test {
             };
             let mut jwt_prov = MockJwtProvider::new();
             jwt_prov
-                .expect_verify()
+                .expect_decode()
                 .with(eq(data.jwt))
-                .times(mocks.verify.times())
+                .times(mocks.decode.times())
                 .returning(move |_| Ok(expected.id));
             let mut db_conn = MockDatabaseConnection::new();
             let mocks = mocks.clone();
@@ -182,7 +182,7 @@ mod test {
             };
             let mocks = Mocks {
                 usr_by_id: Mock::once_with_args(|_| None),
-                verify: Mock::once(|| ()),
+                decode: Mock::once(|| ()),
             };
             let err = run(data, mocks)
                 .await
@@ -204,7 +204,7 @@ mod test {
             };
             let mocks = Mocks {
                 usr_by_id: Mock::once_with_args(Some),
-                verify: Mock::once(|| ()),
+                decode: Mock::once(|| ()),
             };
             let (usr, expected) = run(data, mocks)
                 .await

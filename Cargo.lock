@@ -383,6 +383,7 @@ dependencies = [
  "autoplaylist-common",
  "chrono",
  "clap",
+ "jsonwebtoken",
  "mockable",
  "mockall",
  "reqwest",

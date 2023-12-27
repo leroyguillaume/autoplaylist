@@ -12,8 +12,8 @@ use autoplaylist_common::{
         AuthenticateViaSpotifyQueryParams, CreatePlaylistRequest, JwtResponse,
         PageRequestQueryParams, PreconditionFailedResponse, RedirectUriQueryParam,
         SearchQueryParam, UpdatePlaylistRequest, UpdateTrackRequest, UpdateUserRequest, Validate,
-        ValidationErrorResponse, PATH_AUTH, PATH_HEALTH, PATH_ME, PATH_PLAYLIST, PATH_REFRESH,
-        PATH_SEARCH, PATH_SPOTIFY, PATH_SRC, PATH_SYNC, PATH_TOKEN, PATH_TRACK, PATH_USR,
+        ValidationErrorResponse, PATH_AUTH, PATH_HEALTH, PATH_PLAYLIST, PATH_REFRESH, PATH_SEARCH,
+        PATH_SPOTIFY, PATH_SRC, PATH_SYNC, PATH_TOKEN, PATH_TRACK, PATH_USR,
     },
     broker::{
         rabbitmq::{RabbitMqClient, RabbitMqConfig},
@@ -352,13 +352,15 @@ fn create_app<
                                     };
                                     let mut usr = db_tx.create_user(&creds).await?;
                                     info!(%usr.id, "user created");
-                                    state.svc
+                                    state
+                                        .svc
                                         .playlists_puller()
-                                        .pull_spotify(&mut usr, spotify, db_tx.as_client_mut()).await?;
+                                        .pull_spotify(&mut usr, spotify, db_tx.as_client_mut())
+                                        .await?;
                                     (usr, true)
                                 }
                             };
-                            let jwt = state.svc.jwt().generate(&usr)?;
+                            let jwt = state.svc.jwt().encode(&usr)?;
                             let resp = JwtResponse { jwt };
                             let status = if created {
                                 StatusCode::CREATED
@@ -377,168 +379,6 @@ fn create_app<
         .route(
             PATH_HEALTH,
             routing::get(|| async { StatusCode::NO_CONTENT }),
-        )
-        // auth_user
-        .route(
-            PATH_ME,
-            routing::get(
-                |headers: HeaderMap,
-                 State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>| async move {
-                     handling_error(async {
-                        let mut db_conn = state.db.acquire().await?;
-                        let auth_usr = state
-                            .svc
-                            .auth()
-                            .authenticate(&headers, &mut db_conn)
-                            .await?;
-                        let span = info_span!(
-                            "auth_user",
-                            auth.usr.id = %auth_usr.id,
-                        );
-                        async {
-                            let resp = state.svc.converter().convert_user(auth_usr);
-                            Ok((StatusCode::OK, Json(resp)))
-                        }
-                        .instrument(span)
-                        .await
-                    })
-                    .await
-                },
-            ),
-        )
-        // delete_auth_user
-        .route(
-            PATH_ME,
-            routing::delete(
-                |headers: HeaderMap,
-                 State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>| async move {
-                     handling_error(async {
-                        let mut db_conn = state.db.acquire().await?;
-                        let auth_usr = state
-                            .svc
-                            .auth()
-                            .authenticate(&headers, &mut db_conn)
-                            .await?;
-                        let span = info_span!(
-                            "delete_auth_user",
-                            auth.usr.id = %auth_usr.id,
-                        );
-                        async {
-                            if db_conn.delete_user(auth_usr.id).await? {
-                                info!(%auth_usr.id, "user deleted");
-                                Ok(StatusCode::NO_CONTENT)
-                            } else {
-                                Ok(StatusCode::UNAUTHORIZED)
-                            }
-                        }
-                        .instrument(span)
-                        .await
-                    })
-                    .await
-                },
-            ),
-        )
-        // auth_user_playlists
-        .route(
-            &format!("{PATH_ME}{PATH_PLAYLIST}"),
-            routing::get(
-                |headers: HeaderMap,
-                 State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
-                 Query(req): Query<PageRequestQueryParams<25>>| async move {
-                     handling_error(async {
-                        let mut db_conn = state.db.acquire().await?;
-                        let auth_usr = state
-                            .svc
-                            .auth()
-                            .authenticate(&headers, &mut db_conn)
-                            .await?;
-                        let span = info_span!(
-                            "auth_user_playlists",
-                            auth.usr.id = %auth_usr.id,
-                            params.limit = req.limit,
-                            params.offset = req.offset,
-                        );
-                        async {
-                            let page = db_conn
-                                .user_playlists(auth_usr.id, req.into())
-                                .await?
-                                .map(|playlist| state.svc.converter().convert_playlist(playlist, &auth_usr));
-                            Ok((StatusCode::OK, Json(page)))
-                        }
-                        .instrument(span)
-                        .await
-                    })
-                    .await
-                },
-            ),
-        )
-        // search_auth_user_playlists_by_name
-        .route(
-            &format!("{PATH_ME}{PATH_PLAYLIST}{PATH_SEARCH}"),
-            routing::get(
-                |headers: HeaderMap,
-                 State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
-                 Query(params): Query<SearchQueryParam>,
-                 Query(req): Query<PageRequestQueryParams<25>>| async move {
-                     handling_error(async {
-                        let mut db_conn = state.db.acquire().await?;
-                        let auth_usr = state
-                            .svc
-                            .auth()
-                            .authenticate(&headers, &mut db_conn)
-                            .await?;
-                        let span = info_span!(
-                            "search_auth_user_playlists_by_name",
-                            auth.usr.id = %auth_usr.id,
-                            params.limit = req.limit,
-                            params.offset = req.offset,
-                            params.q = params.q,
-                        );
-                        async {
-                            let page = db_conn
-                                .search_user_playlists_by_name(auth_usr.id, &params.q, req.into())
-                                .await?
-                                .map(|playlist| state.svc.converter().convert_playlist(playlist, &auth_usr));
-                            Ok((StatusCode::OK, Json(page)))
-                        }.instrument(span).await
-                    })
-                    .await
-                },
-            ),
-        )
-        // auth_user_sources
-        .route(
-            &format!("{PATH_ME}{PATH_SRC}"),
-            routing::get(
-                |headers: HeaderMap,
-                 State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
-                 Query(req): Query<PageRequestQueryParams<25>>| async move {
-                     handling_error(async {
-                        let mut db_conn = state.db.acquire().await?;
-                        let auth_usr = state
-                            .svc
-                            .auth()
-                            .authenticate(&headers, &mut db_conn)
-                            .await?;
-                        let span = info_span!(
-                            "auth_user_sources",
-                            auth.usr.id = %auth_usr.id,
-                            params.limit = req.limit,
-                            params.offset = req.offset,
-                        );
-                        async {
-                            let page = db_conn
-                                .user_sources(auth_usr.id, req.into())
-                                .await?
-                                .map(|src| state.svc.converter().convert_source(src, &auth_usr));
-                            Ok((StatusCode::OK, Json(page)))
-                        }
-                        .instrument(span)
-                        .await
-                    })
-                    .await
-                },
-            ),
         )
         // playlists
         .route(
@@ -562,10 +402,9 @@ fn create_app<
                         );
                         async {
                             ensure_user_is_admin!(auth_usr);
-                            let page = db_conn
-                                .playlists(req.into())
-                                .await?
-                                .map(|playlist| state.svc.converter().convert_playlist(playlist, &auth_usr));
+                            let page = db_conn.playlists(req.into()).await?.map(|playlist| {
+                                state.svc.converter().convert_playlist(playlist, &auth_usr)
+                            });
                             Ok((StatusCode::OK, Json(page)))
                         }
                         .instrument(span)
@@ -582,7 +421,7 @@ fn create_app<
                 |headers: HeaderMap,
                  State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
                  Json(req): Json<CreatePlaylistRequest>| async move {
-                     handling_error(async {
+                    handling_error(async {
                         req.validate()?;
                         let mut db_tx = state.db.begin().await?;
                         let mut auth_usr = state
@@ -604,7 +443,11 @@ fn create_app<
                                         .spotify
                                         .as_mut()
                                         .ok_or(ApiError::NoSpotifyCredentials)?;
-                                    let id = state.svc.spotify().create_playlist(&req.name, creds).await?;
+                                    let id = state
+                                        .svc
+                                        .spotify()
+                                        .create_playlist(&req.name, creds)
+                                        .await?;
                                     Target::Spotify(id)
                                 }
                             };
@@ -668,7 +511,7 @@ fn create_app<
                 |Path(id): Path<Uuid>,
                  headers: HeaderMap,
                  State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>| async move {
-                     handling_error(async {
+                    handling_error(async {
                         let mut db_tx = state.db.begin().await?;
                         let auth_usr = state
                             .svc
@@ -681,11 +524,13 @@ fn create_app<
                             playlist.id = %id,
                         );
                         async {
-                            let playlist = db_tx.playlist_by_id(id).await?.ok_or(ApiError::NotFound)?;
+                            let playlist =
+                                db_tx.playlist_by_id(id).await?.ok_or(ApiError::NotFound)?;
                             ensure_user_is_admin_or_owner!(auth_usr, playlist.src.owner);
                             transactional!(db_tx, async {
                                 let deleted = db_tx.delete_playlist(id).await?;
-                                let src_count = db_tx.count_source_playlists(playlist.src.id).await?;
+                                let src_count =
+                                    db_tx.count_source_playlists(playlist.src.id).await?;
                                 if src_count == 0 {
                                     db_tx.delete_source(playlist.src.id).await?;
                                     info!(%playlist.src.id, "source deleted");
@@ -712,7 +557,7 @@ fn create_app<
                 |Path(id): Path<Uuid>,
                  headers: HeaderMap,
                  State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>| async move {
-                     handling_error(async {
+                    handling_error(async {
                         let mut db_conn = state.db.acquire().await?;
                         let auth_usr = state
                             .svc
@@ -725,7 +570,10 @@ fn create_app<
                             playlist.id = %id,
                         );
                         async {
-                            let playlist = db_conn.playlist_by_id(id).await?.ok_or(ApiError::NotFound)?;
+                            let playlist = db_conn
+                                .playlist_by_id(id)
+                                .await?
+                                .ok_or(ApiError::NotFound)?;
                             ensure_user_is_admin_or_owner!(auth_usr, playlist.src.owner);
                             let resp = state.svc.converter().convert_playlist(playlist, &auth_usr);
                             Ok((StatusCode::OK, Json(resp)))
@@ -745,7 +593,7 @@ fn create_app<
                  headers: HeaderMap,
                  State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
                  Json(req): Json<UpdatePlaylistRequest>| async move {
-                     handling_error(async {
+                    handling_error(async {
                         req.validate()?;
                         let mut db_tx = state.db.begin().await?;
                         let auth_usr = state
@@ -761,7 +609,8 @@ fn create_app<
                         );
                         async {
                             let playlist = transactional!(db_tx, async {
-                                let mut playlist = db_tx.playlist_by_id(id).await?.ok_or(ApiError::NotFound)?;
+                                let mut playlist =
+                                    db_tx.playlist_by_id(id).await?.ok_or(ApiError::NotFound)?;
                                 ensure_user_is_admin_or_owner!(auth_usr, playlist.src.owner);
                                 playlist.name = req.name;
                                 playlist.predicate = req.predicate;
@@ -770,8 +619,22 @@ fn create_app<
                                 }
                                 match &playlist.tgt {
                                     Target::Spotify(id) => {
-                                        let creds = playlist.src.owner.creds.spotify.as_mut().ok_or(ApiError::NoSpotifyCredentials)?;
-                                        state.svc.spotify().update_playlist_name(id, &playlist.name, &mut creds.token).await?;
+                                        let creds = playlist
+                                            .src
+                                            .owner
+                                            .creds
+                                            .spotify
+                                            .as_mut()
+                                            .ok_or(ApiError::NoSpotifyCredentials)?;
+                                        state
+                                            .svc
+                                            .spotify()
+                                            .update_playlist_name(
+                                                id,
+                                                &playlist.name,
+                                                &mut creds.token,
+                                            )
+                                            .await?;
                                     }
                                 }
                                 db_tx.update_user(&playlist.src.owner).await?;
@@ -802,7 +665,7 @@ fn create_app<
                  State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
                  Query(params): Query<SearchQueryParam>,
                  Query(req): Query<PageRequestQueryParams<25>>| async move {
-                     handling_error(async {
+                    handling_error(async {
                         let mut db_conn = state.db.acquire().await?;
                         let auth_usr = state
                             .svc
@@ -821,7 +684,9 @@ fn create_app<
                             let page = db_conn
                                 .search_playlists_by_name(&params.q, req.into())
                                 .await?
-                                .map(|playlist| state.svc.converter().convert_playlist(playlist, &auth_usr));
+                                .map(|playlist| {
+                                    state.svc.converter().convert_playlist(playlist, &auth_usr)
+                                });
                             Ok((StatusCode::OK, Json(page)))
                         }
                         .instrument(span)
@@ -838,7 +703,7 @@ fn create_app<
                 |Path(id): Path<Uuid>,
                  headers: HeaderMap,
                  State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>| async move {
-                     handling_error(async {
+                    handling_error(async {
                         let mut db_conn = state.db.acquire().await?;
                         let auth_usr = state
                             .svc
@@ -878,7 +743,7 @@ fn create_app<
                  headers: HeaderMap,
                  State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
                  Query(req): Query<PageRequestQueryParams<25>>| async move {
-                     handling_error(async {
+                    handling_error(async {
                         let mut db_conn = state.db.acquire().await?;
                         let auth_usr = state
                             .svc
@@ -893,7 +758,10 @@ fn create_app<
                             playlist.id = %id,
                         );
                         async {
-                            let playlist = db_conn.playlist_by_id(id).await?.ok_or(ApiError::NotFound)?;
+                            let playlist = db_conn
+                                .playlist_by_id(id)
+                                .await?
+                                .ok_or(ApiError::NotFound)?;
                             ensure_user_is_admin_or_owner!(auth_usr, playlist.src.owner);
                             let page = db_conn.playlist_tracks(id, req.into()).await?;
                             Ok((StatusCode::OK, Json(page)).into_response())
@@ -914,7 +782,7 @@ fn create_app<
                  State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
                  Query(params): Query<SearchQueryParam>,
                  Query(req): Query<PageRequestQueryParams<25>>| async move {
-                     handling_error(async {
+                    handling_error(async {
                         let mut db_conn = state.db.acquire().await?;
                         let auth_usr = state
                             .svc
@@ -930,10 +798,17 @@ fn create_app<
                             playlist.id = %id,
                         );
                         async {
-                            let playlist = db_conn.playlist_by_id(id).await?.ok_or(ApiError::NotFound)?;
+                            let playlist = db_conn
+                                .playlist_by_id(id)
+                                .await?
+                                .ok_or(ApiError::NotFound)?;
                             ensure_user_is_admin_or_owner!(auth_usr, playlist.src.owner);
                             let page = db_conn
-                                .search_playlist_tracks_by_title_artists_album(id, &params.q, req.into())
+                                .search_playlist_tracks_by_title_artists_album(
+                                    id,
+                                    &params.q,
+                                    req.into(),
+                                )
                                 .await?;
                             Ok((StatusCode::OK, Json(page)))
                         }
@@ -951,7 +826,7 @@ fn create_app<
                 |headers: HeaderMap,
                  State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
                  Query(req): Query<PageRequestQueryParams<25>>| async move {
-                     handling_error(async {
+                    handling_error(async {
                         let mut db_conn = state.db.acquire().await?;
                         let auth_usr = state
                             .svc
@@ -966,7 +841,8 @@ fn create_app<
                         );
                         async {
                             ensure_user_is_admin!(auth_usr);
-                            let page = db_conn.sources(req.into())
+                            let page = db_conn
+                                .sources(req.into())
                                 .await?
                                 .map(|src| state.svc.converter().convert_source(src, &auth_usr));
                             Ok((StatusCode::OK, Json(page)))
@@ -985,7 +861,7 @@ fn create_app<
                 |Path(id): Path<Uuid>,
                  headers: HeaderMap,
                  State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>| async move {
-                     handling_error(async {
+                    handling_error(async {
                         let mut db_conn = state.db.acquire().await?;
                         let auth_usr = state
                             .svc
@@ -1010,15 +886,15 @@ fn create_app<
                 },
             ),
         )
-         // source_tracks
-         .route(
+        // source_tracks
+        .route(
             &format!("{PATH_SRC}/:id{PATH_TRACK}"),
             routing::get(
                 |Path(id): Path<Uuid>,
                  headers: HeaderMap,
                  State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
                  Query(req): Query<PageRequestQueryParams<25>>| async move {
-                     handling_error(async {
+                    handling_error(async {
                         let mut db_conn = state.db.acquire().await?;
                         let auth_usr = state
                             .svc
@@ -1054,7 +930,7 @@ fn create_app<
                  State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
                  Query(params): Query<SearchQueryParam>,
                  Query(req): Query<PageRequestQueryParams<25>>| async move {
-                     handling_error(async {
+                    handling_error(async {
                         let mut db_conn = state.db.acquire().await?;
                         let auth_usr = state
                             .svc
@@ -1073,7 +949,11 @@ fn create_app<
                             let src = db_conn.source_by_id(id).await?.ok_or(ApiError::NotFound)?;
                             ensure_user_is_admin_or_owner!(auth_usr, src.owner);
                             let page = db_conn
-                                .search_source_tracks_by_title_artists_album(id, &params.q, req.into())
+                                .search_source_tracks_by_title_artists_album(
+                                    id,
+                                    &params.q,
+                                    req.into(),
+                                )
                                 .await?;
                             Ok((StatusCode::OK, Json(page)))
                         }
@@ -1091,7 +971,7 @@ fn create_app<
                 |Path(id): Path<Uuid>,
                  headers: HeaderMap,
                  State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>| async move {
-                     handling_error(async {
+                    handling_error(async {
                         let mut db_conn = state.db.acquire().await?;
                         let auth_usr = state
                             .svc
@@ -1130,7 +1010,7 @@ fn create_app<
                 |headers: HeaderMap,
                  State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
                  Query(req): Query<PageRequestQueryParams<25>>| async move {
-                     handling_error(async {
+                    handling_error(async {
                         let mut db_conn = state.db.acquire().await?;
                         let auth_usr = state
                             .svc
@@ -1161,7 +1041,7 @@ fn create_app<
                 |Path(id): Path<Uuid>,
                  headers: HeaderMap,
                  State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>| async move {
-                     handling_error(async {
+                    handling_error(async {
                         let mut db_conn = state.db.acquire().await?;
                         let auth_usr = state
                             .svc
@@ -1192,7 +1072,7 @@ fn create_app<
                  headers: HeaderMap,
                  State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
                  Json(req): Json<UpdateTrackRequest>| async move {
-                     handling_error(async {
+                    handling_error(async {
                         req.validate()?;
                         let mut db_conn = state.db.acquire().await?;
                         let auth_usr = state
@@ -1211,7 +1091,8 @@ fn create_app<
                         );
                         async {
                             ensure_user_is_admin!(auth_usr);
-                            let mut track = db_conn.track_by_id(id).await?.ok_or(ApiError::NotFound)?;
+                            let mut track =
+                                db_conn.track_by_id(id).await?.ok_or(ApiError::NotFound)?;
                             track.album = req.album;
                             track.artists = req.artists;
                             track.title = req.title;
@@ -1234,7 +1115,7 @@ fn create_app<
                 |Path(id): Path<Uuid>,
                  headers: HeaderMap,
                  State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>| async move {
-                     handling_error(async {
+                    handling_error(async {
                         let mut db_conn = state.db.acquire().await?;
                         let auth_usr = state
                             .svc
@@ -1271,7 +1152,7 @@ fn create_app<
                  State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
                  Query(params): Query<SearchQueryParam>,
                  Query(req): Query<PageRequestQueryParams<25>>| async move {
-                     handling_error(async {
+                    handling_error(async {
                         let mut db_conn = state.db.acquire().await?;
                         let auth_usr = state
                             .svc
@@ -1305,7 +1186,7 @@ fn create_app<
                 |headers: HeaderMap,
                  State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
                  Query(req): Query<PageRequestQueryParams<25>>| async move {
-                     handling_error(async {
+                    handling_error(async {
                         let mut db_conn = state.db.acquire().await?;
                         let auth_usr = state
                             .svc
@@ -1320,7 +1201,10 @@ fn create_app<
                         );
                         async {
                             ensure_user_is_admin!(auth_usr);
-                            let page = db_conn.users(req.into()).await?.map(|usr| state.svc.converter().convert_user(usr));
+                            let page = db_conn
+                                .users(req.into())
+                                .await?
+                                .map(|usr| state.svc.converter().convert_user(usr));
                             Ok((StatusCode::OK, Json(page)))
                         }
                         .instrument(span)
@@ -1337,7 +1221,7 @@ fn create_app<
                 |Path(id): Path<Uuid>,
                  headers: HeaderMap,
                  State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>| async move {
-                     handling_error(async {
+                    handling_error(async {
                         let mut db_conn = state.db.acquire().await?;
                         let auth_usr = state
                             .svc
@@ -1370,7 +1254,7 @@ fn create_app<
                  headers: HeaderMap,
                  State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
                  Json(req): Json<UpdateUserRequest>| async move {
-                     handling_error(async {
+                    handling_error(async {
                         let mut db_conn = state.db.acquire().await?;
                         let auth_usr = state
                             .svc
@@ -1385,7 +1269,8 @@ fn create_app<
                         );
                         async {
                             ensure_user_is_admin!(auth_usr);
-                            let mut usr = db_conn.user_by_id(id).await?.ok_or(ApiError::NotFound)?;
+                            let mut usr =
+                                db_conn.user_by_id(id).await?.ok_or(ApiError::NotFound)?;
                             usr.role = req.role;
                             db_conn.update_user(&usr).await?;
                             info!("user updated");
@@ -1406,7 +1291,7 @@ fn create_app<
                 |Path(id): Path<Uuid>,
                  headers: HeaderMap,
                  State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>| async move {
-                     handling_error(async {
+                    handling_error(async {
                         let mut db_conn = state.db.acquire().await?;
                         let auth_usr = state
                             .svc
@@ -1443,7 +1328,7 @@ fn create_app<
                  State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
                  params: Option<Query<SearchQueryParam>>,
                  Query(req): Query<PageRequestQueryParams<25>>| async move {
-                     handling_error(async {
+                    handling_error(async {
                         let mut db_conn = state.db.acquire().await?;
                         let auth_usr = state
                             .svc
@@ -1463,15 +1348,15 @@ fn create_app<
                             ensure_user_is_admin_or_itself!(auth_usr, id);
                             if db_conn.user_exists(id).await? {
                                 let page = if let Some(q) = q {
-                                    db_conn.search_user_playlists_by_name(id, &q, req.into()).await?
+                                    db_conn
+                                        .search_user_playlists_by_name(id, &q, req.into())
+                                        .await?
                                 } else {
-                                    db_conn.user_playlists(id, req.into())
-                                    .await?
+                                    db_conn.user_playlists(id, req.into()).await?
                                 };
-                                let page = page
-                                    .map(|playlist| {
-                                        state.svc.converter().convert_playlist(playlist, &auth_usr)
-                                    });
+                                let page = page.map(|playlist| {
+                                    state.svc.converter().convert_playlist(playlist, &auth_usr)
+                                });
                                 Ok((StatusCode::OK, Json(page)).into_response())
                             } else {
                                 Ok(StatusCode::NOT_FOUND.into_response())
@@ -1493,7 +1378,7 @@ fn create_app<
                  State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
                  params: Option<Query<SearchQueryParam>>,
                  Query(req): Query<PageRequestQueryParams<25>>| async move {
-                     handling_error(async {
+                    handling_error(async {
                         let mut db_conn = state.db.acquire().await?;
                         let auth_usr = state
                             .svc
@@ -1514,10 +1399,17 @@ fn create_app<
                             if db_conn.user_exists(id).await? {
                                 let page = if let Some(q) = q {
                                     db_conn
-                                        .search_user_platform_playlists_by_name(id, Platform::Spotify, &q, req.into())
+                                        .search_user_platform_playlists_by_name(
+                                            id,
+                                            Platform::Spotify,
+                                            &q,
+                                            req.into(),
+                                        )
                                         .await?
                                 } else {
-                                    db_conn.user_platform_playlists(id, Platform::Spotify, req.into()).await?
+                                    db_conn
+                                        .user_platform_playlists(id, Platform::Spotify, req.into())
+                                        .await?
                                 };
                                 Ok((StatusCode::OK, Json(page)).into_response())
                             } else {
@@ -1538,13 +1430,9 @@ fn create_app<
                 |Path(id): Path<Uuid>,
                  headers: HeaderMap,
                  State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>| async move {
-                     handling_error(async {
+                    handling_error(async {
                         let mut db_tx = state.db.begin().await?;
-                        let auth_usr = state
-                            .svc
-                            .auth()
-                            .authenticate(&headers, &mut db_tx)
-                            .await?;
+                        let auth_usr = state.svc.auth().authenticate(&headers, &mut db_tx).await?;
                         let span = info_span!(
                             "refresh_user_spotify_playlists",
                             auth.usr.id = %auth_usr.id,
@@ -1555,7 +1443,11 @@ fn create_app<
                             let mut usr = db_tx.user_by_id(id).await?.ok_or(ApiError::NotFound)?;
                             transactional!(db_tx, async {
                                 let spotify = state.svc.spotify();
-                                state.svc.playlists_puller().pull_spotify(&mut usr, spotify, db_tx.as_client_mut()).await?;
+                                state
+                                    .svc
+                                    .playlists_puller()
+                                    .pull_spotify(&mut usr, spotify, db_tx.as_client_mut())
+                                    .await?;
                                 Ok(StatusCode::NO_CONTENT.into_response())
                             })
                         }
@@ -1574,7 +1466,7 @@ fn create_app<
                  State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
                  Query(params): Query<SearchQueryParam>,
                  Query(req): Query<PageRequestQueryParams<25>>| async move {
-                     handling_error(async {
+                    handling_error(async {
                         let mut db_conn = state.db.acquire().await?;
                         let auth_usr = state
                             .svc
@@ -1611,7 +1503,7 @@ fn create_app<
                  headers: HeaderMap,
                  State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
                  Query(req): Query<PageRequestQueryParams<25>>| async move {
-                     handling_error(async {
+                    handling_error(async {
                         let mut db_conn = state.db.acquire().await?;
                         let auth_usr = state
                             .svc
@@ -1628,7 +1520,9 @@ fn create_app<
                         async {
                             ensure_user_is_admin_or_itself!(auth_usr, id);
                             if db_conn.user_exists(id).await? {
-                                let page = db_conn.user_sources(id, req.into()).await?.map(|src| state.svc.converter().convert_source(src, &auth_usr));
+                                let page = db_conn.user_sources(id, req.into()).await?.map(|src| {
+                                    state.svc.converter().convert_source(src, &auth_usr)
+                                });
                                 Ok((StatusCode::OK, Json(page)).into_response())
                             } else {
                                 Ok(StatusCode::NOT_FOUND.into_response())
@@ -1909,7 +1803,7 @@ mod test {
                 });
             let mut jwt_prov = MockJwtProvider::new();
             jwt_prov
-                .expect_generate()
+                .expect_encode()
                 .with(eq(usr.clone()))
                 .times(1)
                 .returning(|_| Ok(expected.into()));
@@ -1965,349 +1859,6 @@ mod test {
             };
             let (resp, expected) = run(mocks).await;
             resp.assert_status(StatusCode::OK);
-            resp.assert_json(&expected);
-        }
-    }
-
-    mod authenticated_user {
-        use super::*;
-
-        // Mocks
-
-        #[derive(Clone, Default)]
-        struct Mocks {
-            auth: Mock<ApiResult<User>, User>,
-            convert: Mock<()>,
-        }
-
-        // Tests
-
-        async fn run(mocks: Mocks) -> (TestResponse, UserResponse) {
-            let auth_usr = User {
-                creation: Utc::now(),
-                creds: Default::default(),
-                id: Uuid::new_v4(),
-                role: Role::User,
-            };
-            let expected = DefaultConverter.convert_user(auth_usr.clone());
-            let mut auth = MockAuthenticator::new();
-            auth.expect_authenticate()
-                .times(mocks.auth.times())
-                .returning({
-                    let usr = auth_usr.clone();
-                    let mock = mocks.auth.clone();
-                    move |_, _| {
-                        Box::pin({
-                            let usr = usr.clone();
-                            let mock = mock.clone();
-                            async move { mock.call_with_args(usr.clone()) }
-                        })
-                    }
-                });
-            let db = MockDatabasePool {
-                acquire: Mock::once(MockDatabaseConnection::new),
-                ..Default::default()
-            };
-            let mut conv = MockConverter::new();
-            conv.expect_convert_user()
-                .with(eq(auth_usr.clone()))
-                .times(mocks.convert.times())
-                .returning({
-                    let expected = expected.clone();
-                    move |_| expected.clone()
-                });
-            let state = AppState {
-                db,
-                svc: MockServices {
-                    auth,
-                    conv,
-                    ..Default::default()
-                },
-                _dbconn: PhantomData,
-                _dbtx: PhantomData,
-            };
-            let server = init(state);
-            let resp = server.get(PATH_ME).await;
-            (resp, expected)
-        }
-
-        // Tests
-
-        #[tokio::test]
-        async fn unauthorized() {
-            let mocks = Mocks {
-                auth: Mock::once_with_args(|_| Err(ApiError::Unauthorized)),
-                ..Default::default()
-            };
-            let (resp, _) = run(mocks).await;
-            resp.assert_status_unauthorized();
-            assert!(resp.as_bytes().is_empty());
-        }
-
-        #[tokio::test]
-        async fn ok() {
-            let mocks = Mocks {
-                auth: Mock::once_with_args(Ok),
-                convert: Mock::once(|| ()),
-            };
-            let (resp, expected) = run(mocks).await;
-            resp.assert_status_ok();
-            resp.assert_json(&expected);
-        }
-    }
-
-    mod authenticated_user_playlists {
-        use super::*;
-
-        // Mocks
-
-        #[derive(Clone, Default)]
-        struct Mocks {
-            auth: Mock<ApiResult<User>, User>,
-            convert: Mock<()>,
-            playlists: Mock<()>,
-        }
-
-        // Tests
-
-        async fn run(mocks: Mocks) -> (TestResponse, Page<PlaylistResponse>) {
-            let auth_usr = User {
-                creation: Utc::now(),
-                creds: Default::default(),
-                id: Uuid::new_v4(),
-                role: Role::User,
-            };
-            let playlist = Playlist {
-                creation: Utc::now(),
-                id: Uuid::new_v4(),
-                name: "name".into(),
-                predicate: Predicate::YearIs(1993),
-                src: Source {
-                    creation: Utc::now(),
-                    id: Uuid::new_v4(),
-                    kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
-                    owner: auth_usr.clone(),
-                    sync: Synchronization::Pending,
-                },
-                sync: Synchronization::Pending,
-                tgt: Target::Spotify("id".into()),
-            };
-            let page = Page {
-                first: true,
-                items: vec![playlist.clone()],
-                last: true,
-                req: PageRequest::new(10, 0),
-                total: 1,
-            };
-            let playlist_resp = DefaultConverter.convert_playlist(playlist.clone(), &auth_usr);
-            let req = PageRequestQueryParams::<25>::from(page.req);
-            let expected = page.clone().map(|_| playlist_resp.clone());
-            let mut auth = MockAuthenticator::new();
-            auth.expect_authenticate()
-                .times(mocks.auth.times())
-                .returning({
-                    let usr = auth_usr.clone();
-                    let mock = mocks.auth.clone();
-                    move |_, _| {
-                        Box::pin({
-                            let usr = usr.clone();
-                            let mock = mock.clone();
-                            async move { mock.call_with_args(usr.clone()) }
-                        })
-                    }
-                });
-            let db = MockDatabasePool {
-                acquire: Mock::once({
-                    let page = page.clone();
-                    let usr = auth_usr.clone();
-                    let mocks = mocks.clone();
-                    move || {
-                        let mut conn = MockDatabaseConnection::new();
-                        conn.0
-                            .expect_user_playlists()
-                            .with(eq(usr.id), eq(page.req))
-                            .times(mocks.playlists.times())
-                            .returning({
-                                let page = page.clone();
-                                move |_, _| Ok(page.clone())
-                            });
-                        conn
-                    }
-                }),
-                ..Default::default()
-            };
-            let mut conv = MockConverter::new();
-            conv.expect_convert_playlist()
-                .with(eq(playlist), eq(auth_usr))
-                .times(mocks.convert.times())
-                .returning({
-                    let playlist_resp = playlist_resp.clone();
-                    move |_, _| playlist_resp.clone()
-                });
-            let state = AppState {
-                db,
-                svc: MockServices {
-                    auth,
-                    conv,
-                    ..Default::default()
-                },
-                _dbconn: PhantomData,
-                _dbtx: PhantomData,
-            };
-            let server = init(state);
-            let resp = server
-                .get(&format!("{PATH_ME}{PATH_PLAYLIST}"))
-                .add_query_params(req)
-                .await;
-            (resp, expected)
-        }
-
-        // Tests
-
-        #[tokio::test]
-        async fn unauthorized() {
-            let mocks = Mocks {
-                auth: Mock::once_with_args(|_| Err(ApiError::Unauthorized)),
-                ..Default::default()
-            };
-            let (resp, _) = run(mocks).await;
-            resp.assert_status_unauthorized();
-            assert!(resp.as_bytes().is_empty());
-        }
-
-        #[tokio::test]
-        async fn ok() {
-            let mocks = Mocks {
-                auth: Mock::once_with_args(Ok),
-                convert: Mock::once(|| ()),
-                playlists: Mock::once(|| ()),
-            };
-            let (resp, expected) = run(mocks).await;
-            resp.assert_status_ok();
-            resp.assert_json(&expected);
-        }
-    }
-
-    mod authenticated_user_sources {
-        use super::*;
-
-        // Mocks
-
-        #[derive(Clone, Default)]
-        struct Mocks {
-            auth: Mock<ApiResult<User>, User>,
-            convert: Mock<()>,
-            srcs: Mock<()>,
-        }
-
-        // Tests
-
-        async fn run(mocks: Mocks) -> (TestResponse, Page<SourceResponse>) {
-            let auth_usr = User {
-                creation: Utc::now(),
-                creds: Default::default(),
-                id: Uuid::new_v4(),
-                role: Role::User,
-            };
-            let src = Source {
-                creation: Utc::now(),
-                id: Uuid::new_v4(),
-                kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
-                owner: auth_usr.clone(),
-                sync: Synchronization::Pending,
-            };
-            let src_resp = DefaultConverter.convert_source(src.clone(), &auth_usr);
-            let page = Page {
-                first: true,
-                items: vec![src.clone()],
-                last: true,
-                req: PageRequest::new(10, 0),
-                total: 1,
-            };
-            let req = PageRequestQueryParams::<25>::from(page.req);
-            let expected = page.clone().map(|_| src_resp.clone());
-            let mut auth = MockAuthenticator::new();
-            auth.expect_authenticate()
-                .times(mocks.auth.times())
-                .returning({
-                    let usr = auth_usr.clone();
-                    let mock = mocks.auth.clone();
-                    move |_, _| {
-                        Box::pin({
-                            let usr = usr.clone();
-                            let mock = mock.clone();
-                            async move { mock.call_with_args(usr.clone()) }
-                        })
-                    }
-                });
-            let db = MockDatabasePool {
-                acquire: Mock::once({
-                    let page = page.clone();
-                    let usr = auth_usr.clone();
-                    let mocks = mocks.clone();
-                    move || {
-                        let mut conn = MockDatabaseConnection::new();
-                        conn.0
-                            .expect_user_sources()
-                            .with(eq(usr.id), eq(page.req))
-                            .times(mocks.srcs.times())
-                            .returning({
-                                let page = page.clone();
-                                move |_, _| Ok(page.clone())
-                            });
-                        conn
-                    }
-                }),
-                ..Default::default()
-            };
-            let mut conv = MockConverter::new();
-            conv.expect_convert_source()
-                .with(eq(src), eq(auth_usr))
-                .times(mocks.convert.times())
-                .returning({
-                    let src_resp = src_resp.clone();
-                    move |_, _| src_resp.clone()
-                });
-            let state = AppState {
-                db,
-                svc: MockServices {
-                    auth,
-                    conv,
-                    ..Default::default()
-                },
-                _dbconn: PhantomData,
-                _dbtx: PhantomData,
-            };
-            let server = init(state);
-            let resp = server
-                .get(&format!("{PATH_ME}{PATH_SRC}"))
-                .add_query_params(req)
-                .await;
-            (resp, expected)
-        }
-
-        // Tests
-
-        #[tokio::test]
-        async fn unauthorized() {
-            let mocks = Mocks {
-                auth: Mock::once_with_args(|_| Err(ApiError::Unauthorized)),
-                ..Default::default()
-            };
-            let (resp, _) = run(mocks).await;
-            resp.assert_status_unauthorized();
-            assert!(resp.as_bytes().is_empty());
-        }
-
-        #[tokio::test]
-        async fn ok() {
-            let mocks = Mocks {
-                auth: Mock::once_with_args(Ok),
-                convert: Mock::once(|| ()),
-                srcs: Mock::once(|| ()),
-            };
-            let (resp, expected) = run(mocks).await;
-            resp.assert_status_ok();
             resp.assert_json(&expected);
         }
     }
@@ -2629,107 +2180,6 @@ mod test {
             let (resp, expected) = run(data, mocks).await;
             resp.assert_status(StatusCode::CREATED);
             resp.assert_json(&expected);
-        }
-    }
-
-    mod delete_authenticated_user {
-        use super::*;
-
-        // Mocks
-
-        #[derive(Clone, Default)]
-        struct Mocks {
-            auth: Mock<ApiResult<User>, User>,
-            del: Mock<bool>,
-        }
-
-        // Tests
-
-        async fn run(mocks: Mocks) -> TestResponse {
-            let auth_usr = User {
-                creation: Utc::now(),
-                creds: Default::default(),
-                id: Uuid::new_v4(),
-                role: Role::User,
-            };
-            let mut auth = MockAuthenticator::new();
-            auth.expect_authenticate()
-                .times(mocks.auth.times())
-                .returning({
-                    let usr = auth_usr.clone();
-                    let mock = mocks.auth.clone();
-                    move |_, _| {
-                        Box::pin({
-                            let usr = usr.clone();
-                            let mock = mock.clone();
-                            async move { mock.call_with_args(usr.clone()) }
-                        })
-                    }
-                });
-            let db = MockDatabasePool {
-                acquire: Mock::once({
-                    let mocks = mocks.clone();
-                    move || {
-                        let mut conn = MockDatabaseConnection::new();
-                        conn.0
-                            .expect_delete_user()
-                            .with(eq(auth_usr.id))
-                            .times(mocks.del.times())
-                            .returning({
-                                let mock = mocks.del.clone();
-                                move |_| Ok(mock.call())
-                            });
-                        conn
-                    }
-                }),
-                ..Default::default()
-            };
-            let state = AppState {
-                db,
-                svc: MockServices {
-                    auth,
-                    ..Default::default()
-                },
-                _dbconn: PhantomData,
-                _dbtx: PhantomData,
-            };
-            let server = init(state);
-            server.delete(PATH_ME).await
-        }
-
-        // Tests
-
-        #[tokio::test]
-        async fn unauthorized_when_auth_failed() {
-            let mocks = Mocks {
-                auth: Mock::once_with_args(|_| Err(ApiError::Unauthorized)),
-                ..Default::default()
-            };
-            let resp = run(mocks).await;
-            resp.assert_status_unauthorized();
-            assert!(resp.as_bytes().is_empty());
-        }
-
-        #[tokio::test]
-        async fn unauthorized_when_user_was_already_deleted() {
-            let mocks = Mocks {
-                auth: Mock::once_with_args(Ok),
-                del: Mock::once(|| false),
-            };
-            let resp = run(mocks).await;
-            resp.assert_status(StatusCode::UNAUTHORIZED);
-            assert!(resp.as_bytes().is_empty());
-        }
-
-        #[tokio::test]
-        async fn no_content() {
-            let mocks = Mocks {
-                auth: Mock::once_with_args(Ok),
-                del: Mock::once(|| true),
-            };
-            let resp = run(mocks).await;
-            resp.assert_status(StatusCode::NO_CONTENT);
-            assert!(resp.as_bytes().is_empty());
         }
     }
 
@@ -3968,141 +3418,6 @@ mod test {
             let resp: TestResponse = run(auth_usr, usr, mocks).await;
             resp.assert_status(StatusCode::NO_CONTENT);
             assert!(resp.as_bytes().is_empty());
-        }
-    }
-
-    mod search_authenticated_user_playlists_by_name {
-        use super::*;
-
-        // Mocks
-
-        #[derive(Clone, Default)]
-        struct Mocks {
-            auth: Mock<ApiResult<User>, User>,
-            convert: Mock<()>,
-            search: Mock<()>,
-        }
-
-        // Tests
-
-        async fn run(mocks: Mocks) -> (TestResponse, Page<PlaylistResponse>) {
-            let auth_usr = User {
-                creation: Utc::now(),
-                creds: Default::default(),
-                id: Uuid::new_v4(),
-                role: Role::User,
-            };
-            let playlist = Playlist {
-                creation: Utc::now(),
-                id: Uuid::new_v4(),
-                name: "name".into(),
-                predicate: Predicate::YearIs(1993),
-                src: Source {
-                    creation: Utc::now(),
-                    id: Uuid::new_v4(),
-                    kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
-                    owner: auth_usr.clone(),
-                    sync: Synchronization::Pending,
-                },
-                sync: Synchronization::Pending,
-                tgt: Target::Spotify("id".into()),
-            };
-            let playlist_resp = DefaultConverter.convert_playlist(playlist.clone(), &auth_usr);
-            let page = Page {
-                first: true,
-                items: vec![],
-                last: true,
-                req: PageRequest::new(10, 0),
-                total: 0,
-            };
-            let params = SearchQueryParam { q: "name".into() };
-            let req = PageRequestQueryParams::<25>::from(page.req);
-            let expected = page.clone().map(|_| playlist_resp.clone());
-            let mut auth = MockAuthenticator::new();
-            auth.expect_authenticate()
-                .times(mocks.auth.times())
-                .returning({
-                    let usr = auth_usr.clone();
-                    let mock = mocks.auth.clone();
-                    move |_, _| {
-                        Box::pin({
-                            let usr = usr.clone();
-                            let mock = mock.clone();
-                            async move { mock.call_with_args(usr.clone()) }
-                        })
-                    }
-                });
-            let db = MockDatabasePool {
-                acquire: Mock::once({
-                    let page = page.clone();
-                    let params = params.clone();
-                    let usr = auth_usr.clone();
-                    let mocks = mocks.clone();
-                    move || {
-                        let mut conn = MockDatabaseConnection::new();
-                        conn.0
-                            .expect_search_user_playlists_by_name()
-                            .with(eq(usr.id), eq(params.q.clone()), eq(page.req))
-                            .times(mocks.search.times())
-                            .returning({
-                                let page = page.clone();
-                                move |_, _, _| Ok(page.clone())
-                            });
-                        conn
-                    }
-                }),
-                ..Default::default()
-            };
-            let mut conv = MockConverter::new();
-            conv.expect_convert_playlist()
-                .with(eq(playlist.clone()), eq(auth_usr.clone()))
-                .times(mocks.convert.times())
-                .returning({
-                    let playlist_resp = playlist_resp.clone();
-                    move |_, _| playlist_resp.clone()
-                });
-            let state = AppState {
-                db,
-                svc: MockServices {
-                    auth,
-                    conv,
-                    ..Default::default()
-                },
-                _dbconn: PhantomData,
-                _dbtx: PhantomData,
-            };
-            let server = init(state);
-            let resp = server
-                .get(&format!("{PATH_ME}{PATH_PLAYLIST}{PATH_SEARCH}"))
-                .add_query_params(&params)
-                .add_query_params(req)
-                .await;
-            (resp, expected)
-        }
-
-        // Tests
-
-        #[tokio::test]
-        async fn unauthorized() {
-            let mocks = Mocks {
-                auth: Mock::once_with_args(|_| Err(ApiError::Unauthorized)),
-                ..Default::default()
-            };
-            let (resp, _) = run(mocks).await;
-            resp.assert_status_unauthorized();
-            assert!(resp.as_bytes().is_empty());
-        }
-
-        #[tokio::test]
-        async fn ok() {
-            let mocks = Mocks {
-                auth: Mock::once_with_args(Ok),
-                convert: Mock::once(|| ()),
-                search: Mock::once(|| ()),
-            };
-            let (resp, expected) = run(mocks).await;
-            resp.assert_status_ok();
-            resp.assert_json(&expected);
         }
     }
 
