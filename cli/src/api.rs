@@ -194,6 +194,7 @@ pub trait ApiClient: Send + Sync {
         &self,
         id: Uuid,
         req: PageRequestQueryParams<25>,
+        params: Option<SearchQueryParam>,
         token: &str,
     ) -> ApiResult<Page<PlaylistResponse>>;
 
@@ -859,12 +860,14 @@ impl ApiClient for DefaultApiClient {
         &self,
         id: Uuid,
         req: PageRequestQueryParams<25>,
+        params: Option<SearchQueryParam>,
         token: &str,
     ) -> ApiResult<Page<PlaylistResponse>> {
         let span = debug_span!(
             "user_playlists",
             params.limit = req.limit,
             params.offset = req.offset,
+            params.q = params.as_ref().map(|params| &params.q),
             usr.id = %id,
         );
         async {
@@ -872,6 +875,7 @@ impl ApiClient for DefaultApiClient {
                 .get(format!("{}{PATH_USR}/{id}{PATH_PLAYLIST}", self.base_url))
                 .bearer_auth(token)
                 .query(&req)
+                .query(&params)
                 .build()?;
             Self::send_and_parse_json_response(req).await
         }
@@ -1773,9 +1777,10 @@ mod test {
                     total: 0,
                 };
                 let req = PageRequestQueryParams::from(expected.req);
+                let params = SearchQueryParam { q: "q".into() };
                 let client = init();
                 let resp = client
-                    .user_playlists(id, req, "jwt")
+                    .user_playlists(id, req, Some(params), "jwt")
                     .await
                     .expect("failed to get playlists");
                 assert_eq!(resp, expected);
