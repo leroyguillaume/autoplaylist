@@ -3,7 +3,9 @@ use std::collections::BTreeSet;
 use async_trait::async_trait;
 use thiserror::Error;
 
-use crate::model::{Album, Page, PageRequest, PlatformTrack, SpotifyCredentials, SpotifyToken};
+use crate::model::{
+    Album, Page, PageRequest, PlatformPlaylist, PlatformTrack, SpotifyCredentials, SpotifyToken,
+};
 
 // Consts - Spotify
 
@@ -71,6 +73,12 @@ pub trait SpotifyClient: Send + Sync {
     async fn authenticate(&self, code: &str, redirect_uri: &str) -> SpotifyResult<SpotifyToken>;
 
     async fn authenticated_user(&self, token: &mut SpotifyToken) -> SpotifyResult<SpotifyUser>;
+
+    async fn authenticated_user_playlists(
+        &self,
+        req: PageRequest,
+        token: &mut SpotifyToken,
+    ) -> SpotifyResult<Page<PlatformPlaylist>>;
 
     fn authorize_url(&self, redirect_uri: &str) -> SpotifyResult<String>;
 

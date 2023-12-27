@@ -12,8 +12,8 @@ use autoplaylist_common::{
         AuthenticateViaSpotifyQueryParams, CreatePlaylistRequest, JwtResponse,
         PageRequestQueryParams, PreconditionFailedResponse, RedirectUriQueryParam,
         SearchQueryParam, UpdatePlaylistRequest, UpdateTrackRequest, UpdateUserRequest, Validate,
-        ValidationErrorResponse, PATH_AUTH, PATH_HEALTH, PATH_ME, PATH_PLAYLIST, PATH_SEARCH,
-        PATH_SPOTIFY, PATH_SRC, PATH_SYNC, PATH_TOKEN, PATH_TRACK, PATH_USR,
+        ValidationErrorResponse, PATH_AUTH, PATH_HEALTH, PATH_ME, PATH_PLAYLIST, PATH_REFRESH,
+        PATH_SEARCH, PATH_SPOTIFY, PATH_SRC, PATH_SYNC, PATH_TOKEN, PATH_TRACK, PATH_USR,
     },
     broker::{
         rabbitmq::{RabbitMqClient, RabbitMqConfig},
@@ -25,7 +25,7 @@ use autoplaylist_common::{
         DatabaseConnection, DatabaseError, DatabasePool, DatabaseTransaction, PlaylistCreation,
         SourceCreation,
     },
-    model::{Credentials, Playlist, Role, SourceKind, SpotifyCredentials, Target},
+    model::{Credentials, Platform, Playlist, Role, SourceKind, SpotifyCredentials, Target},
     sigs::TerminationSignalListener,
     spotify::{
         rspotify::{RSpotifyClient, RSpotifyConfig},
@@ -56,6 +56,7 @@ use crate::{
     auth::{Authenticator, DefaultAuthenticator},
     conv::{Converter, DefaultConverter},
     jwt::{DefaultJwtProvider, JwtConfig, JwtProvider},
+    pull::{DefaultPlaylistsPuller, PlaylistsPuller},
 };
 
 // main
@@ -75,6 +76,7 @@ async fn main() -> anyhow::Result<()> {
         broker: RabbitMqClient::init(broker_cfg).await?,
         conv: DefaultConverter,
         spotify: RSpotifyClient::new(spotify_cfg),
+        playlists_puller: DefaultPlaylistsPuller,
     };
     let state = Arc::new(AppState {
         db: PostgresPool::init(db_cfg).await?,
@@ -229,6 +231,8 @@ trait Services: Send + Sync {
 
     fn jwt(&self) -> &dyn JwtProvider;
 
+    fn playlists_puller(&self) -> &dyn PlaylistsPuller;
+
     fn spotify(&self) -> &dyn SpotifyClient;
 }
 
@@ -238,6 +242,7 @@ pub struct DefaultServices {
     auth: DefaultAuthenticator<DefaultJwtProvider<DefaultClock>>,
     broker: RabbitMqClient,
     conv: DefaultConverter,
+    playlists_puller: DefaultPlaylistsPuller,
     spotify: RSpotifyClient,
 }
 
@@ -256,6 +261,10 @@ impl Services for DefaultServices {
 
     fn jwt(&self) -> &dyn JwtProvider {
         &self.auth.0
+    }
+
+    fn playlists_puller(&self) -> &dyn PlaylistsPuller {
+        &self.playlists_puller
     }
 
     fn spotify(&self) -> &dyn SpotifyClient {
@@ -318,7 +327,7 @@ fn create_app<
                     let span =
                         info_span!("authenticate_via_spotify", params.code, params.redirect_uri);
                     handling_error(async {
-                        let mut db_conn = state.db.acquire().await?;
+                        let mut db_tx = state.db.begin().await?;
                         let spotify = state.svc.spotify();
                         let mut token = spotify
                             .authenticate(&params.code, &params.redirect_uri)
@@ -329,30 +338,35 @@ fn create_app<
                             id: spotify_usr.id,
                             token,
                         };
-                        let usr = db_conn.user_by_spotify_id(&creds.id).await?;
-                        let (usr, created) = match usr {
-                            Some(mut usr) => {
-                                usr.creds.spotify = Some(creds);
-                                db_conn.update_user(&usr).await?;
-                                (usr, false)
-                            }
-                            None => {
-                                let creds = Credentials {
-                                    spotify: Some(creds),
-                                };
-                                let usr = db_conn.create_user(&creds).await?;
-                                info!(%usr.id, "user created");
-                                (usr, true)
-                            }
-                        };
-                        let jwt = state.svc.jwt().generate(&usr)?;
-                        let resp = JwtResponse { jwt };
-                        let status = if created {
-                            StatusCode::CREATED
-                        } else {
-                            StatusCode::OK
-                        };
-                        Ok((status, Json(resp)))
+                        let usr = db_tx.user_by_spotify_id(&creds.id).await?;
+                        transactional!(db_tx, async {
+                            let (usr, created) = match usr {
+                                Some(mut usr) => {
+                                    usr.creds.spotify = Some(creds);
+                                    db_tx.update_user(&usr).await?;
+                                    (usr, false)
+                                }
+                                None => {
+                                    let creds = Credentials {
+                                        spotify: Some(creds),
+                                    };
+                                    let mut usr = db_tx.create_user(&creds).await?;
+                                    info!(%usr.id, "user created");
+                                    state.svc
+                                        .playlists_puller()
+                                        .pull_spotify(&mut usr, spotify, db_tx.as_client_mut()).await?;
+                                    (usr, true)
+                                }
+                            };
+                            let jwt = state.svc.jwt().generate(&usr)?;
+                            let resp = JwtResponse { jwt };
+                            let status = if created {
+                                StatusCode::CREATED
+                            } else {
+                                StatusCode::OK
+                            };
+                            Ok((status, Json(resp)))
+                        })
                     })
                     .instrument(span)
                     .await
@@ -1438,6 +1452,8 @@ fn create_app<
                         let span = info_span!(
                             "user_playlists",
                             auth.usr.id = %auth_usr.id,
+                            params.limit = req.limit,
+                            params.offset = req.offset,
                             usr.id = %id,
                         );
                         async {
@@ -1452,6 +1468,88 @@ fn create_app<
                             } else {
                                 Ok(StatusCode::NOT_FOUND.into_response())
                             }
+                        }
+                        .instrument(span)
+                        .await
+                    })
+                    .await
+                },
+            ),
+        )
+        // user_spotify_playlists
+        .route(
+            &format!("{PATH_USR}/:id{PATH_PLAYLIST}{PATH_SPOTIFY}"),
+            routing::get(
+                |Path(id): Path<Uuid>,
+                 headers: HeaderMap,
+                 State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>,
+                 params: Option<Query<SearchQueryParam>>,
+                 Query(req): Query<PageRequestQueryParams<25>>| async move {
+                     handling_error(async {
+                        let mut db_conn = state.db.acquire().await?;
+                        let auth_usr = state
+                            .svc
+                            .auth()
+                            .authenticate(&headers, &mut db_conn)
+                            .await?;
+                        let q = params.map(|Query(params)| params.q);
+                        let span = info_span!(
+                            "user_spotify_playlists",
+                            auth.usr.id = %auth_usr.id,
+                            params.limit = req.limit,
+                            params.offset = req.offset,
+                            params.q = q,
+                            usr.id = %id,
+                        );
+                        async {
+                            ensure_user_is_admin_or_itself!(auth_usr, id);
+                            if db_conn.user_exists(id).await? {
+                                let page = if let Some(q) = q {
+                                    db_conn
+                                        .search_user_platform_playlists_by_name(id, Platform::Spotify, &q, req.into())
+                                        .await?
+                                } else {
+                                    db_conn.user_platform_playlists(id, Platform::Spotify, req.into()).await?
+                                };
+                                Ok((StatusCode::OK, Json(page)).into_response())
+                            } else {
+                                Ok(StatusCode::NOT_FOUND.into_response())
+                            }
+                        }
+                        .instrument(span)
+                        .await
+                    })
+                    .await
+                },
+            ),
+        )
+        // refresh_user_spotify_playlists
+        .route(
+            &format!("{PATH_USR}/:id{PATH_PLAYLIST}{PATH_SPOTIFY}{PATH_REFRESH}"),
+            routing::put(
+                |Path(id): Path<Uuid>,
+                 headers: HeaderMap,
+                 State(state): State<Arc<AppState<DBCONN, DBTX, DB, SVC>>>| async move {
+                     handling_error(async {
+                        let mut db_tx = state.db.begin().await?;
+                        let auth_usr = state
+                            .svc
+                            .auth()
+                            .authenticate(&headers, &mut db_tx)
+                            .await?;
+                        let span = info_span!(
+                            "refresh_user_spotify_playlists",
+                            auth.usr.id = %auth_usr.id,
+                            usr.id = %id,
+                        );
+                        async {
+                            ensure_user_is_admin_or_itself!(auth_usr, id);
+                            let mut usr = db_tx.user_by_id(id).await?.ok_or(ApiError::NotFound)?;
+                            transactional!(db_tx, async {
+                                let spotify = state.svc.spotify();
+                                state.svc.playlists_puller().pull_spotify(&mut usr, spotify, db_tx.as_client_mut()).await?;
+                                Ok(StatusCode::NO_CONTENT.into_response())
+                            })
                         }
                         .instrument(span)
                         .await
@@ -1515,6 +1613,8 @@ fn create_app<
                         let span = info_span!(
                             "user_sources",
                             auth.usr.id = %auth_usr.id,
+                            params.limit = req.limit,
+                            params.offset = req.offset,
                             usr.id = %id,
                         );
                         async {
@@ -1590,6 +1690,7 @@ async fn handling_error<RESP: IntoResponse, FUT: Future<Output = ApiResult<RESP>
 mod auth;
 mod conv;
 mod jwt;
+mod pull;
 
 // Tests
 
@@ -1605,17 +1706,21 @@ mod test {
         broker::MockBrokerClient,
         db::{MockDatabaseConnection, MockDatabasePool, MockDatabaseTransaction},
         model::{
-            Album, Page, PageRequest, Platform, Playlist, Predicate, Role, Source, SourceKind,
-            SpotifySourceKind, SpotifyToken, Synchronization, Target, Track, User,
+            Album, Page, PageRequest, Platform, PlatformPlaylist, Playlist, Predicate, Role,
+            Source, SourceKind, SpotifySourceKind, SpotifyToken, Synchronization, Target, Track,
+            User,
         },
         spotify::{MockSpotifyClient, SpotifyUser},
     };
     use axum_test::{TestResponse, TestServer};
     use chrono::Utc;
     use mockable::Mock;
-    use mockall::predicate::eq;
+    use mockall::predicate::{always, eq};
 
-    use crate::{auth::MockAuthenticator, conv::MockConverter, jwt::MockJwtProvider};
+    use crate::{
+        auth::MockAuthenticator, conv::MockConverter, jwt::MockJwtProvider,
+        pull::MockPlaylistsPuller,
+    };
 
     use super::*;
 
@@ -1626,6 +1731,7 @@ mod test {
         auth: MockAuthenticator,
         broker: MockBrokerClient,
         conv: MockConverter,
+        playlists_puller: MockPlaylistsPuller,
         jwt: MockJwtProvider,
         spotify: MockSpotifyClient,
     }
@@ -1641,6 +1747,10 @@ mod test {
 
         fn converter(&self) -> &dyn Converter {
             &self.conv
+        }
+
+        fn playlists_puller(&self) -> &dyn PlaylistsPuller {
+            &self.playlists_puller
         }
 
         fn jwt(&self) -> &dyn JwtProvider {
@@ -1697,6 +1807,7 @@ mod test {
         #[derive(Clone, Default)]
         struct Mocks {
             create_usr: Mock<()>,
+            pull_playlists: Mock<()>,
             update_usr: Mock<()>,
             usr_by_spotify_id: Mock<Option<User>, User>,
         }
@@ -1731,13 +1842,13 @@ mod test {
             };
             let expected = "jwt";
             let db = MockDatabasePool {
-                acquire: Mock::once({
+                begin: Mock::once({
                     let spotify_usr = spotify_usr.clone();
                     let usr = usr.clone();
                     let mocks = mocks.clone();
                     move || {
-                        let mut conn = MockDatabaseConnection::new();
-                        conn.0
+                        let mut tx = MockDatabaseTransaction::new();
+                        tx.client
                             .expect_user_by_spotify_id()
                             .with(eq(spotify_usr.id.clone()))
                             .times(mocks.usr_by_spotify_id.times())
@@ -1746,7 +1857,7 @@ mod test {
                                 let mock = mocks.usr_by_spotify_id.clone();
                                 move |_| Ok(mock.call_with_args(usr.clone()))
                             });
-                        conn.0
+                        tx.client
                             .expect_update_user()
                             .with(eq(usr.clone()))
                             .times(mocks.update_usr.times())
@@ -1757,7 +1868,7 @@ mod test {
                                     Ok(true)
                                 }
                             });
-                        conn.0
+                        tx.client
                             .expect_create_user()
                             .with(eq(usr.creds.clone()))
                             .times(mocks.create_usr.times())
@@ -1765,7 +1876,7 @@ mod test {
                                 let usr = usr.clone();
                                 move |_| Ok(usr.clone())
                             });
-                        conn
+                        tx
                     }
                 }),
                 ..Default::default()
@@ -1794,11 +1905,18 @@ mod test {
                 .with(eq(usr.clone()))
                 .times(1)
                 .returning(|_| Ok(expected.into()));
+            let mut spotify_puller = MockPlaylistsPuller::new();
+            spotify_puller
+                .expect_pull_spotify()
+                .with(eq(usr.clone()), always(), always())
+                .times(mocks.pull_playlists.times())
+                .returning(|_, _, _| Box::pin(async { Ok(()) }));
             let state = AppState {
                 db,
                 svc: MockServices {
                     jwt: jwt_prov,
                     spotify,
+                    playlists_puller: spotify_puller,
                     ..Default::default()
                 },
                 _dbconn: PhantomData,
@@ -1818,9 +1936,10 @@ mod test {
         // Tests
 
         #[tokio::test]
-        async fn ok_when_user_was_created() {
+        async fn ok_when_user_didnt_exist() {
             let mocks = Mocks {
                 create_usr: Mock::once(|| ()),
+                pull_playlists: Mock::once(|| ()),
                 usr_by_spotify_id: Mock::once_with_args(|_| None),
                 ..Default::default()
             };
@@ -1830,7 +1949,7 @@ mod test {
         }
 
         #[tokio::test]
-        async fn ok_when_user_didnt_exist() {
+        async fn ok_when_user_was_created() {
             let mocks = Mocks {
                 update_usr: Mock::once(|| ()),
                 usr_by_spotify_id: Mock::once_with_args(Some),
@@ -3652,6 +3771,195 @@ mod test {
             let (resp, expected) = run(mocks).await;
             resp.assert_status_ok();
             resp.assert_json(&expected);
+        }
+    }
+
+    mod refresh_user_spotify_playlists {
+        use super::*;
+
+        // Mocks
+
+        #[derive(Clone, Default)]
+        struct Mocks {
+            auth: Mock<ApiResult<User>, User>,
+            by_id: Mock<Option<User>, User>,
+            pull_playlists: Mock<()>,
+        }
+
+        // run
+
+        async fn run(auth_usr: User, usr: User, mocks: Mocks) -> TestResponse {
+            let mut auth = MockAuthenticator::new();
+            auth.expect_authenticate()
+                .times(mocks.auth.times())
+                .returning({
+                    let usr = auth_usr.clone();
+                    let mock = mocks.auth.clone();
+                    move |_, _| {
+                        Box::pin({
+                            let usr = usr.clone();
+                            let mock = mock.clone();
+                            async move { mock.call_with_args(usr.clone()) }
+                        })
+                    }
+                });
+            let db = MockDatabasePool {
+                begin: Mock::once({
+                    let usr = usr.clone();
+                    let mocks = mocks.clone();
+                    move || {
+                        let mut tx = MockDatabaseTransaction::new();
+                        tx.client
+                            .expect_user_by_id()
+                            .with(eq(usr.id))
+                            .times(mocks.by_id.times())
+                            .returning({
+                                let usr = usr.clone();
+                                let mock = mocks.by_id.clone();
+                                move |_| Ok(mock.call_with_args(usr.clone()))
+                            });
+                        tx
+                    }
+                }),
+                ..Default::default()
+            };
+            let mut spotify_puller = MockPlaylistsPuller::new();
+            spotify_puller
+                .expect_pull_spotify()
+                .with(eq(usr.clone()), always(), always())
+                .times(mocks.pull_playlists.times())
+                .returning(|_, _, _| Box::pin(async { Ok(()) }));
+            let state = AppState {
+                db,
+                svc: MockServices {
+                    auth,
+                    playlists_puller: spotify_puller,
+                    ..Default::default()
+                },
+                _dbconn: PhantomData,
+                _dbtx: PhantomData,
+            };
+            let server = init(state);
+            server
+                .put(&format!(
+                    "{PATH_USR}/{}{PATH_PLAYLIST}{PATH_SPOTIFY}{PATH_REFRESH}",
+                    usr.id
+                ))
+                .await
+        }
+
+        // Tests
+
+        #[tokio::test]
+        async fn unauthorized() {
+            let auth_usr = User {
+                creation: Utc::now(),
+                creds: Default::default(),
+                id: Uuid::new_v4(),
+                role: Role::Admin,
+            };
+            let usr = User {
+                creation: Utc::now(),
+                creds: Default::default(),
+                id: Uuid::new_v4(),
+                role: Role::User,
+            };
+            let mocks = Mocks {
+                auth: Mock::once_with_args(|_| Err(ApiError::Unauthorized)),
+                ..Default::default()
+            };
+            let resp = run(auth_usr, usr, mocks).await;
+            resp.assert_status_unauthorized();
+            assert!(resp.as_bytes().is_empty());
+        }
+
+        #[tokio::test]
+        async fn forbidden() {
+            let auth_usr = User {
+                creation: Utc::now(),
+                creds: Default::default(),
+                id: Uuid::new_v4(),
+                role: Role::User,
+            };
+            let usr = User {
+                creation: Utc::now(),
+                creds: Default::default(),
+                id: Uuid::new_v4(),
+                role: Role::User,
+            };
+            let mocks = Mocks {
+                auth: Mock::once_with_args(Ok),
+                ..Default::default()
+            };
+            let resp = run(auth_usr, usr, mocks).await;
+            resp.assert_status(StatusCode::FORBIDDEN);
+            assert!(resp.as_bytes().is_empty());
+        }
+
+        #[tokio::test]
+        async fn not_found() {
+            let auth_usr = User {
+                creation: Utc::now(),
+                creds: Default::default(),
+                id: Uuid::new_v4(),
+                role: Role::Admin,
+            };
+            let usr = User {
+                creation: Utc::now(),
+                creds: Default::default(),
+                id: Uuid::new_v4(),
+                role: Role::User,
+            };
+            let mocks = Mocks {
+                auth: Mock::once_with_args(Ok),
+                by_id: Mock::once_with_args(|_| None),
+                ..Default::default()
+            };
+            let resp = run(auth_usr, usr, mocks).await;
+            resp.assert_status_not_found();
+            assert!(resp.as_bytes().is_empty());
+        }
+
+        #[tokio::test]
+        async fn ok_when_user_is_itself() {
+            let auth_usr = User {
+                creation: Utc::now(),
+                creds: Default::default(),
+                id: Uuid::new_v4(),
+                role: Role::Admin,
+            };
+            let mocks = Mocks {
+                auth: Mock::once_with_args(Ok),
+                by_id: Mock::once_with_args(Some),
+                pull_playlists: Mock::once(|| ()),
+            };
+            let resp: TestResponse = run(auth_usr.clone(), auth_usr, mocks).await;
+            resp.assert_status(StatusCode::NO_CONTENT);
+            assert!(resp.as_bytes().is_empty());
+        }
+
+        #[tokio::test]
+        async fn ok_when_user_is_admin() {
+            let auth_usr = User {
+                creation: Utc::now(),
+                creds: Default::default(),
+                id: Uuid::new_v4(),
+                role: Role::Admin,
+            };
+            let usr = User {
+                creation: Utc::now(),
+                creds: Default::default(),
+                id: Uuid::new_v4(),
+                role: Role::User,
+            };
+            let mocks = Mocks {
+                auth: Mock::once_with_args(Ok),
+                by_id: Mock::once_with_args(Some),
+                pull_playlists: Mock::once(|| ()),
+            };
+            let resp: TestResponse = run(auth_usr, usr, mocks).await;
+            resp.assert_status(StatusCode::NO_CONTENT);
+            assert!(resp.as_bytes().is_empty());
         }
     }
 
@@ -7098,6 +7406,236 @@ mod test {
                 srcs: Mock::once(|| ()),
             };
             let (resp, expected) = run(Uuid::new_v4(), auth_usr, mocks).await;
+            resp.assert_status_ok();
+            resp.assert_json(&expected);
+        }
+    }
+
+    mod user_spotify_playlists {
+        use super::*;
+
+        // Data
+
+        struct Data {
+            auth_usr: User,
+            id: Uuid,
+            q: &'static str,
+            params: Option<SearchQueryParam>,
+        }
+
+        // Mocks
+
+        #[derive(Clone, Default)]
+        struct Mocks {
+            auth: Mock<ApiResult<User>, User>,
+            exists: Mock<bool>,
+            playlists: Mock<()>,
+            search: Mock<()>,
+        }
+
+        // Tests
+
+        async fn run(data: Data, mocks: Mocks) -> (TestResponse, Page<PlatformPlaylist>) {
+            let page = Page {
+                first: true,
+                items: vec![],
+                last: true,
+                req: PageRequest::new(10, 0),
+                total: 1,
+            };
+            let req = PageRequestQueryParams::<25>::from(page.req);
+            let mut auth = MockAuthenticator::new();
+            auth.expect_authenticate()
+                .times(mocks.auth.times())
+                .returning({
+                    let usr = data.auth_usr.clone();
+                    let mock = mocks.auth.clone();
+                    move |_, _| {
+                        Box::pin({
+                            let usr = usr.clone();
+                            let mock = mock.clone();
+                            async move { mock.call_with_args(usr.clone()) }
+                        })
+                    }
+                });
+            let db = MockDatabasePool {
+                acquire: Mock::once({
+                    let page = page.clone();
+                    let mocks = mocks.clone();
+                    move || {
+                        let mut conn = MockDatabaseConnection::new();
+                        conn.0
+                            .expect_user_exists()
+                            .with(eq(data.id))
+                            .times(mocks.exists.times())
+                            .returning({
+                                let mock = mocks.exists.clone();
+                                move |_| Ok(mock.call())
+                            });
+                        conn.0
+                            .expect_user_platform_playlists()
+                            .with(eq(data.id), eq(Platform::Spotify), eq(page.req))
+                            .times(mocks.playlists.times())
+                            .returning({
+                                let page = page.clone();
+                                move |_, _, _| Ok(page.clone())
+                            });
+                        conn.0
+                            .expect_search_user_platform_playlists_by_name()
+                            .with(eq(data.id), eq(Platform::Spotify), eq(data.q), eq(page.req))
+                            .times(mocks.search.times())
+                            .returning({
+                                let page = page.clone();
+                                move |_, _, _, _| Ok(page.clone())
+                            });
+                        conn
+                    }
+                }),
+                ..Default::default()
+            };
+            let state = AppState {
+                db,
+                svc: MockServices {
+                    auth,
+                    ..Default::default()
+                },
+                _dbconn: PhantomData,
+                _dbtx: PhantomData,
+            };
+            let server = init(state);
+            let resp = server
+                .get(&format!(
+                    "{PATH_USR}/{}{PATH_PLAYLIST}{PATH_SPOTIFY}",
+                    data.id
+                ))
+                .add_query_params(data.params)
+                .add_query_params(req)
+                .await;
+            (resp, page)
+        }
+
+        // Tests
+
+        #[tokio::test]
+        async fn unauthorized() {
+            let id = Uuid::new_v4();
+            let q = "q";
+            let data = Data {
+                auth_usr: User {
+                    creation: Utc::now(),
+                    creds: Default::default(),
+                    id,
+                    role: Role::User,
+                },
+                id: Uuid::new_v4(),
+                q,
+                params: None,
+            };
+            let mocks = Mocks {
+                auth: Mock::once_with_args(|_| Err(ApiError::Unauthorized)),
+                ..Default::default()
+            };
+            let (resp, _) = run(data, mocks).await;
+            resp.assert_status_unauthorized();
+            assert!(resp.as_bytes().is_empty());
+        }
+
+        #[tokio::test]
+        async fn forbidden() {
+            let id = Uuid::new_v4();
+            let q = "q";
+            let data = Data {
+                auth_usr: User {
+                    creation: Utc::now(),
+                    creds: Default::default(),
+                    id,
+                    role: Role::User,
+                },
+                id: Uuid::new_v4(),
+                q,
+                params: None,
+            };
+            let mocks = Mocks {
+                auth: Mock::once_with_args(Ok),
+                ..Default::default()
+            };
+            let (resp, _) = run(data, mocks).await;
+            resp.assert_status(StatusCode::FORBIDDEN);
+            assert!(resp.as_bytes().is_empty());
+        }
+
+        #[tokio::test]
+        async fn not_found() {
+            let id = Uuid::new_v4();
+            let q = "q";
+            let data = Data {
+                auth_usr: User {
+                    creation: Utc::now(),
+                    creds: Default::default(),
+                    id,
+                    role: Role::Admin,
+                },
+                id: Uuid::new_v4(),
+                q,
+                params: None,
+            };
+            let mocks = Mocks {
+                auth: Mock::once_with_args(Ok),
+                exists: Mock::once(|| false),
+                ..Default::default()
+            };
+            let (resp, _) = run(data, mocks).await;
+            resp.assert_status(StatusCode::NOT_FOUND);
+            assert!(resp.as_bytes().is_empty());
+        }
+
+        #[tokio::test]
+        async fn ok_when_user_is_itself() {
+            let id = Uuid::new_v4();
+            let q = "q";
+            let data = Data {
+                auth_usr: User {
+                    creation: Utc::now(),
+                    creds: Default::default(),
+                    id,
+                    role: Role::User,
+                },
+                id,
+                q,
+                params: None,
+            };
+            let mocks = Mocks {
+                auth: Mock::once_with_args(Ok),
+                exists: Mock::once(|| true),
+                playlists: Mock::once(|| ()),
+                ..Default::default()
+            };
+            let (resp, expected) = run(data, mocks).await;
+            resp.assert_status_ok();
+            resp.assert_json(&expected);
+        }
+
+        #[tokio::test]
+        async fn ok_when_user_is_admin() {
+            let q = "q";
+            let data = Data {
+                auth_usr: User {
+                    creation: Utc::now(),
+                    creds: Default::default(),
+                    id: Uuid::new_v4(),
+                    role: Role::Admin,
+                },
+                id: Uuid::new_v4(),
+                q,
+                params: Some(SearchQueryParam { q: q.into() }),
+            };
+            let mocks = Mocks {
+                auth: Mock::once_with_args(Ok),
+                exists: Mock::once(|| true),
+                search: Mock::once(|| ()),
+                ..Default::default()
+            };
+            let (resp, expected) = run(data, mocks).await;
             resp.assert_status_ok();
             resp.assert_json(&expected);
         }

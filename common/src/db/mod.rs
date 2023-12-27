@@ -5,8 +5,8 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::model::{
-    Album, Credentials, Page, PageRequest, Platform, Playlist, Predicate, Source, SourceKind,
-    Target, Track, User,
+    Album, Credentials, Page, PageRequest, Platform, PlatformPlaylist, Playlist, Predicate, Source,
+    SourceKind, Target, Track, User,
 };
 
 // Macros
@@ -101,6 +101,16 @@ macro_rules! mock_client_impl {
                 self.$attr.delete_user(id).await
             }
 
+            async fn delete_user_platform_playlists(
+                &mut self,
+                id: Uuid,
+                platform: Platform,
+            ) -> DatabaseResult<u64> {
+                self.$attr
+                    .delete_user_platform_playlists(id, platform)
+                    .await
+            }
+
             async fn playlist_by_id(&mut self, id: Uuid) -> DatabaseResult<Option<Playlist>> {
                 self.$attr.playlist_by_id(id).await
             }
@@ -137,6 +147,14 @@ macro_rules! mock_client_impl {
 
             async fn playlists(&mut self, req: PageRequest) -> DatabaseResult<Page<Playlist>> {
                 self.$attr.playlists(req).await
+            }
+
+            async fn save_user_platform_playlist(
+                &mut self,
+                id: Uuid,
+                playlist: &PlatformPlaylist,
+            ) -> DatabaseResult<()> {
+                self.$attr.save_user_platform_playlist(id, playlist).await
             }
 
             async fn search_playlist_tracks_by_title_artists_album(
@@ -176,6 +194,18 @@ macro_rules! mock_client_impl {
             ) -> DatabaseResult<Page<Track>> {
                 self.$attr
                     .search_tracks_by_title_artists_album(q, req)
+                    .await
+            }
+
+            async fn search_user_platform_playlists_by_name(
+                &mut self,
+                id: Uuid,
+                platform: Platform,
+                q: &str,
+                req: PageRequest,
+            ) -> DatabaseResult<Page<PlatformPlaylist>> {
+                self.$attr
+                    .search_user_platform_playlists_by_name(id, platform, q, req)
                     .await
             }
 
@@ -285,6 +315,15 @@ macro_rules! mock_client_impl {
 
             async fn user_exists(&mut self, id: Uuid) -> DatabaseResult<bool> {
                 self.$attr.user_exists(id).await
+            }
+
+            async fn user_platform_playlists(
+                &mut self,
+                id: Uuid,
+                platform: Platform,
+                req: PageRequest,
+            ) -> DatabaseResult<Page<PlatformPlaylist>> {
+                self.$attr.user_platform_playlists(id, platform, req).await
             }
 
             async fn user_playlists(
@@ -430,6 +469,12 @@ pub trait DatabaseClient: Send + Sync {
 
     async fn delete_user(&mut self, id: Uuid) -> DatabaseResult<bool>;
 
+    async fn delete_user_platform_playlists(
+        &mut self,
+        id: Uuid,
+        platform: Platform,
+    ) -> DatabaseResult<u64>;
+
     async fn playlist_by_id(&mut self, id: Uuid) -> DatabaseResult<Option<Playlist>>;
 
     async fn playlist_contains_track(
@@ -449,6 +494,12 @@ pub trait DatabaseClient: Send + Sync {
     async fn playlist_tracks(&mut self, id: Uuid, req: PageRequest) -> DatabaseResult<Page<Track>>;
 
     async fn playlists(&mut self, req: PageRequest) -> DatabaseResult<Page<Playlist>>;
+
+    async fn save_user_platform_playlist(
+        &mut self,
+        id: Uuid,
+        playlist: &PlatformPlaylist,
+    ) -> DatabaseResult<()>;
 
     async fn search_playlist_tracks_by_title_artists_album(
         &mut self,
@@ -475,6 +526,14 @@ pub trait DatabaseClient: Send + Sync {
         q: &str,
         req: PageRequest,
     ) -> DatabaseResult<Page<Track>>;
+
+    async fn search_user_platform_playlists_by_name(
+        &mut self,
+        id: Uuid,
+        platform: Platform,
+        q: &str,
+        req: PageRequest,
+    ) -> DatabaseResult<Page<PlatformPlaylist>>;
 
     async fn search_user_playlists_by_name(
         &mut self,
@@ -533,6 +592,13 @@ pub trait DatabaseClient: Send + Sync {
     async fn user_by_spotify_id(&mut self, id: &str) -> DatabaseResult<Option<User>>;
 
     async fn user_exists(&mut self, id: Uuid) -> DatabaseResult<bool>;
+
+    async fn user_platform_playlists(
+        &mut self,
+        id: Uuid,
+        platform: Platform,
+        req: PageRequest,
+    ) -> DatabaseResult<Page<PlatformPlaylist>>;
 
     async fn user_playlists(
         &mut self,
