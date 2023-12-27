@@ -577,6 +577,8 @@ struct UserPlaylistsCommandArgs {
     id: Uuid,
     #[command(flatten)]
     req: PageRequestArgs<25>,
+    #[arg(short, long, help = "Search by name")]
+    search: Option<String>,
 }
 
 // UserSourcesCommandArgs
@@ -1139,13 +1141,19 @@ impl<
                     api_base_url = %args.api_base_url.value,
                     params.limit = args.req.limit,
                     params.offset = args.req.offset,
+                    params.search = args.search,
                     usr.id = %args.id,
                 );
                 async {
                     let api = self.svc.api(args.api_base_url.value);
                     let req = PageRequestQueryParams::from(args.req);
                     let resp = api
-                        .user_playlists(args.id, req, &args.api_token.value)
+                        .user_playlists(
+                            args.id,
+                            req,
+                            args.search.map(|q| SearchQueryParam { q }),
+                            &args.api_token.value,
+                        )
                         .await?;
                     Self::write_to_output(out, &resp)
                 }
@@ -1632,11 +1640,16 @@ mod test {
                                 move |_, _| Ok(mock.call())
                             });
                         api.expect_user_playlists()
-                            .with(eq(data.id), eq(req), eq(data.api_token))
+                            .with(
+                                eq(data.id),
+                                eq(req),
+                                eq(Some(params.clone())),
+                                eq(data.api_token),
+                            )
                             .times(mocks.usr_playlists.times())
                             .returning({
                                 let mock = mocks.usr_playlists.clone();
-                                move |_, _, _| Ok(mock.call())
+                                move |_, _, _, _| Ok(mock.call())
                             });
                         api.expect_user_sources()
                             .with(eq(data.id), eq(req), eq(data.api_token))
@@ -3957,6 +3970,7 @@ mod test {
                     limit: 25,
                     offset: 0,
                 };
+                let q = "q";
                 let id = Uuid::new_v4();
                 let data = Data {
                     api_base_url,
@@ -3970,6 +3984,7 @@ mod test {
                         },
                         id,
                         req,
+                        search: Some(q.into()),
                     })),
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
@@ -3985,7 +4000,7 @@ mod test {
                         user: "user".into(),
                     },
                     id,
-                    q: "name",
+                    q,
                     port,
                     req,
                     role: Role::Admin,
