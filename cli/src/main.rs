@@ -27,7 +27,10 @@ use serde::{de::DeserializeOwned, Serialize};
 use tracing::{debug, error, info_span, trace, Instrument};
 use uuid::Uuid;
 
-use crate::api::{ApiClient, DefaultApiClient};
+use crate::{
+    api::{ApiClient, DefaultApiClient},
+    jwt::{DefaultJwtDecoder, JwtDecoder},
+};
 
 // main
 
@@ -205,8 +208,6 @@ struct MeCommandArgs {
     api_base_url: ApiBaseUrlArg,
     #[command(flatten)]
     api_token: TokenArg,
-    #[arg(short, long, default_value_t = false, help = "Delete your account")]
-    delete: bool,
 }
 
 // PageRequestArgs
@@ -640,6 +641,8 @@ trait Services<
 
     async fn create_database_pool(&self, args: DatabaseArgs) -> anyhow::Result<DB>;
 
+    fn jwt_decoder(&self) -> &dyn JwtDecoder;
+
     async fn start_server(&self, port: u16) -> anyhow::Result<SERVER>;
 
     fn system(&self) -> &dyn System;
@@ -770,16 +773,12 @@ impl<
                 let span = info_span!(
                     "me",
                     api_base_url = %args.api_base_url.value,
-                    params.delete = args.delete
                 );
                 async {
+                    let id = self.svc.jwt_decoder().decode(&args.api_token.value)?;
                     let api = self.svc.api(args.api_base_url.value);
-                    if args.delete {
-                        api.delete_authenticated_user(&args.api_token.value).await?;
-                    } else {
-                        let resp = api.authenticated_user(&args.api_token.value).await?;
-                        Self::write_to_output(out, &resp)?;
-                    }
+                    let resp = api.user_by_id(id, &args.api_token.value).await?;
+                    Self::write_to_output(out, &resp)?;
                     Ok(())
                 }
                 .instrument(span)
@@ -846,17 +845,15 @@ impl<
                             api.search_playlists_by_name(&params, req, &args.api_token.value)
                                 .await?
                         } else {
-                            api.search_authenticated_user_playlists_by_name(
-                                &params,
-                                req,
-                                &args.api_token.value,
-                            )
-                            .await?
+                            let id = self.svc.jwt_decoder().decode(&args.api_token.value)?;
+                            api.user_playlists(id, req, Some(params), &args.api_token.value)
+                                .await?
                         }
                     } else if args.all {
                         api.playlists(req, &args.api_token.value).await?
                     } else {
-                        api.authenticated_user_playlists(req, &args.api_token.value)
+                        let id = self.svc.jwt_decoder().decode(&args.api_token.value)?;
+                        api.user_playlists(id, req, None, &args.api_token.value)
                             .await?
                     };
                     Self::write_to_output(out, &resp)
@@ -958,8 +955,8 @@ impl<
                     let resp = if args.all {
                         api.sources(req, &args.api_token.value).await?
                     } else {
-                        api.authenticated_user_sources(req, &args.api_token.value)
-                            .await?
+                        let id = self.svc.jwt_decoder().decode(&args.api_token.value)?;
+                        api.user_sources(id, req, &args.api_token.value).await?
                     };
                     Self::write_to_output(out, &resp)
                 }
@@ -1267,6 +1264,10 @@ impl
         Ok(pool)
     }
 
+    fn jwt_decoder(&self) -> &dyn JwtDecoder {
+        &DefaultJwtDecoder
+    }
+
     async fn start_server(&self, port: u16) -> anyhow::Result<DefaultHttpServer> {
         let html = include_str!("../resources/main/html/close.html");
         let addr = SocketAddr::from(([127, 0, 0, 1], port));
@@ -1321,6 +1322,7 @@ impl From<RoleArg> for Role {
 // Mods
 
 mod api;
+mod jwt;
 
 // Tests
 
@@ -1344,7 +1346,7 @@ mod test {
     use tempdir::TempDir;
     use uuid::Uuid;
 
-    use crate::api::MockApiClient;
+    use crate::{api::MockApiClient, jwt::MockJwtDecoder};
 
     use super::*;
 
@@ -1354,6 +1356,7 @@ mod test {
     struct MockServices {
         api: Mock<MockApiClient, String>,
         create_db_pool: Mock<MockDatabasePool, DatabaseArgs>,
+        jwt_decoder: MockJwtDecoder,
         start_server: Mock<MockHttpServer, u16>,
         sys: MockSystem,
     }
@@ -1377,6 +1380,10 @@ mod test {
             args: DatabaseArgs,
         ) -> anyhow::Result<MockDatabasePool> {
             Ok(self.create_db_pool.call_with_args(args))
+        }
+
+        fn jwt_decoder(&self) -> &dyn JwtDecoder {
+            &self.jwt_decoder
         }
 
         async fn start_server(&self, port: u16) -> anyhow::Result<MockHttpServer> {
@@ -1419,14 +1426,11 @@ mod test {
 
             #[derive(Clone, Default)]
             struct Mocks {
-                auth_usr: Mock<UserResponse>,
-                auth_usr_playlists: Mock<Page<PlaylistResponse>>,
-                auth_usr_srcs: Mock<Page<SourceResponse>>,
                 auth_via_spotify: Mock<JwtResponse>,
                 create_playlist: Mock<PlaylistResponse>,
                 db_update_usr: Mock<()>,
                 db_usr_by_id: Mock<User, User>,
-                delete_auth_usr: Mock<()>,
+                decode_jwt: Mock<Uuid>,
                 delete_playlist: Mock<()>,
                 delete_track: Mock<()>,
                 delete_usr: Mock<()>,
@@ -1435,7 +1439,6 @@ mod test {
                 playlist_by_id: Mock<PlaylistResponse>,
                 playlist_tracks: Mock<Page<Track>>,
                 playlists: Mock<Page<PlaylistResponse>>,
-                search_auth_usr_plalists: Mock<Page<PlaylistResponse>>,
                 search_playlist_tracks: Mock<Page<Track>>,
                 search_plalists: Mock<Page<PlaylistResponse>>,
                 search_src_tracks: Mock<Page<Track>>,
@@ -1515,25 +1518,11 @@ mod test {
                             .with(eq(data.id), eq(data.api_token))
                             .times(mocks.start_src_sync.times())
                             .returning(|_, _| Ok(()));
-                        api.expect_authenticated_user_playlists()
-                            .with(eq(req), eq(data.api_token))
-                            .times(mocks.auth_usr_playlists.times())
-                            .returning({
-                                let mock = mocks.auth_usr_playlists.clone();
-                                move |_, _| Ok(mock.call())
-                            });
                         api.expect_playlists()
                             .with(eq(req), eq(data.api_token))
                             .times(mocks.playlists.times())
                             .returning({
                                 let mock = mocks.playlists.clone();
-                                move |_, _| Ok(mock.call())
-                            });
-                        api.expect_authenticated_user_sources()
-                            .with(eq(req), eq(data.api_token))
-                            .times(mocks.auth_usr_srcs.times())
-                            .returning({
-                                let mock = mocks.auth_usr_srcs.clone();
                                 move |_, _| Ok(mock.call())
                             });
                         api.expect_sources()
@@ -1554,13 +1543,6 @@ mod test {
                                 let mock = mocks.search_plalists.clone();
                                 move |_, _, _| Ok(mock.call())
                             });
-                        api.expect_search_authenticated_user_playlists_by_name()
-                            .with(eq(params.clone()), eq(req), eq(data.api_token))
-                            .times(mocks.search_auth_usr_plalists.times())
-                            .returning({
-                                let mock = mocks.search_auth_usr_plalists.clone();
-                                move |_, _, _| Ok(mock.call())
-                            });
                         api.expect_users()
                             .with(eq(req), eq(data.api_token))
                             .times(mocks.usrs.times())
@@ -1579,17 +1561,6 @@ mod test {
                             .with(eq(data.id), eq(data.api_token))
                             .times(mocks.delete_usr.times())
                             .returning(|_, _| Ok(()));
-                        api.expect_delete_authenticated_user()
-                            .with(eq(data.api_token))
-                            .times(mocks.delete_auth_usr.times())
-                            .returning(|_| Ok(()));
-                        api.expect_authenticated_user()
-                            .with(eq(data.api_token))
-                            .times(mocks.auth_usr.times())
-                            .returning({
-                                let mock = mocks.auth_usr.clone();
-                                move |_| Ok(mock.call())
-                            });
                         api.expect_playlist_tracks()
                             .with(eq(data.id), eq(req), eq(data.api_token))
                             .times(mocks.playlist_tracks.times())
@@ -1768,6 +1739,12 @@ mod test {
                         }
                     }
                 });
+                let mut jwt_decoder = MockJwtDecoder::new();
+                jwt_decoder
+                    .expect_decode()
+                    .with(eq(data.api_token))
+                    .times(mocks.decode_jwt.times())
+                    .returning(move |_| Ok(data.id));
                 let start_server = Mock::once_with_args({
                     let data = data.clone();
                     let mocks = mocks.clone();
@@ -1804,6 +1781,7 @@ mod test {
                 let svc = MockServices {
                     api,
                     create_db_pool,
+                    jwt_decoder,
                     start_server,
                     sys,
                 };
@@ -1912,7 +1890,6 @@ mod test {
                         api_token: TokenArg {
                             value: api_token.into(),
                         },
-                        delete: false,
                     }),
                     create_playlist_req: CreatePlaylistRequest {
                         name: "name".into(),
@@ -1951,7 +1928,8 @@ mod test {
                     update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
-                    auth_usr: Mock::once({
+                    decode_jwt: Mock::once(move || data.id),
+                    usr_by_id: Mock::once({
                         let resp = resp.clone();
                         move || resp.clone()
                     }),
@@ -1978,6 +1956,7 @@ mod test {
                     limit: 25,
                     offset: 0,
                 };
+                let q = "q";
                 let data = Data {
                     api_base_url,
                     api_token: "jwt",
@@ -1989,7 +1968,7 @@ mod test {
                         api_token: TokenArg {
                             value: "jwt".into(),
                         },
-                        search: None,
+                        search: Some(q.into()),
                         req,
                     })),
                     create_playlist_req: CreatePlaylistRequest {
@@ -2007,7 +1986,7 @@ mod test {
                     },
                     id: Uuid::new_v4(),
                     port,
-                    q: "name",
+                    q,
                     req,
                     role: Role::Admin,
                     update_playlist_req: UpdatePlaylistRequest {
@@ -2026,7 +2005,8 @@ mod test {
                     update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
-                    auth_usr_playlists: Mock::once({
+                    decode_jwt: Mock::once(move || data.id),
+                    usr_playlists: Mock::once({
                         let resp = resp.clone();
                         move || resp.clone()
                     }),
@@ -2100,7 +2080,8 @@ mod test {
                     update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
-                    auth_usr_srcs: Mock::once({
+                    decode_jwt: Mock::once(move || data.id),
+                    usr_srcs: Mock::once({
                         let resp = resp.clone();
                         move || resp.clone()
                     }),
@@ -2201,67 +2182,6 @@ mod test {
                 let expected = format!("{expected}\n");
                 let out = run(data, mocks).await;
                 assert_eq!(out, expected);
-            }
-
-            #[tokio::test]
-            async fn delete_authenticated_user() {
-                let api_base_url = "http://localhost:8000";
-                let port = 3000;
-                let api_token = "jwt";
-                let data = Data {
-                    api_base_url,
-                    api_token,
-                    cmd: Command::Me(MeCommandArgs {
-                        api_base_url: ApiBaseUrlArg {
-                            value: api_base_url.into(),
-                        },
-                        api_token: TokenArg {
-                            value: api_token.into(),
-                        },
-                        delete: true,
-                    }),
-                    create_playlist_req: CreatePlaylistRequest {
-                        name: "name".into(),
-                        predicate: Predicate::YearIs(1993),
-                        src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
-                    },
-                    db: DatabaseArgs {
-                        host: "host".into(),
-                        name: "name".into(),
-                        password: "password".into(),
-                        port: 5432,
-                        secret: "secret".into(),
-                        user: "user".into(),
-                    },
-                    id: Uuid::new_v4(),
-                    q: "name",
-                    port,
-                    req: PageRequestArgs::<25> {
-                        limit: 25,
-                        offset: 0,
-                    },
-                    role: Role::Admin,
-                    update_playlist_req: UpdatePlaylistRequest {
-                        name: "name".into(),
-                        predicate: Predicate::YearIs(1993),
-                    },
-                    update_track_req: UpdateTrackRequest {
-                        album: Album {
-                            compil: false,
-                            name: "album".into(),
-                        },
-                        artists: Default::default(),
-                        title: "title".into(),
-                        year: 2020,
-                    },
-                    update_usr_req: UpdateUserRequest { role: Role::Admin },
-                };
-                let mocks = Mocks {
-                    delete_auth_usr: Mock::once(|| ()),
-                    ..Default::default()
-                };
-                let out = run(data, mocks).await;
-                assert!(out.is_empty());
             }
 
             #[tokio::test]
@@ -2748,7 +2668,8 @@ mod test {
                     update_usr_req: UpdateUserRequest { role: Role::Admin },
                 };
                 let mocks = Mocks {
-                    search_auth_usr_plalists: Mock::once({
+                    decode_jwt: Mock::once(move || data.id),
+                    usr_playlists: Mock::once({
                         let resp = resp.clone();
                         move || resp.clone()
                     }),

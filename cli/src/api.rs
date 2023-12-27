@@ -4,8 +4,8 @@ use autoplaylist_common::{
         AuthenticateViaSpotifyQueryParams, CreatePlaylistRequest, JwtResponse,
         PageRequestQueryParams, PlaylistResponse, RedirectUriQueryParam, SearchQueryParam,
         SourceResponse, UpdatePlaylistRequest, UpdateTrackRequest, UpdateUserRequest, UserResponse,
-        PATH_AUTH, PATH_ME, PATH_PLAYLIST, PATH_SEARCH, PATH_SPOTIFY, PATH_SRC, PATH_SYNC,
-        PATH_TOKEN, PATH_TRACK, PATH_USR,
+        PATH_AUTH, PATH_PLAYLIST, PATH_SEARCH, PATH_SPOTIFY, PATH_SRC, PATH_SYNC, PATH_TOKEN,
+        PATH_TRACK, PATH_USR,
     },
     model::{Page, PlatformPlaylist, Track},
 };
@@ -55,27 +55,11 @@ pub trait ApiClient: Send + Sync {
         params: &AuthenticateViaSpotifyQueryParams,
     ) -> ApiResult<JwtResponse>;
 
-    async fn authenticated_user(&self, token: &str) -> ApiResult<UserResponse>;
-
-    async fn authenticated_user_playlists(
-        &self,
-        req: PageRequestQueryParams<25>,
-        token: &str,
-    ) -> ApiResult<Page<PlaylistResponse>>;
-
-    async fn authenticated_user_sources(
-        &self,
-        req: PageRequestQueryParams<25>,
-        token: &str,
-    ) -> ApiResult<Page<SourceResponse>>;
-
     async fn create_playlist(
         &self,
         req: &CreatePlaylistRequest,
         token: &str,
     ) -> ApiResult<PlaylistResponse>;
-
-    async fn delete_authenticated_user(&self, token: &str) -> ApiResult<()>;
 
     async fn delete_playlist(&self, id: Uuid, token: &str) -> ApiResult<()>;
 
@@ -94,13 +78,6 @@ pub trait ApiClient: Send + Sync {
 
     async fn playlists(
         &self,
-        req: PageRequestQueryParams<25>,
-        token: &str,
-    ) -> ApiResult<Page<PlaylistResponse>>;
-
-    async fn search_authenticated_user_playlists_by_name(
-        &self,
-        params: &SearchQueryParam,
         req: PageRequestQueryParams<25>,
         token: &str,
     ) -> ApiResult<Page<PlaylistResponse>>;
@@ -281,63 +258,6 @@ impl ApiClient for DefaultApiClient {
         .await
     }
 
-    async fn authenticated_user(&self, token: &str) -> ApiResult<UserResponse> {
-        let span = debug_span!("auth_user");
-        async {
-            let req = Client::new()
-                .get(format!("{}{PATH_ME}", self.base_url))
-                .bearer_auth(token)
-                .build()?;
-            Self::send_and_parse_json_response(req).await
-        }
-        .instrument(span)
-        .await
-    }
-
-    async fn authenticated_user_playlists(
-        &self,
-        req: PageRequestQueryParams<25>,
-        token: &str,
-    ) -> ApiResult<Page<PlaylistResponse>> {
-        let span = debug_span!(
-            "auth_user_playlists",
-            params.limit = req.limit,
-            params.offset = req.offset,
-        );
-        async {
-            let req = Client::new()
-                .get(format!("{}{PATH_ME}{PATH_PLAYLIST}", self.base_url))
-                .bearer_auth(token)
-                .query(&req)
-                .build()?;
-            Self::send_and_parse_json_response(req).await
-        }
-        .instrument(span)
-        .await
-    }
-
-    async fn authenticated_user_sources(
-        &self,
-        req: PageRequestQueryParams<25>,
-        token: &str,
-    ) -> ApiResult<Page<SourceResponse>> {
-        let span = debug_span!(
-            "auth_user_sources",
-            params.limit = req.limit,
-            params.offset = req.offset,
-        );
-        async {
-            let req = Client::new()
-                .get(format!("{}{PATH_ME}{PATH_SRC}", self.base_url))
-                .bearer_auth(token)
-                .query(&req)
-                .build()?;
-            Self::send_and_parse_json_response(req).await
-        }
-        .instrument(span)
-        .await
-    }
-
     async fn create_playlist(
         &self,
         req: &CreatePlaylistRequest,
@@ -355,20 +275,6 @@ impl ApiClient for DefaultApiClient {
                 .json(req)
                 .build()?;
             Self::send_and_parse_json_response(req).await
-        }
-        .instrument(span)
-        .await
-    }
-
-    async fn delete_authenticated_user(&self, token: &str) -> ApiResult<()> {
-        let span = debug_span!("delete_auth_user");
-        async {
-            let req = Client::new()
-                .delete(format!("{}{PATH_ME}", self.base_url))
-                .bearer_auth(token)
-                .build()?;
-            Self::send(req).await?;
-            Ok(())
         }
         .instrument(span)
         .await
@@ -467,34 +373,6 @@ impl ApiClient for DefaultApiClient {
             let req = Client::new()
                 .get(format!("{}{PATH_PLAYLIST}", self.base_url))
                 .bearer_auth(token)
-                .query(&req)
-                .build()?;
-            Self::send_and_parse_json_response(req).await
-        }
-        .instrument(span)
-        .await
-    }
-
-    async fn search_authenticated_user_playlists_by_name(
-        &self,
-        params: &SearchQueryParam,
-        req: PageRequestQueryParams<25>,
-        token: &str,
-    ) -> ApiResult<Page<PlaylistResponse>> {
-        let span = debug_span!(
-            "search_auth_user_playlists_by_name",
-            params.limit = req.limit,
-            params.offset = req.offset,
-            params.q = params.q
-        );
-        async {
-            let req = Client::new()
-                .get(format!(
-                    "{}{PATH_ME}{PATH_PLAYLIST}{PATH_SEARCH}",
-                    self.base_url
-                ))
-                .bearer_auth(token)
-                .query(&params)
                 .query(&req)
                 .build()?;
             Self::send_and_parse_json_response(req).await
@@ -1017,78 +895,6 @@ mod test {
             }
         }
 
-        mod authenticated_user {
-            use super::*;
-
-            // Tests
-
-            #[tokio::test]
-            async fn user() {
-                let expected = UserResponse {
-                    creation: DateTime::parse_from_rfc3339("2022-01-02T00:00:00Z")
-                        .expect("failed to parse date")
-                        .into(),
-                    creds: Default::default(),
-                    id: Uuid::from_u128(0x730ea2158aa44463a1379c4c71d50ed6),
-                    role: Role::User,
-                };
-                let client = init();
-                let resp = client
-                    .authenticated_user("jwt")
-                    .await
-                    .expect("failed to get authenticated user");
-                assert_eq!(resp, expected);
-            }
-        }
-
-        mod authenticated_user_playlists {
-            use super::*;
-
-            // Tests
-
-            #[tokio::test]
-            async fn page() {
-                let expected = Page {
-                    first: true,
-                    items: vec![],
-                    last: true,
-                    req: PageRequest::new(10, 0),
-                    total: 0,
-                };
-                let req = PageRequestQueryParams::from(expected.req);
-                let client = init();
-                let resp = client
-                    .authenticated_user_playlists(req, "jwt")
-                    .await
-                    .expect("failed to get playlists");
-                assert_eq!(resp, expected);
-            }
-        }
-
-        mod authenticated_user_sources {
-            use super::*;
-
-            // Tests
-
-            #[tokio::test]
-            async fn page() {
-                let expected = Page {
-                    first: true,
-                    items: vec![],
-                    last: true,
-                    req: PageRequest::new(10, 0),
-                    total: 0,
-                };
-                let req = PageRequestQueryParams::from(expected.req);
-                let client = init();
-                let resp = client
-                    .authenticated_user_sources(req, "jwt")
-                    .await
-                    .expect("failed to get sources");
-                assert_eq!(resp, expected);
-            }
-        }
-
         mod create_playlist {
             use super::*;
 
@@ -1133,21 +939,6 @@ mod test {
                     .await
                     .expect("failed to create playlist");
                 assert_eq!(resp, expected);
-            }
-        }
-
-        mod delete_authenticated_user {
-            use super::*;
-
-            // Tests
-
-            #[tokio::test]
-            async fn no_content() {
-                let client = init();
-                client
-                    .delete_authenticated_user("jwt")
-                    .await
-                    .expect("failed to delete user");
             }
         }
 
@@ -1284,31 +1075,6 @@ mod test {
                 let client = init();
                 let resp = client
                     .playlists(req, "jwt")
-                    .await
-                    .expect("failed to get playlists");
-                assert_eq!(resp, expected);
-            }
-        }
-
-        mod search_authenticated_user_playlists_by_name {
-            use super::*;
-
-            // Tests
-
-            #[tokio::test]
-            async fn page() {
-                let expected = Page {
-                    first: true,
-                    items: vec![],
-                    last: true,
-                    req: PageRequest::new(10, 0),
-                    total: 0,
-                };
-                let params = SearchQueryParam { q: "name".into() };
-                let req = PageRequestQueryParams::from(expected.req);
-                let client = init();
-                let resp = client
-                    .search_authenticated_user_playlists_by_name(&params, req, "jwt")
                     .await
                     .expect("failed to get playlists");
                 assert_eq!(resp, expected);

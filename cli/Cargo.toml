@@ -3,6 +3,7 @@ anyhow = "1.0"
 async-trait = "0.1"
 autoplaylist-common = {path = "../common", features = ["api", "db"]}
 clap = {version = "4.4", features = ["derive", "env"]}
+jsonwebtoken = "9.2"
 mockable = {version = "2.4", features = ["browser", "http"]}
 reqwest = {version = "0.11", features = ["json"]}
 serde = "1.0"

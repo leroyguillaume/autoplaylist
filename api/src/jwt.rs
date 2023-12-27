@@ -58,9 +58,9 @@ impl JwtConfig {
 
 #[cfg_attr(test, mockall::automock)]
 pub trait JwtProvider: Send + Sync {
-    fn generate(&self, usr: &User) -> ApiResult<String>;
+    fn decode(&self, jwt: &str) -> ApiResult<Uuid>;
 
-    fn verify(&self, jwt: &str) -> ApiResult<Uuid>;
+    fn encode(&self, usr: &User) -> ApiResult<String>;
 }
 
 // DefaultJwtProvider
@@ -87,18 +87,8 @@ impl DefaultJwtProvider<DefaultClock> {
 }
 
 impl<CLOCK: Clock> JwtProvider for DefaultJwtProvider<CLOCK> {
-    fn generate(&self, usr: &User) -> ApiResult<String> {
-        let claims = JwtClaims {
-            exp: self.clock.utc().timestamp() + self.cfg.validity,
-            role: usr.role,
-            sub: usr.id,
-        };
-        let jwt = jsonwebtoken::encode(&Header::default(), &claims, &self.encoding_key)?;
-        Ok(jwt)
-    }
-
-    fn verify(&self, jwt: &str) -> ApiResult<Uuid> {
-        debug!("verifying JWT");
+    fn decode(&self, jwt: &str) -> ApiResult<Uuid> {
+        debug!("decoding JWT");
         let data =
             jsonwebtoken::decode::<JwtClaims>(jwt, &self.decoding_key, &Validation::default())
                 .map_err(|err| {
@@ -106,6 +96,17 @@ impl<CLOCK: Clock> JwtProvider for DefaultJwtProvider<CLOCK> {
                     ApiError::Unauthorized
                 })?;
         Ok(data.claims.sub)
+    }
+
+    fn encode(&self, usr: &User) -> ApiResult<String> {
+        let claims = JwtClaims {
+            exp: self.clock.utc().timestamp() + self.cfg.validity,
+            role: usr.role,
+            sub: usr.id,
+        };
+        debug!("encoding JWT");
+        let jwt = jsonwebtoken::encode(&Header::default(), &claims, &self.encoding_key)?;
+        Ok(jwt)
     }
 }
 
@@ -214,7 +215,7 @@ mod test {
                     id: Uuid::new_v4(),
                     role: Role::Admin,
                 };
-                let jwt = provider.generate(&usr).expect("failed to generate JWT");
+                let jwt = provider.encode(&usr).expect("failed to generate JWT");
                 let data = jsonwebtoken::decode::<JwtClaims>(
                     &jwt,
                     &provider.decoding_key,
@@ -257,7 +258,7 @@ mod test {
                     decoding_key,
                     encoding_key,
                 };
-                provider.verify(&jwt).map(|id| (id, expected))
+                provider.decode(&jwt).map(|id| (id, expected))
             }
 
             // Tests
