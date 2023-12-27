@@ -3,12 +3,10 @@ anyhow = "1.0"
 async-trait = "0.1"
 autoplaylist-common = {path = "../common", features = ["api", "broker", "db", "sigs", "spotify"]}
 axum = "0.6"
-hmac = "0.12"
-jwt = "0.16"
+jsonwebtoken = "9.2"
 mockable = {version = "2.2", features = ["clock"]}
 regex = "1.10"
 serde_json = "1.0"
-sha2 = "0.10"
 thiserror = "1.0"
 tokio = {version = "1.33", features = ["full"]}
 tower-http = {version = "0.4", features = ["cors", "trace"]}
