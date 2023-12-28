@@ -52,6 +52,7 @@ impl Message for PlaylistMessage {
 pub enum PlaylistMessageKind {
     Created,
     Sync,
+    Updated,
 }
 
 // SourceMessage

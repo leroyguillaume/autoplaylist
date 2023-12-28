@@ -391,6 +391,11 @@ pub async fn update_playlist<
                 %playlist.sync,
                 "playlist updated"
             );
+            let msg = PlaylistMessage {
+                id: playlist.id,
+                kind: PlaylistMessageKind::Updated,
+            };
+            state.svc.broker().publish_playlist_message(&msg).await?;
             let resp = state.svc.converter().convert_playlist(playlist, &auth_usr);
             Ok((StatusCode::OK, Json(resp)))
         }
@@ -1785,6 +1790,7 @@ mod test {
             auth: Mock<ApiResult<User>, User>,
             by_id: Mock<Option<Playlist>, Playlist>,
             convert: Mock<()>,
+            publish: Mock<()>,
             rollback: Mock<()>,
             spotify_update: Mock<()>,
             update_playlist: Mock<bool>,
@@ -1801,6 +1807,10 @@ mod test {
             };
             let expected =
                 DefaultConverter.convert_playlist(playlist_updated.clone(), &data.auth_usr);
+            let msg = PlaylistMessage {
+                id: playlist_updated.id,
+                kind: PlaylistMessageKind::Updated,
+            };
             let mut auth = MockAuthenticator::new();
             auth.expect_authenticate()
                 .times(mocks.auth.times())
@@ -1860,6 +1870,12 @@ mod test {
                 }),
                 ..Default::default()
             };
+            let mut broker = MockBrokerClient::new();
+            broker
+                .expect_publish_playlist_message()
+                .with(eq(msg))
+                .times(mocks.publish.times())
+                .returning(|_| Ok(()));
             let mut conv = MockConverter::new();
             conv.expect_convert_playlist()
                 .with(eq(playlist_updated.clone()), eq(data.auth_usr.clone()))
@@ -1872,6 +1888,7 @@ mod test {
                 db,
                 svc: MockServices {
                     auth,
+                    broker,
                     conv,
                     spotify,
                     ..Default::default()
@@ -2292,6 +2309,7 @@ mod test {
                 auth: Mock::once_with_args(Ok),
                 by_id: Mock::once_with_args(Some),
                 convert: Mock::once(|| ()),
+                publish: Mock::once(|| ()),
                 spotify_update: Mock::once(|| ()),
                 update_playlist: Mock::once(|| true),
                 update_user: Mock::once(|| ()),
@@ -2354,6 +2372,7 @@ mod test {
                 auth: Mock::once_with_args(Ok),
                 by_id: Mock::once_with_args(Some),
                 convert: Mock::once(|| ()),
+                publish: Mock::once(|| ()),
                 spotify_update: Mock::once(|| ()),
                 update_playlist: Mock::once(|| true),
                 update_user: Mock::once(|| ()),
