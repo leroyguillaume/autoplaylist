@@ -2,7 +2,7 @@ use std::collections::{BTreeSet, HashMap};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use serde_trim::{btreeset_non_empty_string_trim, string_trim};
+use serde_trim::{btreeset_non_empty_string_trim, option_string_trim, string_trim};
 use uuid::Uuid;
 
 use crate::model::{Album, PageRequest, Predicate, Role, SourceKind, Target};
@@ -132,7 +132,8 @@ pub struct RedirectUriQueryParam {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct SearchQueryParam {
-    pub q: String,
+    #[serde(deserialize_with = "option_string_trim")]
+    pub q: Option<String>,
 }
 
 // SpotifyCredentialsResponse

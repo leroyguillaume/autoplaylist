@@ -76,7 +76,7 @@ pub async fn source_tracks<
         async {
             let src = db_conn.source_by_id(id).await?.ok_or(ApiError::NotFound)?;
             ensure_user_is_admin_or_owner!(auth_usr, src.owner);
-            let page = if let Some(q) = q {
+            let page = if let Some(Some(q)) = q {
                 db_conn
                     .search_source_tracks_by_title_artists_album(id, &q, req.into())
                     .await?
@@ -607,7 +607,7 @@ mod test {
             let q = "q";
             let data = Data {
                 q,
-                params: Some(SearchQueryParam { q: q.into() }),
+                params: Some(SearchQueryParam { q: Some(q.into()) }),
             };
             let mocks = Mocks {
                 auth: Mock::once_with_args(|usr| {

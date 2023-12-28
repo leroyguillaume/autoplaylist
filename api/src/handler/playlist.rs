@@ -231,7 +231,7 @@ pub async fn playlist_tracks<
                 .await?
                 .ok_or(ApiError::NotFound)?;
             ensure_user_is_admin_or_owner!(auth_usr, playlist.src.owner);
-            let page = if let Some(q) = q {
+            let page = if let Some(Some(q)) = q {
                 db_conn
                     .search_playlist_tracks_by_title_artists_album(id, &q, req.into())
                     .await?
@@ -273,7 +273,7 @@ pub async fn playlists<
         );
         async {
             ensure_user_is_admin!(auth_usr);
-            let page = if let Some(q) = q {
+            let page = if let Some(Some(q)) = q {
                 db_conn.search_playlists_by_name(&q, req.into()).await?
             } else {
                 db_conn.playlists(req.into()).await?
@@ -1422,7 +1422,7 @@ mod test {
             let q = "q";
             let data = Data {
                 q,
-                params: Some(SearchQueryParam { q: q.into() }),
+                params: Some(SearchQueryParam { q: Some(q.into()) }),
             };
             let mocks = Mocks {
                 auth: Mock::once_with_args(|usr| {
@@ -1622,7 +1622,7 @@ mod test {
             let q = "q";
             let data = Data {
                 q,
-                params: Some(SearchQueryParam { q: q.into() }),
+                params: Some(SearchQueryParam { q: Some(q.into()) }),
             };
             let mocks = Mocks {
                 auth: Mock::once_with_args(Ok),

@@ -904,7 +904,9 @@ mod test {
                     total: 0,
                 };
                 let req = PageRequestQueryParams::from(expected.req);
-                let params = SearchQueryParam { q: "q".into() };
+                let params = SearchQueryParam {
+                    q: Some("q".into()),
+                };
                 let client = init();
                 let resp = client
                     .playlist_tracks(id, req, Some(params), "jwt")
@@ -929,7 +931,9 @@ mod test {
                     total: 0,
                 };
                 let req = PageRequestQueryParams::from(expected.req);
-                let params = SearchQueryParam { q: "q".into() };
+                let params = SearchQueryParam {
+                    q: Some("q".into()),
+                };
                 let client = init();
                 let resp = client
                     .playlists(req, Some(params), "jwt")
@@ -987,7 +991,9 @@ mod test {
                     total: 0,
                 };
                 let req = PageRequestQueryParams::from(expected.req);
-                let params = SearchQueryParam { q: "q".into() };
+                let params = SearchQueryParam {
+                    q: Some("q".into()),
+                };
                 let client = init();
                 let resp = client
                     .source_tracks(id, req, Some(params), "jwt")
@@ -1118,7 +1124,9 @@ mod test {
                     total: 0,
                 };
                 let req = PageRequestQueryParams::from(expected.req);
-                let params = SearchQueryParam { q: "q".into() };
+                let params = SearchQueryParam {
+                    q: Some("q".into()),
+                };
                 let client = init();
                 let resp = client
                     .tracks(req, Some(params), "jwt")
@@ -1276,7 +1284,9 @@ mod test {
                     total: 0,
                 };
                 let req = PageRequestQueryParams::from(expected.req);
-                let params = SearchQueryParam { q: "q".into() };
+                let params = SearchQueryParam {
+                    q: Some("q".into()),
+                };
                 let client = init();
                 let resp = client
                     .user_playlists(id, req, Some(params), "jwt")
@@ -1301,7 +1311,9 @@ mod test {
                     req: PageRequest::new(10, 0),
                     total: 0,
                 };
-                let params = SearchQueryParam { q: "name".into() };
+                let params = SearchQueryParam {
+                    q: Some("name".into()),
+                };
                 let req = PageRequestQueryParams::from(expected.req);
                 let client = init();
                 let resp = client
@@ -1352,7 +1364,9 @@ mod test {
                     total: 0,
                 };
                 let req = PageRequestQueryParams::from(expected.req);
-                let params = SearchQueryParam { q: "q".into() };
+                let params = SearchQueryParam {
+                    q: Some("q".into()),
+                };
                 let client = init();
                 let resp = client
                     .users(req, Some(params), "jwt")

@@ -191,7 +191,7 @@ pub async fn user_playlists<
         async {
             ensure_user_is_admin_or_itself!(auth_usr, id);
             if db_conn.user_exists(id).await? {
-                let page = if let Some(q) = q {
+                let page = if let Some(Some(q)) = q {
                     db_conn
                         .search_user_playlists_by_name(id, &q, req.into())
                         .await?
@@ -241,7 +241,7 @@ pub async fn user_spotify_playlists<
         async {
             ensure_user_is_admin_or_itself!(auth_usr, id);
             if db_conn.user_exists(id).await? {
-                let page = if let Some(q) = q {
+                let page = if let Some(Some(q)) = q {
                     db_conn
                         .search_user_platform_playlists_by_name(
                             id,
@@ -335,7 +335,7 @@ pub async fn users<
         );
         async {
             ensure_user_is_admin!(auth_usr);
-            let page = if let Some(q) = q {
+            let page = if let Some(Some(q)) = q {
                 db_conn.search_users_by_email(&q, req.into()).await?
             } else {
                 db_conn.users(req.into()).await?
@@ -1253,7 +1253,7 @@ mod test {
             let data = Data {
                 auth_usr,
                 id,
-                params: Some(SearchQueryParam { q: q.into() }),
+                params: Some(SearchQueryParam { q: Some(q.into()) }),
                 q,
             };
             let mocks = Mocks {
@@ -1682,7 +1682,7 @@ mod test {
                 },
                 id: Uuid::new_v4(),
                 q,
-                params: Some(SearchQueryParam { q: q.into() }),
+                params: Some(SearchQueryParam { q: Some(q.into()) }),
             };
             let mocks = Mocks {
                 auth: Mock::once_with_args(Ok),
@@ -1868,7 +1868,7 @@ mod test {
             let q = "q";
             let data = Data {
                 q,
-                params: Some(SearchQueryParam { q: q.into() }),
+                params: Some(SearchQueryParam { q: Some(q.into()) }),
             };
             let mocks = Mocks {
                 auth: Mock::once_with_args(Ok),
