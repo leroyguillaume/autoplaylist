@@ -842,7 +842,7 @@ impl<
                     let resp = if args.all {
                         api.playlists(
                             req,
-                            args.search.map(|q| SearchQueryParam { q }),
+                            args.search.map(|q| SearchQueryParam { q: Some(q) }),
                             &args.api_token.value,
                         )
                         .await?
@@ -851,7 +851,7 @@ impl<
                         api.user_playlists(
                             id,
                             req,
-                            args.search.map(|q| SearchQueryParam { q }),
+                            args.search.map(|q| SearchQueryParam { q: Some(q) }),
                             &args.api_token.value,
                         )
                         .await?
@@ -892,7 +892,7 @@ impl<
                         .playlist_tracks(
                             args.id,
                             req,
-                            args.search.map(|q| SearchQueryParam { q }),
+                            args.search.map(|q| SearchQueryParam { q: Some(q) }),
                             &args.api_token.value,
                         )
                         .await?;
@@ -989,7 +989,7 @@ impl<
                         .source_tracks(
                             args.id,
                             req,
-                            args.search.map(|q| SearchQueryParam { q }),
+                            args.search.map(|q| SearchQueryParam { q: Some(q) }),
                             &args.api_token.value,
                         )
                         .await?;
@@ -1040,7 +1040,7 @@ impl<
                     let resp = api
                         .tracks(
                             req,
-                            args.search.map(|q| SearchQueryParam { q }),
+                            args.search.map(|q| SearchQueryParam { q: Some(q) }),
                             &args.api_token.value,
                         )
                         .await?;
@@ -1109,7 +1109,7 @@ impl<
                     let resp = api
                         .users(
                             req,
-                            args.search.map(|q| SearchQueryParam { q }),
+                            args.search.map(|q| SearchQueryParam { q: Some(q) }),
                             &args.api_token.value,
                         )
                         .await?;
@@ -1134,7 +1134,7 @@ impl<
                         .user_playlists(
                             args.id,
                             req,
-                            args.search.map(|q| SearchQueryParam { q }),
+                            args.search.map(|q| SearchQueryParam { q: Some(q) }),
                             &args.api_token.value,
                         )
                         .await?;
@@ -1178,7 +1178,7 @@ impl<
                         .user_spotify_playlists(
                             args.id,
                             req,
-                            args.search.map(|q| SearchQueryParam { q }),
+                            args.search.map(|q| SearchQueryParam { q: Some(q) }),
                             &args.api_token.value,
                         )
                         .await?;
@@ -1471,7 +1471,9 @@ mod test {
                             limit: Some(data.req.limit),
                             offset: Some(data.req.offset),
                         };
-                        let params = SearchQueryParam { q: data.q.into() };
+                        let params = SearchQueryParam {
+                            q: Some(data.q.into()),
+                        };
                         let mut api = MockApiClient::new();
                         api.expect_spotify_authorize_url()
                             .with(eq(redirect_uri_param.clone()))
