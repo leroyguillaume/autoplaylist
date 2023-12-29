@@ -1,0 +1,120 @@
+{
+  "conjunction": {
+    "and": "et"
+  },
+  "error": {
+    "config": "Fichier de configuration invalide.",
+    "forbidden": "Vous n'avez pas les permissions n\u00e9cessaires pour acc\u00e9der \u00e0 cette page.",
+    "unauthorized": "Vous devez \u00eatre connect\u00e9 pour acc\u00e9der \u00e0 cette page.",
+    "unexpected": "Une erreur inattendue est survenue."
+  },
+  "info": {
+    "playlist-created": "Playlist cr\u00e9\u00e9e!",
+    "playlist-deleted": "Playlist supprim\u00e9e!",
+    "playlist-synchronization-started": "La synchronisation de la playlist va commencer!",
+    "playlist-updated": "Playlist mise \u00e0 jour!",
+    "source-synchronization-started": "La synchronisation de la source va commencer!",
+    "track-deleted": "Morceau supprim\u00e9e!",
+    "track-updated": "Morceau mis \u00e0 jour!",
+    "user-deleted": "Utilisateur supprim\u00e9!",
+    "user-updated": "Utilisateur mis \u00e0 jour!"
+  },
+  "label": {
+    "actions": "Actions",
+    "admin": "Administration",
+    "album": "Album",
+    "artists": "Artistes",
+    "authenticating": "Authentification en cours",
+    "back": "Retour",
+    "cancel": "Annuler",
+    "compil": "Est une compilation",
+    "create": "Cr\u00e9er",
+    "create-playlist": "Cr\u00e9er une playlist",
+    "creating": "Cr\u00e9ation en cours",
+    "creds": "Identifiants",
+    "delete": "Supprimer",
+    "deleting": "Suppression en cours",
+    "email": "Email",
+    "filter": "Filtre",
+    "logout": "D\u00e9connexion",
+    "name": "Nom",
+    "owner": "Propri\u00e9taire",
+    "platform": "Platforme",
+    "platform-id": "ID sur la platforme",
+    "playlist-name": "Nom de la playlist",
+    "playlists": "Playlists",
+    "role": "Role",
+    "source": "Source",
+    "spotify-login": "Connexion avec Spotify",
+    "spotify-playlist": "Spotify (playlist)",
+    "spotify-saved-tracks": "Spotify (morceaux sauvegard\u00e9s)",
+    "status": "Statut",
+    "title": "Titre",
+    "update": "Mettre \u00e0 jour",
+    "updating": "Mise \u00e0 jour en cours",
+    "users": "Utilisateurs",
+    "year": "Ann\u00e9e"
+  },
+  "paragraph": {
+    "delete-my-account": "\u00cates-vous s\u00fbr de vouloir supprimer votre compte ? Toutes vos playlists seront perdues mais elles ne seront pas supprim\u00e9es de la platforme.",
+    "delete-playlist": "\u00cates-vous s\u00fbr de vouloir supprimer cette playlist ? Elle ne sera pas supprim\u00e9e de la platforme.",
+    "delete-track": "\u00cates-vous s\u00fbr de vouloir supprimer ce morceau ?",
+    "delete-user": "\u00cates-vous s\u00fbr de vouloir supprimer cet utilisateur ?",
+    "description": "AutoPlaylist cr\u00e9e et maintient vos playlists \u00e0 jour en fonction de vos propres r\u00e8gles."
+  },
+  "placeholder": {
+    "album": "Entrez un album",
+    "artists": "Entrez un ou plusieurs artistes s\u00e9par\u00e9s par des virgules",
+    "name": "Entrez un nom",
+    "playlist-name": "Entrez un nom de playlist",
+    "search": "Rechercher",
+    "title": "Entrez un titre",
+    "year": "Entrez une ann\u00e9e"
+  },
+  "predicate": {
+    "and": "et",
+    "artists-are": "Artistes sont",
+    "artists-are-exactly": "Artistes sont exactement",
+    "or": "ou",
+    "year-is": "Ann\u00e9e est",
+    "year-is-between": "Ann\u00e9e est entre"
+  },
+  "preposition": {
+    "at": "\u00e0"
+  },
+  "punctuation": {
+    "colon": " :",
+    "ellipsis": "\u2026"
+  },
+  "role": {
+    "admin": "Administrateur",
+    "user": "Utilisateur"
+  },
+  "sync": {
+    "failed": "\u00c9chec",
+    "pending": "Attente de la premi\u00e8re synchronisation",
+    "running": "Synchronization d\u00e9marr\u00e9e",
+    "succeeded": "Synchroniz\u00e9e"
+  },
+  "title": {
+    "are-you-sure": "\u00cates-vous s\u00fbr ?",
+    "create-playlist": "Cr\u00e9er une playlist",
+    "credentials": "Identifiants",
+    "forbidden": "Acc\u00e8s interdit",
+    "my-account": "Mon compte",
+    "my-playlists": "Mes playlists",
+    "not-found": "Oups ! On dirait que cette page n'existe pas.",
+    "playlists": "Playlists",
+    "sources": "Sources",
+    "tracks": "Morceaux",
+    "users": "Utilisateurs"
+  },
+  "validation": {
+    "album": "Veuillez entrer un album.",
+    "artists": "Veuillez entrer un ou plusieurs artistes s\u00e9par\u00e9s par des virgules.",
+    "name": "Veuillez entrer un nom.",
+    "playlist-name": "Veuillez entrer un nom de playlist.",
+    "title": "Veuillez entrer un titre.",
+    "year": "Veuillez entrer une ann\u00e9e."
+  }
+}

@@ -12,6 +12,7 @@ import {
 } from ".";
 import Alerts from "./Alerts";
 import { decodeToken } from "./utils";
+import { t } from "i18next";
 
 function AuthSpotifyPage(): JSX.Element {
   const state = useContext(AppContext);
@@ -52,7 +53,8 @@ function AuthSpotifyPage(): JSX.Element {
           <Col>
             <p>
               <FontAwesomeIcon icon={faSpinner} spin className="inline-icon" />
-              Authenticating...
+              {t("label.authenticating")}
+              {t("punctuation.elipsis")}
             </p>
           </Col>
         </Row>

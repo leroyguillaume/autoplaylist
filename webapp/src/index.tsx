@@ -8,6 +8,7 @@ import AuthSpotifyPage from "./AuthSpotifyPage";
 import { initReactI18next } from "react-i18next";
 import i18n from "i18next";
 import i18nEn from "./i18n/en.json";
+import i18nFr from "./i18n/fr.json";
 import MyPlaylistsPage from "./MyPlaylistsPage";
 import CreatePlaylistPage from "./CreatePlaylistPage";
 import { type Role } from "./api";
@@ -26,6 +27,7 @@ import AdminTracksPage from "./AdminTracksPage";
 import AdminTrackPage from "./AdminTrackPage";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faGithub } from "@fortawesome/free-brands-svg-icons";
+import LanguageDetector from "i18next-browser-languagedetector";
 
 export const LOCAL_STORAGE_KEY_TOKEN = "token";
 
@@ -157,20 +159,25 @@ const router = createBrowserRouter([
   },
 ]);
 
-// eslint-disable-next-line @typescript-eslint/no-floating-promises
-i18n.use(initReactI18next).init({
-  resources: {
-    en: {
-      common: i18nEn,
+void i18n
+  .use(initReactI18next)
+  .use(LanguageDetector)
+  .init({
+    resources: {
+      en: {
+        common: i18nEn,
+      },
+      fr: {
+        common: i18nFr,
+      },
     },
-  },
-  ns: ["common"],
-  defaultNS: "common",
-  fallbackLng: "en",
-  interpolation: {
-    escapeValue: false,
-  },
-});
+    ns: ["common"],
+    defaultNS: "common",
+    fallbackLng: "en",
+    interpolation: {
+      escapeValue: false,
+    },
+  });
 
 const App = (): JSX.Element => {
   const jwt = localStorage.getItem(LOCAL_STORAGE_KEY_TOKEN);
