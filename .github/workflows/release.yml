@@ -1,0 +1,19 @@
+name: Release
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}
+  cancel-in-progress: true
+
+on:
+  push:
+    tags: [v*]
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    steps:
+    - name: Create release
+      uses: softprops/action-gh-release@v1
+      with:
+        generate_release_notes: true
