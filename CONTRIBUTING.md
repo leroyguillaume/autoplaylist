@@ -32,11 +32,21 @@ docker compose --profile test up -d
 cargo test
 ```
 
+## Admin
+
+If you want to promote your user as admin, you can run the following commands:
+```bash
+export AUTOPLAYLIST_TOKEN=$(cargo run --bin autoplaylist -- auth spotify | jq -r '.jwt')
+id=$(cargo run --bin autoplaylist -- me | jq -r .id)
+cargo run --bin autoplaylist -- adm usr update-role $id admin
+```
+
 ## Services
 
 ### Configuration
 
-Spotify API credentials are required to run the services.
+Spotify API credentials are required to run the services. You can generate credentials [here](https://developer.spotify.com/dashboard/create).
+
 You need to set the following environment variables:
 - `SPOTIFY_CLIENT_ID`
 - `SPOTIFY_CLIENT_SECRET`
@@ -57,6 +67,8 @@ cargo run --bin autoplaylist-api
 
 This service is responsible for synchronizing the playlists with the music providers.
 
+It listens playlist/source events on RabbitMQ queues.
+
 #### How to run
 
 ```bash
@@ -69,6 +81,8 @@ The WebApp is a React application which allows to manage the playlists.
 
 By default, the WebApp is configured to call the API on `http://localhost:8000` but you can change it by modifying `public/config.json`.
 
+It is particularly ugly because I'm not a frontend developer, feel free to contribute to improve it.
+
 ### How to run
 
 ```bash
@@ -80,6 +94,8 @@ npm start
 ## CLI
 
 The CLI can be used to interract with the API or to do administrative tasks.
+
+The administrative tasks don't call the API but directly the database/the broker.
 
 ### How to run
 
