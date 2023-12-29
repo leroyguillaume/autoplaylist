@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE playlist\nSET\n    name = $2,\n    predicate = $3,\n    sync = $4\nWHERE id = $1;\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Varchar",
+        "Jsonb",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0bf8093f69e4f89ba77e32ce4c0d07c7b2c2a8a2d67a59873154b59b2968a9a4"
+}

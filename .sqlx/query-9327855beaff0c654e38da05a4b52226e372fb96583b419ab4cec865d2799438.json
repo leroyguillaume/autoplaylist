@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(playlist.id)\nFROM playlist\nINNER JOIN source\n    ON source.id = playlist.src\nWHERE source.owner = $1;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "9327855beaff0c654e38da05a4b52226e372fb96583b419ab4cec865d2799438"
+}

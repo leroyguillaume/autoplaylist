@@ -1,0 +1,50 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n    id AS usr_id,\n    creation AS usr_creation,\n    role AS \"usr_role: Role\", -- noqa: disable=RF05\n    creds AS usr_creds\nFROM \"user\"\nWHERE id = $1;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "usr_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "usr_creation",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "usr_role: Role",
+        "type_info": {
+          "Custom": {
+            "name": "role",
+            "kind": {
+              "Enum": [
+                "admin",
+                "user"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "usr_creds",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "68bddfc062f94e0255fcb912dc9512d056ff7b03f074c93cf2167551558777f8"
+}

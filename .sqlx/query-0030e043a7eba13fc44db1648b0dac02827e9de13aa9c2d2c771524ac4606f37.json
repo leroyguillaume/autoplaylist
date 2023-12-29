@@ -1,0 +1,81 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n    track.id AS track_id,\n    track.creation AS track_creation,\n    track.title AS track_title,\n    track.artists AS track_artists,\n    track.album AS track_album,\n    track.from_compil AS track_from_compil,\n    track.year AS track_year,\n    track.platform AS \"track_platform: Platform\", -- noqa: disable=RF05,\n    track.platform_id AS track_platform_id\nFROM source_track\nINNER JOIN track\n    ON track.id = source_track.track\nWHERE source_track.src = $1\nORDER BY track.creation ASC, track.id ASC\nLIMIT $2\nOFFSET $3;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "track_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "track_creation",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "track_title",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "track_artists",
+        "type_info": "VarcharArray"
+      },
+      {
+        "ordinal": 4,
+        "name": "track_album",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "track_from_compil",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "track_year",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "track_platform: Platform",
+        "type_info": {
+          "Custom": {
+            "name": "platform",
+            "kind": {
+              "Enum": [
+                "spotify"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "track_platform_id",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "0030e043a7eba13fc44db1648b0dac02827e9de13aa9c2d2c771524ac4606f37"
+}

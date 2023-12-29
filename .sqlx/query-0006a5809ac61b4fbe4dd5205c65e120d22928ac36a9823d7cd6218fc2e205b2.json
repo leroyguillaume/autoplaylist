@@ -1,0 +1,82 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n    t1.id AS track_id,\n    t1.creation AS track_creation,\n    t1.title AS track_title,\n    t1.artists AS track_artists,\n    t1.album AS track_album,\n    t1.from_compil AS track_from_compil,\n    t1.year AS track_year,\n    t1.platform AS \"track_platform: Platform\", -- noqa: disable=RF05,\n    t1.platform_id AS track_platform_id\nFROM playlist_track\nINNER JOIN track t1\n    ON t1.id = playlist_track.track\nWHERE\n    playlist_track.playlist = $1\n    AND (\n        title LIKE CONCAT('%', LOWER($2), '%')\n        OR album LIKE CONCAT('%', LOWER($2), '%')\n        OR EXISTS (\n            SELECT 1\n            FROM (\n                SELECT UNNEST (artists) AS artists\n                FROM track t2\n                WHERE t2.id = t1.id\n            ) AS t3\n            WHERE t3.artists LIKE CONCAT('%', LOWER($2), '%')\n        )\n    )\nORDER BY t1.creation ASC, t1.id ASC\nLIMIT $3\nOFFSET $4;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "track_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "track_creation",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "track_title",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "track_artists",
+        "type_info": "VarcharArray"
+      },
+      {
+        "ordinal": 4,
+        "name": "track_album",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "track_from_compil",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "track_year",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "track_platform: Platform",
+        "type_info": {
+          "Custom": {
+            "name": "platform",
+            "kind": {
+              "Enum": [
+                "spotify"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "track_platform_id",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "0006a5809ac61b4fbe4dd5205c65e120d22928ac36a9823d7cd6218fc2e205b2"
+}

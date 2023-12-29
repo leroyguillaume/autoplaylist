@@ -1,0 +1,56 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n    id AS platform_playlist_id,\n    name AS platform_playlist_name,\n    platform AS \"platform_playlist_platform: Platform\" -- noqa: disable=RF05\nFROM user_platform_playlist\nWHERE\n    usr = $1\n    AND platform = $2\n    AND LOWER(name) LIKE CONCAT('%', LOWER($3), '%')\nORDER BY name ASC, id ASC\nLIMIT $4\nOFFSET $5;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "platform_playlist_id",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "platform_playlist_name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "platform_playlist_platform: Platform",
+        "type_info": {
+          "Custom": {
+            "name": "platform",
+            "kind": {
+              "Enum": [
+                "spotify"
+              ]
+            }
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        {
+          "Custom": {
+            "name": "platform",
+            "kind": {
+              "Enum": [
+                "spotify"
+              ]
+            }
+          }
+        },
+        "Text",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "eb497ab52823b0a732491a7ddc0eb8ea34b01a876d24e2be7c6684440a8660a8"
+}

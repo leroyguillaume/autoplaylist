@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT (*)\nFROM track t1\nWHERE\n    title LIKE CONCAT('%', LOWER($1), '%')\n    OR album LIKE CONCAT('%', LOWER($1), '%')\n    OR EXISTS (\n        SELECT 1\n        FROM (\n            SELECT UNNEST (artists) AS artists\n            FROM track t2\n            WHERE t2.id = t1.id\n        ) AS t3\n        WHERE t3.artists LIKE CONCAT('%', LOWER($1), '%')\n    );\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "8be9ffcfaa194cbd0b5a37ab208ecb95f033ecf334e6b7a89a07cefeeb18e69b"
+}

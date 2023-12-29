@@ -1,0 +1,79 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n    id AS track_id,\n    creation AS track_creation,\n    title AS track_title,\n    artists AS track_artists,\n    album AS track_album,\n    from_compil AS track_from_compil,\n    year AS track_year,\n    platform AS \"track_platform: Platform\", -- noqa: disable=RF05,\n    platform_id AS track_platform_id\nFROM track\nWHERE id = $1;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "track_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "track_creation",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "track_title",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "track_artists",
+        "type_info": "VarcharArray"
+      },
+      {
+        "ordinal": 4,
+        "name": "track_album",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "track_from_compil",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "track_year",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "track_platform: Platform",
+        "type_info": {
+          "Custom": {
+            "name": "platform",
+            "kind": {
+              "Enum": [
+                "spotify"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "track_platform_id",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "f09491473e30418c71073f0610e611a245617a766ab26e0fe20fb7c0b310c5d1"
+}

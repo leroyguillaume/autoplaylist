@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n    source.id AS src_id,\n    source.creation AS src_creation,\n    source.kind AS src_kind,\n    source.sync AS src_sync,\n    \"user\".id AS owner_id,\n    \"user\".creation AS owner_creation,\n    \"user\".role AS \"owner_role: Role\", -- noqa: disable=RF05\n    \"user\".creds AS owner_creds\nFROM source\nINNER JOIN \"user\"\n    ON \"user\".id = source.owner\nWHERE source.owner = $1\nORDER BY source.creation ASC, source.id ASC\nLIMIT $2\nOFFSET $3;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "src_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "src_creation",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "src_kind",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 3,
+        "name": "src_sync",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 4,
+        "name": "owner_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "owner_creation",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "owner_role: Role",
+        "type_info": {
+          "Custom": {
+            "name": "role",
+            "kind": {
+              "Enum": [
+                "admin",
+                "user"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "owner_creds",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "ff20aef701fd482295db6685168b89764818ff184b0cb72748fc3d664c7509e5"
+}

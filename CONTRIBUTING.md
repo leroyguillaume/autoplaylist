@@ -28,6 +28,7 @@ cargo build
 ## How to test
 
 ```bash
+docker compose --profile test up -d
 cargo test
 ```
 

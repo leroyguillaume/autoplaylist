@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO source_track\nVALUES ($1, $2)\nON CONFLICT DO NOTHING;\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f7f5d2c86899820ab1d90bf7f6f31b785a6ce8eb9ebd9cd03a84b28b67652020"
+}

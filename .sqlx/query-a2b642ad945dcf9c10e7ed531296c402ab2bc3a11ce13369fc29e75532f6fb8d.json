@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(id)\nFROM \"user\"\nWHERE LOWER(spotify_creds ->> 'email') LIKE CONCAT('%', LOWER($1), '%');\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "a2b642ad945dcf9c10e7ed531296c402ab2bc3a11ce13369fc29e75532f6fb8d"
+}

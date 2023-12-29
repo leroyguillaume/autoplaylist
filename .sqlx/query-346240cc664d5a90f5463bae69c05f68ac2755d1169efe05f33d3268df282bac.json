@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE track\nSET\n    title = $2,\n    artists = $3,\n    album = $4,\n    from_compil = $5,\n    year = $6\nWHERE id = $1;\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Varchar",
+        "VarcharArray",
+        "Varchar",
+        "Bool",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "346240cc664d5a90f5463bae69c05f68ac2755d1169efe05f33d3268df282bac"
+}

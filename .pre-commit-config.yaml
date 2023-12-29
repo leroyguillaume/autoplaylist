@@ -6,6 +6,7 @@ repos:
   - id: check-yaml
   - id: pretty-format-json
     args: [--autofix]
+    exclude: ^.sqlx/
   - id: trailing-whitespace
     exclude: .rs$
   - id: end-of-file-fixer
@@ -37,3 +38,18 @@ repos:
     args: [--fix]
     types: [file]
     files: \.[jt]sx?$
+- repo: local
+  hooks:
+  - id: sqlx-prepare
+    name: sqlx-prepare
+    entry: cargo
+    args:
+    - sqlx
+    - prepare
+    - -D
+    - postgres://autoplaylist:autoplaylist@localhost:5432/autoplaylist
+    - --workspace
+    language: system
+    types: [file]
+    files: common/resources/main/db/pg/migrations/.*\.sql$
+    pass_filenames: false

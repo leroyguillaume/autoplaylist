@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n    id AS usr_id,\n    creation AS usr_creation,\n    role AS \"usr_role: Role\", -- noqa: disable=RF05\n    creds AS usr_creds\nFROM \"user\"\nWHERE LOWER(spotify_creds ->> 'email') LIKE CONCAT('%', LOWER($1), '%')\nORDER BY creation ASC, id ASC\nLIMIT $2\nOFFSET $3;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "usr_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "usr_creation",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "usr_role: Role",
+        "type_info": {
+          "Custom": {
+            "name": "role",
+            "kind": {
+              "Enum": [
+                "admin",
+                "user"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "usr_creds",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "4d4d1b10dc3f193571930ff4cc0f611ae13162438b6368657f2661a3f91b847b"
+}

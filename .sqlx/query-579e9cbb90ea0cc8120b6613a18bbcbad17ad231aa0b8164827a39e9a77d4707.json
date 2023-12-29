@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(playlist.id)\nFROM playlist\nINNER JOIN source\n    ON source.id = playlist.src\nWHERE\n    source.owner = $1\n    AND LOWER(name) LIKE CONCAT('%', LOWER($2), '%');\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "579e9cbb90ea0cc8120b6613a18bbcbad17ad231aa0b8164827a39e9a77d4707"
+}

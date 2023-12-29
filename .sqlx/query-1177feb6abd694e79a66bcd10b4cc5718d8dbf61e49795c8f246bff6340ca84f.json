@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS(\n    SELECT 1\n    FROM playlist_track\n    WHERE playlist = $1\n        AND track = $2\n) AS contains;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "contains",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "1177feb6abd694e79a66bcd10b4cc5718d8dbf61e49795c8f246bff6340ca84f"
+}
