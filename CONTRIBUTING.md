@@ -6,6 +6,7 @@
 - [pre-commit](https://pre-commit.com/)
 - [Rust](https://rustup.rs/)
 - [sqlfluff](https://sqlfluff.com/)
+- [sqlx-cli](https://crates.io/crates/sqlx-cli)
 - [Spotify API credentials](https://developer.spotify.com/)
 
 ## Getting started
@@ -15,6 +16,7 @@ git clone https://github.com/leroyguillaume/autoplaylist
 cd autoplaylist
 pre-commit install
 docker compose up -d
+./sh/recreate-db.sh
 ```
 
 ## How to build
