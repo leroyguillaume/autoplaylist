@@ -39,7 +39,7 @@ A *target* is the platform on which create the playlist.
 A *target* can be:
 - Spotify
 
-## Synchronization workflow
+## Synchronization flow
 
 1. Fetch the tracks from the playlist *source*
 2. Start synchronization of all playlists based on this *source*:
@@ -54,24 +54,6 @@ Note a synchronization can be triggered manually via the REST API by an admin.
 AutoPlaylist is composed of 2 services:
 - API which exposes the REST API to manage the playlists
 - Synchronizer which synchronizes the playlists
-
-## WebApp
-
-The WebApp is a React application which allows to manage the playlists.
-You can start it by running:
-```bash
-cd webapp
-npm install
-npm start
-```
-
-## CLI
-
-The CLI can be used to interract with the API or to do administrative tasks.
-You can see the available commands by running:
-```bash
-cargo run --bin autoplaylist -- help
-```
 
 ## Contributing
 
