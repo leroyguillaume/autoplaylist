@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM user_platform_playlist\nWHERE\n    usr = $1\n    AND platform = $2;\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        {
+          "Custom": {
+            "name": "platform",
+            "kind": {
+              "Enum": [
+                "spotify"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7b941b65fa1018fcb07b0a2a423478e3c994bc19f931da4d62b5dc239df75ac9"
+}

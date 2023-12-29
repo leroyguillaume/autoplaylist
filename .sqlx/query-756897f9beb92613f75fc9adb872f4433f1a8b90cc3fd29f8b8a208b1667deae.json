@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS(\n    SELECT 1\n    FROM source_track\n    WHERE src = $1\n        AND track = $2\n) AS contains;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "contains",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "756897f9beb92613f75fc9adb872f4433f1a8b90cc3fd29f8b8a208b1667deae"
+}

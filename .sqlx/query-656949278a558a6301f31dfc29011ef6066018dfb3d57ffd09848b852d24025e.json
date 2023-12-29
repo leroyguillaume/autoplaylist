@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(id)\nFROM playlist\nWHERE LOWER(name) LIKE CONCAT('%', LOWER($1), '%');\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "656949278a558a6301f31dfc29011ef6066018dfb3d57ffd09848b852d24025e"
+}

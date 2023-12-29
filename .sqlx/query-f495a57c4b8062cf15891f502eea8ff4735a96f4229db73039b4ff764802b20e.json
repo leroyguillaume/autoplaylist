@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT (t1.id)\nFROM playlist_track\nINNER JOIN track t1\n    ON t1.id = playlist_track.track\nWHERE\n    playlist_track.playlist = $1\n    AND (\n        title LIKE CONCAT('%', LOWER($2), '%')\n        OR album LIKE CONCAT('%', LOWER($2), '%')\n        OR EXISTS (\n            SELECT 1\n            FROM (\n                SELECT UNNEST (artists) AS artists\n                FROM track t2\n                WHERE t2.id = t1.id\n            ) AS t3\n            WHERE t3.artists LIKE CONCAT('%', LOWER($2), '%')\n        )\n    );\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "f495a57c4b8062cf15891f502eea8ff4735a96f4229db73039b4ff764802b20e"
+}

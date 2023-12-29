@@ -1,0 +1,94 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO track (title, artists, album, from_compil, year, platform, platform_id)\nVALUES ($1, $2, $3, $4, $5, $6, $7)\nRETURNING\n    id AS track_id,\n    creation AS track_creation,\n    title AS track_title,\n    artists AS track_artists,\n    album AS track_album,\n    from_compil AS track_from_compil,\n    year AS track_year,\n    platform AS \"track_platform: Platform\", -- noqa: disable=RF05,\n    platform_id AS track_platform_id;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "track_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "track_creation",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "track_title",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "track_artists",
+        "type_info": "VarcharArray"
+      },
+      {
+        "ordinal": 4,
+        "name": "track_album",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "track_from_compil",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "track_year",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "track_platform: Platform",
+        "type_info": {
+          "Custom": {
+            "name": "platform",
+            "kind": {
+              "Enum": [
+                "spotify"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "track_platform_id",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "VarcharArray",
+        "Varchar",
+        "Bool",
+        "Int4",
+        {
+          "Custom": {
+            "name": "platform",
+            "kind": {
+              "Enum": [
+                "spotify"
+              ]
+            }
+          }
+        },
+        "Varchar"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "3f24b866d5ac4b46b95c03681ec3cd4f0d65681cf20eae4023aa5c90edf4dea9"
+}

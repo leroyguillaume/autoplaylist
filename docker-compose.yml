@@ -1,6 +1,23 @@
 version: '3'
 
 services:
+  api:
+    profiles: [main]
+    build:
+      context: .
+      target: api
+    environment:
+      BROKER_URL: amqp://guest:guest@broker:5672/%2f
+      CORS_ALLOWED_ORIGINS: http://localhost:3000
+      DATABASE_HOST: db
+      DATABASE_PASSWORD: autoplaylist
+      DATABASE_SECRET: changeit
+      JWT_SECRET: changeit
+      SPOTIFY_CLIENT_ID: $SPOTIFY_CLIENT_ID
+      SPOTIFY_CLIENT_SECRET: $SPOTIFY_CLIENT_SECRET
+    ports:
+    - 8000:8000
+
   broker:
     image: rabbitmq:3
     ports:
@@ -15,7 +32,31 @@ services:
     ports:
     - 5432:5432
 
+  sync:
+    profiles: [main]
+    build:
+      context: .
+      target: sync
+    environment:
+      BROKER_URL: amqp://guest:guest@broker:5672/%2f
+      DATABASE_HOST: db
+      DATABASE_PASSWORD: autoplaylist
+      DATABASE_SECRET: changeit
+      SPOTIFY_CLIENT_ID: $SPOTIFY_CLIENT_ID
+      SPOTIFY_CLIENT_SECRET: $SPOTIFY_CLIENT_SECRET
+
+  webapp:
+    profiles: [main]
+    build:
+      context: .
+      target: webapp
+    environment:
+      API_URL: http://localhost:8000
+    ports:
+    - 3000:80
+
   wiremock:
+    profiles: [test]
     image: wiremock/wiremock
     ports:
     - 8081:8080

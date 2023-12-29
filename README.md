@@ -4,7 +4,21 @@ Automatically create playlists based on predicate.
 
 ## Getting started
 
-For the moment, you need to build the project from source. See [CONTRIBUTING.md](CONTRIBUTING.md) for more details.
+### With Docker
+
+Spotify API credentials are required to run the services.
+You need to set the following environment variables:
+- `SPOTIFY_CLIENT_ID`
+- `SPOTIFY_CLIENT_SECRET`
+
+You can run the services with the following command:
+```bash
+docker compose --profile main up -d
+```
+
+### With cargo
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Concepts
 
@@ -27,14 +41,13 @@ A *target* can be:
 
 ## Synchronization workflow
 
-For every 6 hours, the synchronizer will:
-1. fetch the tracks from the playlist *source*
-2. start synchronization of all playlists based on this *source*:
-   1. fetch the tracks from the playlist *target*
-   2. for each track of the *source*, if it matches the playlist predicate, add it to the *target*
-   3. for each track of the *target*, if it doesn't match the playlist predicate, remove it from the *target*
+1. Fetch the tracks from the playlist *source*
+2. Start synchronization of all playlists based on this *source*:
+   1. Fetch the tracks from the playlist *target*
+   2. For each track of the *source*, if it matches the playlist predicate, add it to the *target*
+   3. For each track of the *target*, if it doesn't match the playlist predicate, remove it from the *target*
 
-Note a synchronization can be triggered manually via the REST API.
+Note a synchronization can be triggered manually via the REST API by an admin.
 
 ## Architecture
 
@@ -62,4 +75,4 @@ cargo run --bin autoplaylist -- help
 
 ## Contributing
 
-[See CONTRIBUTING.md](CONTRIBUTING.md)
+[See CONTRIBUTING.md](CONTRIBUTING.md).

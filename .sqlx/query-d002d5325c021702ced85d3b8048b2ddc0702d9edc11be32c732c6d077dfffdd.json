@@ -1,0 +1,50 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n    id AS usr_id,\n    creation AS usr_creation,\n    role AS \"usr_role: Role\", -- noqa: disable=RF05\n    creds AS usr_creds\nFROM \"user\"\nWHERE spotify_creds ->> 'id' = $1;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "usr_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "usr_creation",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "usr_role: Role",
+        "type_info": {
+          "Custom": {
+            "name": "role",
+            "kind": {
+              "Enum": [
+                "admin",
+                "user"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "usr_creds",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "d002d5325c021702ced85d3b8048b2ddc0702d9edc11be32c732c6d077dfffdd"
+}

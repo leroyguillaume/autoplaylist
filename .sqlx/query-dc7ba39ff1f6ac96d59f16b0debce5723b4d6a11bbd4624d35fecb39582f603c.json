@@ -1,0 +1,75 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH new_src AS (\n    INSERT INTO source (owner, kind)\n    VALUES ($1, $2)\n    RETURNING\n        id,\n        creation,\n        owner,\n        kind,\n        sync\n)\nSELECT\n    new_src.id AS src_id,\n    new_src.creation AS src_creation,\n    new_src.kind AS src_kind,\n    new_src.sync AS src_sync,\n    \"user\".id AS owner_id,\n    \"user\".creation AS owner_creation,\n    \"user\".role AS \"owner_role: Role\", -- noqa: disable=RF05\n    \"user\".creds AS owner_creds\nFROM new_src\nINNER JOIN \"user\"\n    ON \"user\".id = new_src.owner;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "src_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "src_creation",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "src_kind",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 3,
+        "name": "src_sync",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 4,
+        "name": "owner_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "owner_creation",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "owner_role: Role",
+        "type_info": {
+          "Custom": {
+            "name": "role",
+            "kind": {
+              "Enum": [
+                "admin",
+                "user"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "owner_creds",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Jsonb"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "dc7ba39ff1f6ac96d59f16b0debce5723b4d6a11bbd4624d35fecb39582f603c"
+}
