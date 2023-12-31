@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(id)\nFROM source\nWHERE (sync -> 'succeeded' ->> 'end')::TIMESTAMP WITH TIME ZONE <= $1;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "8efd147cee463e6eb783eb543e3a6bb93fff934bacb2c60d317126d18eee5023"
+}

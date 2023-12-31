@@ -528,6 +528,31 @@ pub struct SynchronizationState<STEP: SynchronizationStep> {
     pub step: STEP,
 }
 
+// SynchronizationStatus
+
+#[derive(Clone, Copy, Debug, Deserialize, EnumDisplay, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[enum_display(case = "Kebab")]
+pub enum SynchronizationStatus {
+    Aborted,
+    Failed,
+    Pending,
+    Running,
+    Succeeded,
+}
+
+impl SynchronizationStatus {
+    pub fn from_synchronization<STEP: SynchronizationStep>(sync: &Synchronization<STEP>) -> Self {
+        match sync {
+            Synchronization::Aborted { .. } => Self::Aborted,
+            Synchronization::Failed { .. } => Self::Failed,
+            Synchronization::Pending => Self::Pending,
+            Synchronization::Running(_) => Self::Running,
+            Synchronization::Succeeded { .. } => Self::Succeeded,
+        }
+    }
+}
+
 // Target
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -1395,6 +1420,69 @@ mod test {
             fn first() {
                 let step = SourceSynchronizationStep::first();
                 assert_eq!(step, SourceSynchronizationStep::DeleteOldPull);
+            }
+        }
+    }
+
+    mod synchronization_status {
+        use super::*;
+
+        // Mods
+
+        mod from_synchronization {
+            use super::*;
+
+            // Tests
+
+            #[test]
+            fn aborted() {
+                let sync = Synchronization::Aborted {
+                    end: Utc::now(),
+                    state: SynchronizationState {
+                        start: Utc::now(),
+                        step: PlaylistSynchronizationStep::first(),
+                    },
+                };
+                let status = SynchronizationStatus::from_synchronization(&sync);
+                assert_eq!(status, SynchronizationStatus::Aborted);
+            }
+
+            #[test]
+            fn failed() {
+                let sync = Synchronization::Failed {
+                    details: "details".into(),
+                    end: Utc::now(),
+                    state: SynchronizationState {
+                        start: Utc::now(),
+                        step: PlaylistSynchronizationStep::first(),
+                    },
+                };
+                let status = SynchronizationStatus::from_synchronization(&sync);
+                assert_eq!(status, SynchronizationStatus::Failed);
+            }
+
+            #[test]
+            fn pending() {
+                let sync: SourceSynchronization = Synchronization::Pending;
+                let status = SynchronizationStatus::from_synchronization(&sync);
+                assert_eq!(status, SynchronizationStatus::Pending);
+            }
+
+            #[test]
+            fn running() {
+                let sync: SourceSynchronization = Synchronization::Running(Utc::now());
+                let status = SynchronizationStatus::from_synchronization(&sync);
+                assert_eq!(status, SynchronizationStatus::Running);
+            }
+
+            #[test]
+            fn succeeded() {
+                let sync: SourceSynchronization = Synchronization::Succeeded {
+                    end: Utc::now(),
+                    start: Utc::now(),
+                };
+                let status = SynchronizationStatus::from_synchronization(&sync);
+                assert_eq!(status, SynchronizationStatus::Succeeded);
             }
         }
     }

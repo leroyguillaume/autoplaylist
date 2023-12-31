@@ -1011,7 +1011,7 @@ mod test {
                 let data = Data {
                     msg: SourceMessage {
                         id: src.id,
-                        kind: SourceMessageKind::Sync,
+                        kind: SourceMessageKind::Synchronize,
                     },
                     src,
                 };
@@ -1039,7 +1039,7 @@ mod test {
                 let data = Data {
                     msg: SourceMessage {
                         id: src.id,
-                        kind: SourceMessageKind::Sync,
+                        kind: SourceMessageKind::Synchronize,
                     },
                     src,
                 };
@@ -1076,7 +1076,7 @@ mod test {
                 let data = Data {
                     msg: SourceMessage {
                         id: src.id,
-                        kind: SourceMessageKind::Sync,
+                        kind: SourceMessageKind::Synchronize,
                     },
                     src,
                 };

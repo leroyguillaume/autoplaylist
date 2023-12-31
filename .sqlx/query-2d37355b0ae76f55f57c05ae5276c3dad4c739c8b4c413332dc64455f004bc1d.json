@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id\nFROM source\nWHERE (sync -> 'succeeded' ->> 'end')::TIMESTAMP WITH TIME ZONE <= $1\nORDER BY creation, id\nLIMIT $2\nOFFSET $3;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "2d37355b0ae76f55f57c05ae5276c3dad4c739c8b4c413332dc64455f004bc1d"
+}

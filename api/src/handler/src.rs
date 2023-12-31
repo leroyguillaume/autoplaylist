@@ -153,7 +153,7 @@ pub async fn start_source_synchronization<
             if db_conn.source_exists(id).await? {
                 let msg = SourceMessage {
                     id,
-                    kind: SourceMessageKind::Sync,
+                    kind: SourceMessageKind::Synchronize,
                 };
                 state.svc.broker().publish_source_message(&msg).await?;
                 Ok(StatusCode::NO_CONTENT)
@@ -785,7 +785,7 @@ mod test {
             };
             let msg = SourceMessage {
                 id: Uuid::new_v4(),
-                kind: SourceMessageKind::Sync,
+                kind: SourceMessageKind::Synchronize,
             };
             let mut auth = MockAuthenticator::new();
             auth.expect_authenticate()

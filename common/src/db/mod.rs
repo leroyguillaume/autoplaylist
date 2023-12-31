@@ -1,12 +1,13 @@
 use std::collections::BTreeSet;
 
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use thiserror::Error;
 use uuid::Uuid;
 
 use crate::model::{
     Album, Credentials, Page, PageRequest, Platform, PlatformPlaylist, Playlist, Predicate, Source,
-    SourceKind, Target, Track, User,
+    SourceKind, SynchronizationStatus, Target, Track, User,
 };
 
 // Macros
@@ -248,6 +249,26 @@ macro_rules! mock_client_impl {
 
             async fn source_exists(&mut self, id: Uuid) -> DatabaseResult<bool> {
                 self.$attr.source_exists(id).await
+            }
+
+            async fn source_ids_by_last_synchronization_date(
+                &mut self,
+                end: DateTime<Utc>,
+                req: PageRequest,
+            ) -> DatabaseResult<Page<Uuid>> {
+                self.$attr
+                    .source_ids_by_last_synchronization_date(end, req)
+                    .await
+            }
+
+            async fn source_ids_by_synchronization_status(
+                &mut self,
+                status: SynchronizationStatus,
+                req: PageRequest,
+            ) -> DatabaseResult<Page<Uuid>> {
+                self.$attr
+                    .source_ids_by_synchronization_status(status, req)
+                    .await
             }
 
             async fn source_tracks(
@@ -560,6 +581,18 @@ pub trait DatabaseClient: Send + Sync {
         -> DatabaseResult<bool>;
 
     async fn source_exists(&mut self, id: Uuid) -> DatabaseResult<bool>;
+
+    async fn source_ids_by_last_synchronization_date(
+        &mut self,
+        end: DateTime<Utc>,
+        req: PageRequest,
+    ) -> DatabaseResult<Page<Uuid>>;
+
+    async fn source_ids_by_synchronization_status(
+        &mut self,
+        status: SynchronizationStatus,
+        req: PageRequest,
+    ) -> DatabaseResult<Page<Uuid>>;
 
     async fn source_tracks(&mut self, id: Uuid, req: PageRequest) -> DatabaseResult<Page<Track>>;
 
