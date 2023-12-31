@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 use crate::model::{
     Album, Credentials, Page, PageRequest, Platform, Playlist, Role, Source, SourceKind,
-    SpotifyCredentials, Track, User,
+    SpotifyCredentials, SynchronizationStatus, Track, User,
 };
 
 use super::{
@@ -273,6 +273,26 @@ macro_rules! client_impl {
             async fn source_exists(&mut self, id: Uuid) -> DatabaseResult<bool> {
                 let exists = source_exists(id, &mut self.conn).await?;
                 Ok(exists)
+            }
+
+            async fn source_ids_by_last_synchronization_date(
+                &mut self,
+                date: DateTime<Utc>,
+                req: PageRequest,
+            ) -> DatabaseResult<Page<Uuid>> {
+                let page =
+                    source_ids_by_last_synchronization_date(date, req, &mut self.conn).await?;
+                Ok(page)
+            }
+
+            async fn source_ids_by_synchronization_status(
+                &mut self,
+                status: SynchronizationStatus,
+                req: PageRequest,
+            ) -> DatabaseResult<Page<Uuid>> {
+                let page =
+                    source_ids_by_synchronization_status(status, req, &mut self.conn).await?;
+                Ok(page)
             }
 
             async fn source_tracks(
@@ -797,8 +817,8 @@ mod test {
 
     use crate::{
         model::{
-            Credentials, Predicate, SourceKind, SpotifyCredentials, SpotifySourceKind,
-            SpotifyToken, Synchronization, Target,
+            Credentials, Predicate, SourceKind, SourceSynchronizationStep, SpotifyCredentials,
+            SpotifySourceKind, SpotifyToken, Synchronization, SynchronizationState, Target,
         },
         test_env_var, TracingConfig,
     };
@@ -1011,7 +1031,14 @@ mod test {
                 id: Uuid::from_u128(0x911ca8e748744bf4b8e11ddd1b6cee41),
                 kind: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
                 owner: usr_1.usr.clone(),
-                sync: Synchronization::Pending,
+                sync: Synchronization::Succeeded {
+                    end: DateTime::parse_from_rfc3339("2023-01-05T01:00:10Z")
+                        .expect("failed to parse date")
+                        .into(),
+                    start: DateTime::parse_from_rfc3339("2023-01-05T01:00:00Z")
+                        .expect("failed to parse date")
+                        .into(),
+                },
             };
             let src_2 = Source {
                 creation: DateTime::parse_from_rfc3339("2023-02-05T02:00:00Z")
@@ -1033,7 +1060,14 @@ mod test {
                 id: Uuid::from_u128(0x12d423d13bc04eefb0c66748beb7d52e),
                 kind: SourceKind::Spotify(SpotifySourceKind::Playlist("src_3".into())),
                 owner: usr_1.usr.clone(),
-                sync: Synchronization::Pending,
+                sync: Synchronization::Succeeded {
+                    end: DateTime::parse_from_rfc3339("2023-01-05T02:00:10Z")
+                        .expect("failed to parse date")
+                        .into(),
+                    start: DateTime::parse_from_rfc3339("2023-01-05T02:00:00Z")
+                        .expect("failed to parse date")
+                        .into(),
+                },
             };
             let src_4 = Source {
                 creation: DateTime::parse_from_rfc3339("2023-02-05T04:00:00Z")
@@ -1041,6 +1075,77 @@ mod test {
                     .into(),
                 id: Uuid::from_u128(0xa23c9cc92b7246db9a52922f1c09db01),
                 kind: SourceKind::Spotify(SpotifySourceKind::Playlist("src_4".into())),
+                owner: usr_2.usr.clone(),
+                sync: Synchronization::Succeeded {
+                    end: DateTime::parse_from_rfc3339("2023-01-05T03:00:10Z")
+                        .expect("failed to parse date")
+                        .into(),
+                    start: DateTime::parse_from_rfc3339("2023-01-05T03:00:00Z")
+                        .expect("failed to parse date")
+                        .into(),
+                },
+            };
+            let src_5 = Source {
+                creation: DateTime::parse_from_rfc3339("2023-02-05T05:00:00Z")
+                    .expect("failed to parse date")
+                    .into(),
+                id: Uuid::from_u128(0x2d2e540155e1408499258fbea33cf9cf),
+                kind: SourceKind::Spotify(SpotifySourceKind::Playlist("src_5".into())),
+                owner: usr_2.usr.clone(),
+                sync: Synchronization::Succeeded {
+                    end: DateTime::parse_from_rfc3339("2023-01-05T03:06:10Z")
+                        .expect("failed to parse date")
+                        .into(),
+                    start: DateTime::parse_from_rfc3339("2023-01-05T03:06:00Z")
+                        .expect("failed to parse date")
+                        .into(),
+                },
+            };
+            let src_6 = Source {
+                creation: DateTime::parse_from_rfc3339("2023-02-05T06:00:00Z")
+                    .expect("failed to parse date")
+                    .into(),
+                id: Uuid::from_u128(0xb919d322823d4a4ebc3df7dfde83f698),
+                kind: SourceKind::Spotify(SpotifySourceKind::Playlist("src_6".into())),
+                owner: usr_2.usr.clone(),
+                sync: Synchronization::Aborted {
+                    end: DateTime::parse_from_rfc3339("2023-01-05T03:06:10Z")
+                        .expect("failed to parse date")
+                        .into(),
+                    state: SynchronizationState {
+                        start: DateTime::parse_from_rfc3339("2023-01-05T03:06:00Z")
+                            .expect("failed to parse date")
+                            .into(),
+                        step: SourceSynchronizationStep::Finished,
+                    },
+                },
+            };
+            let src_7 = Source {
+                creation: DateTime::parse_from_rfc3339("2023-02-05T07:00:00Z")
+                    .expect("failed to parse date")
+                    .into(),
+                id: Uuid::from_u128(0xda933c0b5bc64eeaa96735e9c8636417),
+                kind: SourceKind::Spotify(SpotifySourceKind::Playlist("src_7".into())),
+                owner: usr_2.usr.clone(),
+                sync: Synchronization::Failed {
+                    details: "error".into(),
+                    end: DateTime::parse_from_rfc3339("2023-01-05T03:06:10Z")
+                        .expect("failed to parse date")
+                        .into(),
+                    state: SynchronizationState {
+                        start: DateTime::parse_from_rfc3339("2023-01-05T03:06:00Z")
+                            .expect("failed to parse date")
+                            .into(),
+                        step: SourceSynchronizationStep::Finished,
+                    },
+                },
+            };
+            let src_8 = Source {
+                creation: DateTime::parse_from_rfc3339("2023-02-05T08:00:00Z")
+                    .expect("failed to parse date")
+                    .into(),
+                id: Uuid::from_u128(0x5b21b979a37f40e893ec541e45c29847),
+                kind: SourceKind::Spotify(SpotifySourceKind::Playlist("src_8".into())),
                 owner: usr_2.usr.clone(),
                 sync: Synchronization::Pending,
             };
@@ -1117,7 +1222,7 @@ mod test {
                         tgt: Target::Spotify("playlist_6".into()),
                     },
                 ],
-                srcs: vec![src_1, src_2, src_3, src_4],
+                srcs: vec![src_1, src_2, src_3, src_4, src_5, src_6, src_7, src_8],
                 tracks: vec![track_1, track_2, track_3, track_4],
                 usrs: vec![usr_1, usr_2, usr_3, usr_4, usr_5],
             }

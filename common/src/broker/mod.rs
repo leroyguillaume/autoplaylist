@@ -81,7 +81,7 @@ impl Message for SourceMessage {
 #[enum_display(case = "Kebab")]
 pub enum SourceMessageKind {
     Created,
-    Sync,
+    Synchronize,
 }
 
 // BrokerClient

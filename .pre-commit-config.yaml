@@ -49,7 +49,8 @@ repos:
     - -D
     - postgres://autoplaylist:autoplaylist@localhost:5432/autoplaylist
     - --workspace
+    - --check
     language: system
     types: [file]
-    files: common/resources/main/db/pg/migrations/.*\.sql$
+    files: \.sql$
     pass_filenames: false

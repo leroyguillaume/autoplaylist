@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use magic_crypt::MagicCrypt256;
 use sqlx::{query_file, query_file_as, Acquire, PgConnection, Postgres};
 use tracing::{debug, info_span, trace, Instrument};
@@ -5,7 +6,7 @@ use uuid::Uuid;
 
 use crate::{
     db::SourceCreation,
-    model::{Page, PageRequest, Platform, Role, Source, SourceKind, Track},
+    model::{Page, PageRequest, Platform, Role, Source, SourceKind, SynchronizationStatus, Track},
 };
 
 use super::{PostgresResult, SourceRecord, TrackRecord};
@@ -361,6 +362,115 @@ pub async fn source_exists<
             .await?;
         let exists = record.exists.unwrap_or(false);
         Ok(exists)
+    }
+    .instrument(span)
+    .await
+}
+
+// source_ids_by_last_synchronization_date
+
+#[inline]
+pub async fn source_ids_by_last_synchronization_date<
+    'a,
+    A: Acquire<'a, Database = Postgres, Connection = &'a mut PgConnection>,
+>(
+    date: DateTime<Utc>,
+    req: PageRequest,
+    conn: A,
+) -> PostgresResult<Page<Uuid>> {
+    let span = info_span!(
+        "source_ids_by_last_synchronization_date",
+        params.date = %date,
+        params.limit = req.limit,
+        params.offset = req.offset,
+    );
+    async {
+        let limit: i64 = req.limit.into();
+        let offset: i64 = req.offset.into();
+        trace!("acquiring database connection");
+        let conn = conn.acquire().await?;
+        debug!("counting sources");
+        let record = query_file!(
+            "resources/main/db/pg/queries/count-source-by-last-synchronization-date.sql",
+            date,
+        )
+        .fetch_one(&mut *conn)
+        .await?;
+        let total = record.count.unwrap_or(0).try_into()?;
+        debug!("fetching source IDs");
+        let records = query_file!(
+            "resources/main/db/pg/queries/source-ids-by-last-synchronization-date.sql",
+            date,
+            limit,
+            offset,
+        )
+        .fetch_all(&mut *conn)
+        .await?;
+        Ok(Page {
+            first: req.offset == 0,
+            items: records.into_iter().map(|record| record.id).collect(),
+            last: (req.offset + req.limit) >= total,
+            req,
+            total,
+        })
+    }
+    .instrument(span)
+    .await
+}
+
+// source_ids_by_synchronization_status
+
+#[inline]
+pub async fn source_ids_by_synchronization_status<
+    'a,
+    A: Acquire<'a, Database = Postgres, Connection = &'a mut PgConnection>,
+>(
+    status: SynchronizationStatus,
+    req: PageRequest,
+    conn: A,
+) -> PostgresResult<Page<Uuid>> {
+    let span = info_span!(
+        "source_ids_by_synchronization_status",
+        params.limit = req.limit,
+        params.offset = req.offset,
+        src.sync = %status,
+    );
+    async {
+        let limit: i64 = req.limit.into();
+        let offset: i64 = req.offset.into();
+        let sync = match status {
+            SynchronizationStatus::Aborted => "aborted",
+            SynchronizationStatus::Failed => "failed",
+            SynchronizationStatus::Pending => "pending",
+            SynchronizationStatus::Running => "running",
+            SynchronizationStatus::Succeeded => "succeeded",
+        };
+        trace!("acquiring database connection");
+        let conn = conn.acquire().await?;
+        debug!("counting sources");
+        let record = query_file!(
+            "resources/main/db/pg/queries/count-source-by-synchronization-status.sql",
+            sync,
+        )
+        .fetch_one(&mut *conn)
+        .await?;
+        let total = record.count.unwrap_or(0).try_into()?;
+        debug!("fetching source IDs");
+        let records = query_file!(
+            "resources/main/db/pg/queries/source-ids-by-synchronization-status.sql",
+            sync,
+            limit,
+            offset,
+        )
+        .fetch_all(&mut *conn)
+        .await?;
+        Ok(Page {
+            first: req.offset == 0,
+            items: records.into_iter().map(|record| record.id).collect(),
+            last: (req.offset + req.limit) >= total,
+            req,
+            total,
+        })
     }
     .instrument(span)
     .await
@@ -894,6 +1004,144 @@ mod test {
                 let data = Data::new();
                 let id = data.srcs[0].id;
                 run(id, true, db).await;
+            }
+        }
+
+        mod source_ids_by_last_synchronization_date {
+            use super::*;
+
+            // run
+
+            async fn run(date: DateTime<Utc>, expected: Page<Uuid>, db: PgPool) {
+                let db = init(db).await;
+                let mut conn = db.acquire().await.expect("failed to acquire connection");
+                let page = conn
+                    .source_ids_by_last_synchronization_date(date, expected.req)
+                    .await
+                    .expect("failed to fetch source IDs");
+                assert_eq!(page, expected);
+            }
+
+            // Tests
+
+            #[sqlx::test]
+            async fn first_and_last(db: PgPool) {
+                let data = Data::new();
+                let expected = Page {
+                    first: true,
+                    items: vec![data.srcs[0].id, data.srcs[2].id, data.srcs[3].id],
+                    last: true,
+                    req: PageRequest::new(100, 0),
+                    total: 3,
+                };
+                let date = DateTime::parse_from_rfc3339("2023-01-05T03:05:00Z")
+                    .expect("failed to parse date")
+                    .into();
+                run(date, expected, db).await;
+            }
+
+            #[sqlx::test]
+            async fn middle(db: PgPool) {
+                let data = Data::new();
+                let expected = Page {
+                    first: false,
+                    items: vec![data.srcs[2].id],
+                    last: false,
+                    req: PageRequest::new(1, 1),
+                    total: 3,
+                };
+                let date = DateTime::parse_from_rfc3339("2023-01-05T03:05:00Z")
+                    .expect("failed to parse date")
+                    .into();
+                run(date, expected, db).await;
+            }
+        }
+
+        mod source_ids_by_synchronization_status {
+            use super::*;
+
+            // run
+
+            async fn run(status: SynchronizationStatus, expected: Page<Uuid>, db: PgPool) {
+                let db = init(db).await;
+                let mut conn = db.acquire().await.expect("failed to acquire connection");
+                let page = conn
+                    .source_ids_by_synchronization_status(status, expected.req)
+                    .await
+                    .expect("failed to fetch source IDs");
+                assert_eq!(page, expected);
+            }
+
+            // Tests
+
+            #[sqlx::test]
+            async fn first_and_last(db: PgPool) {
+                let data = Data::new();
+                let expected = Page {
+                    first: true,
+                    items: vec![
+                        data.srcs[0].id,
+                        data.srcs[2].id,
+                        data.srcs[3].id,
+                        data.srcs[4].id,
+                    ],
+                    last: true,
+                    req: PageRequest::new(100, 0),
+                    total: 4,
+                };
+                run(SynchronizationStatus::Succeeded, expected, db).await;
+            }
+
+            #[sqlx::test]
+            async fn middle(db: PgPool) {
+                let data = Data::new();
+                let expected = Page {
+                    first: false,
+                    items: vec![data.srcs[2].id],
+                    last: false,
+                    req: PageRequest::new(1, 1),
+                    total: 4,
+                };
+                run(SynchronizationStatus::Succeeded, expected, db).await;
+            }
+
+            #[sqlx::test]
+            async fn aborted(db: PgPool) {
+                let data = Data::new();
+                let expected = Page {
+                    first: true,
+                    items: vec![data.srcs[5].id],
+                    last: true,
+                    req: PageRequest::new(100, 0),
+                    total: 1,
+                };
+                run(SynchronizationStatus::Aborted, expected, db).await;
+            }
+
+            #[sqlx::test]
+            async fn failed(db: PgPool) {
+                let data = Data::new();
+                let expected = Page {
+                    first: true,
+                    items: vec![data.srcs[6].id],
+                    last: true,
+                    req: PageRequest::new(100, 0),
+                    total: 1,
+                };
+                run(SynchronizationStatus::Failed, expected, db).await;
+            }
+
+            #[sqlx::test]
+            async fn pending(db: PgPool) {
+                let data = Data::new();
+                let expected = Page {
+                    first: true,
+                    items: vec![data.srcs[7].id],
+                    last: true,
+                    req: PageRequest::new(100, 0),
+                    total: 1,
+                };
+                run(SynchronizationStatus::Pending, expected, db).await;
             }
         }
 

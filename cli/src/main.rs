@@ -14,15 +14,31 @@ use autoplaylist_common::{
         RedirectUriQueryParam, SearchQueryParam, UpdatePlaylistRequest, UpdateTrackRequest,
         UpdateUserRequest,
     },
+    broker::{
+        rabbitmq::{
+            RabbitMqClient, RabbitMqConfig, DEFAULT_BROKER_URL, DEFAULT_PLAYLIST_MSG_EXCH,
+            DEFAULT_SRC_MSG_EXCH, ENV_VAR_KEY_BROKER_URL, ENV_VAR_KEY_SRC_MSG_EXCH,
+        },
+        BrokerClient, SourceMessage, SourceMessageKind,
+    },
     db::{
-        pg::{PostgresConfig, PostgresConnection, PostgresPool, PostgresTransaction},
+        pg::{
+            PostgresConfig, PostgresConnection, PostgresPool, PostgresTransaction, DEFAULT_DB_HOST,
+            DEFAULT_DB_NAME, DEFAULT_DB_PORT, DEFAULT_DB_USER, ENV_VAR_KEY_DB_HOST,
+            ENV_VAR_KEY_DB_NAME, ENV_VAR_KEY_DB_PASSWORD, ENV_VAR_KEY_DB_PORT,
+            ENV_VAR_KEY_DB_SECRET, ENV_VAR_KEY_DB_USER,
+        },
         DatabaseConnection, DatabasePool, DatabaseTransaction,
     },
-    model::Role,
+    model::{PageRequest, Role, SynchronizationStatus},
     TracingConfig,
 };
+use chrono::Duration;
 use clap::{Parser, Subcommand, ValueEnum};
-use mockable::{DefaultEnv, DefaultHttpServer, DefaultSystem, HttpResponse, HttpServer, System};
+use mockable::{
+    Clock, DefaultClock, DefaultEnv, DefaultHttpServer, DefaultSystem, HttpResponse, HttpServer,
+    System,
+};
 use serde::{de::DeserializeOwned, Serialize};
 use tracing::{debug, error, info_span, trace, Instrument};
 use uuid::Uuid;
@@ -49,13 +65,63 @@ async fn main() -> anyhow::Result<()> {
 
 const CODE_QUERY_PARAM: &str = "code";
 
+// Consts - Pages
+
+const PAGE_LIMIT: u32 = 100;
+
+// Macros
+
+macro_rules! send_source_synchronize_messages {
+    ($req:expr, $broker:expr, $f:block) => {{
+        loop {
+            let page = $f.await?;
+            Self::send_source_synchronize_messages(page.items, &$broker).await?;
+            if page.last {
+                break;
+            } else {
+                $req.offset += PAGE_LIMIT;
+            }
+        }
+    }};
+}
+
 // AdminCommand
 
 #[derive(Clone, Debug, Eq, PartialEq, Subcommand)]
 #[command(about = "Admin commands (not using API)")]
 enum AdminCommand {
+    #[command(subcommand, alias = "src")]
+    Source(AdminSourceCommand),
     #[command(subcommand, alias = "usr")]
     User(AdminUserCommand),
+}
+
+// AdminSourceCommand
+
+#[derive(Clone, Debug, Eq, PartialEq, Subcommand)]
+#[command(about = "Admin commands about sources")]
+enum AdminSourceCommand {
+    #[command(
+        about = "Start aborted, failed, pending and succeeded synchronizations",
+        alias = "sync"
+    )]
+    Synchronize(AdminSynchronizeCommandArgs),
+}
+
+// AdminSynchronizeCommandArgs
+
+#[derive(clap::Args, Clone, Debug, Eq, PartialEq)]
+struct AdminSynchronizeCommandArgs {
+    #[command(flatten)]
+    broker: BrokerArgs,
+    #[command(flatten)]
+    db: DatabaseArgs,
+    #[arg(
+        long,
+        default_value_t = 180,
+        help = "Number of minutes since last succeeded synchronization"
+    )]
+    since: i64,
 }
 
 // AdminUserCommand
@@ -128,6 +194,28 @@ struct AuthSpotifyCommandArgs {
     port: u16,
 }
 
+// BrokerArgs
+
+#[derive(clap::Args, Clone, Debug, Eq, PartialEq)]
+struct BrokerArgs {
+    #[arg(
+        long = "broker-source-message-exchange",
+        env = ENV_VAR_KEY_SRC_MSG_EXCH,
+        default_value = DEFAULT_SRC_MSG_EXCH,
+        help = "Name of the exchange used to send source messages",
+        name = "BROKER_SOURCE_MESSAGE_EXCHANGE"
+    )]
+    src_msg_exch: String,
+    #[arg(
+        long = "broker-url",
+        env = ENV_VAR_KEY_BROKER_URL,
+        default_value = DEFAULT_BROKER_URL,
+        help = "Broker URL",
+        name = "BROKER_URL"
+    )]
+    url: String,
+}
+
 // Command
 
 #[derive(Clone, Debug, Eq, PartialEq, Subcommand)]
@@ -154,46 +242,46 @@ enum Command {
 struct DatabaseArgs {
     #[arg(
         long = "db-host",
-        env = "DATABASE_HOST",
-        default_value = "localhost",
+        env = ENV_VAR_KEY_DB_HOST,
+        default_value = DEFAULT_DB_HOST,
         help = "Database host",
         name = "DATABASE_HOST"
     )]
     host: String,
     #[arg(
         long = "db-name",
-        env = "DATABASE_NAME",
-        default_value = "autoplaylist",
+        env = ENV_VAR_KEY_DB_NAME,
+        default_value = DEFAULT_DB_NAME,
         help = "Database name",
         name = "DATABASE_NAME"
     )]
     name: String,
     #[arg(
         long = "db-password",
-        env = "DATABASE_PASSWORD",
+        env = ENV_VAR_KEY_DB_PASSWORD,
         help = "Database password",
         name = "DATABASE_PASSWORD"
     )]
     password: String,
     #[arg(
         long = "db-port",
-        env = "DATABASE_PORT",
-        default_value_t = 5432,
+        env = ENV_VAR_KEY_DB_PORT,
+        default_value_t = DEFAULT_DB_PORT,
         help = "Database port",
         name = "DATABASE_PORT"
     )]
     port: u16,
     #[arg(
         long = "db-secret",
-        env = "DATABASE_SECRET",
+        env = ENV_VAR_KEY_DB_SECRET,
         help = "Database secret",
         name = "DATABASE_SECRET"
     )]
     secret: String,
     #[arg(
         long = "db-user",
-        env = "DATABASE_USER",
-        default_value = "autoplaylist",
+        env = ENV_VAR_KEY_DB_USER,
+        default_value = DEFAULT_DB_USER,
         help = "Database user",
         name = "DATABASE_USER"
     )]
@@ -631,6 +719,7 @@ struct UserUpdateCommandArgs {
 #[async_trait]
 trait Services<
     API: ApiClient,
+    BROKER: BrokerClient,
     SERVER: HttpServer,
     DBCONN: DatabaseConnection,
     DBTX: DatabaseTransaction,
@@ -639,7 +728,11 @@ trait Services<
 {
     fn api(&self, base_url: String) -> API;
 
-    async fn create_database_pool(&self, args: DatabaseArgs) -> anyhow::Result<DB>;
+    fn clock(&self) -> &dyn Clock;
+
+    async fn init_broker(&self, args: BrokerArgs) -> anyhow::Result<BROKER>;
+
+    async fn init_database(&self, args: DatabaseArgs) -> anyhow::Result<DB>;
 
     fn jwt_decoder(&self) -> &dyn JwtDecoder;
 
@@ -652,14 +745,16 @@ trait Services<
 
 struct CommandRunner<
     API: ApiClient,
+    BROKER: BrokerClient,
     SERVER: HttpServer,
     DBCONN: DatabaseConnection,
     DBTX: DatabaseTransaction,
     DB: DatabasePool<DBCONN, DBTX>,
-    SVC: Services<API, SERVER, DBCONN, DBTX, DB>,
+    SVC: Services<API, BROKER, SERVER, DBCONN, DBTX, DB>,
 > {
     svc: SVC,
     _api: PhantomData<API>,
+    _broker: PhantomData<BROKER>,
     _db: PhantomData<DB>,
     _dbconn: PhantomData<DBCONN>,
     _dbtx: PhantomData<DBTX>,
@@ -669,6 +764,7 @@ struct CommandRunner<
 impl
     CommandRunner<
         DefaultApiClient,
+        RabbitMqClient,
         DefaultHttpServer,
         PostgresConnection,
         PostgresTransaction<'_>,
@@ -680,6 +776,7 @@ impl
         Self {
             svc,
             _api: PhantomData,
+            _broker: PhantomData,
             _db: PhantomData,
             _dbconn: PhantomData,
             _dbtx: PhantomData,
@@ -690,15 +787,77 @@ impl
 
 impl<
         API: ApiClient,
+        BROKER: BrokerClient,
         SERVER: HttpServer,
         DBCONN: DatabaseConnection,
         DBTX: DatabaseTransaction,
         DB: DatabasePool<DBCONN, DBTX>,
-        SVC: Services<API, SERVER, DBCONN, DBTX, DB>,
-    > CommandRunner<API, SERVER, DBCONN, DBTX, DB, SVC>
+        SVC: Services<API, BROKER, SERVER, DBCONN, DBTX, DB>,
+    > CommandRunner<API, BROKER, SERVER, DBCONN, DBTX, DB, SVC>
 {
     async fn run(&self, cmd: Command, mut out: &mut dyn Write) -> anyhow::Result<()> {
         match cmd {
+            Command::Admin(AdminCommand::Source(AdminSourceCommand::Synchronize(args))) => {
+                let span = info_span!(
+                    "start_source_synchronizations",
+                    broker.exch.src = args.broker.src_msg_exch,
+                    db.host = args.db.host,
+                    db.name = args.db.name,
+                    db.port = args.db.port,
+                    db.user = args.db.user,
+                );
+                async {
+                    let broker = self.svc.init_broker(args.broker).await?;
+                    let pool = self.svc.init_database(args.db).await?;
+                    let mut db_conn = pool.acquire().await?;
+                    let since = Duration::minutes(args.since);
+                    let date = self.svc.clock().utc() - since;
+                    let mut req = PageRequest::new(PAGE_LIMIT, 0);
+                    send_source_synchronize_messages!(req, broker, {
+                        async {
+                            db_conn
+                                .source_ids_by_last_synchronization_date(date, req)
+                                .await
+                        }
+                    });
+                    let mut req = PageRequest::new(PAGE_LIMIT, 0);
+                    send_source_synchronize_messages!(req, broker, {
+                        async {
+                            db_conn
+                                .source_ids_by_synchronization_status(
+                                    SynchronizationStatus::Aborted,
+                                    req,
+                                )
+                                .await
+                        }
+                    });
+                    let mut req = PageRequest::new(PAGE_LIMIT, 0);
+                    send_source_synchronize_messages!(req, broker, {
+                        async {
+                            db_conn
+                                .source_ids_by_synchronization_status(
+                                    SynchronizationStatus::Failed,
+                                    req,
+                                )
+                                .await
+                        }
+                    });
+                    let mut req = PageRequest::new(PAGE_LIMIT, 0);
+                    send_source_synchronize_messages!(req, broker, {
+                        async {
+                            db_conn
+                                .source_ids_by_synchronization_status(
+                                    SynchronizationStatus::Pending,
+                                    req,
+                                )
+                                .await
+                        }
+                    });
+                    Ok(())
+                }
+                .instrument(span)
+                .await
+            }
             Command::Admin(AdminCommand::User(AdminUserCommand::UpdateRole(args))) => {
                 let span = info_span!(
                     "update_user_role",
@@ -709,7 +868,7 @@ impl<
                     usr.id = %args.id,
                 );
                 async {
-                    let pool = self.svc.create_database_pool(args.db).await?;
+                    let pool = self.svc.init_database(args.db).await?;
                     let mut db_conn = pool.acquire().await?;
                     let mut usr = match db_conn.user_by_id(args.id).await? {
                         Some(usr) => usr,
@@ -1218,6 +1377,21 @@ impl<
     }
 
     #[inline]
+    async fn send_source_synchronize_messages(
+        ids: Vec<Uuid>,
+        broker: &BROKER,
+    ) -> anyhow::Result<()> {
+        for id in ids {
+            let msg = SourceMessage {
+                id,
+                kind: SourceMessageKind::Synchronize,
+            };
+            broker.publish_source_message(&msg).await?;
+        }
+        Ok(())
+    }
+
+    #[inline]
     fn write_to_output<T: Serialize>(mut out: &mut dyn Write, resp: &T) -> anyhow::Result<()> {
         trace!("writing response on output");
         serde_json::to_writer(&mut out, resp)?;
@@ -1234,6 +1408,7 @@ struct DefaultServices;
 impl
     Services<
         DefaultApiClient,
+        RabbitMqClient,
         DefaultHttpServer,
         PostgresConnection,
         PostgresTransaction<'_>,
@@ -1244,9 +1419,19 @@ impl
         DefaultApiClient::new(base_url)
     }
 
-    async fn create_database_pool(&self, args: DatabaseArgs) -> anyhow::Result<PostgresPool> {
-        let db_cfg = PostgresConfig::from(args);
-        let pool = PostgresPool::init(db_cfg).await?;
+    fn clock(&self) -> &dyn Clock {
+        &DefaultClock
+    }
+
+    async fn init_broker(&self, args: BrokerArgs) -> anyhow::Result<RabbitMqClient> {
+        let cfg = RabbitMqConfig::from(args);
+        let broker = RabbitMqClient::init(cfg).await?;
+        Ok(broker)
+    }
+
+    async fn init_database(&self, args: DatabaseArgs) -> anyhow::Result<PostgresPool> {
+        let cfg = PostgresConfig::from(args);
+        let pool = PostgresPool::init(cfg).await?;
         Ok(pool)
     }
 
@@ -1294,6 +1479,18 @@ impl From<DatabaseArgs> for PostgresConfig {
     }
 }
 
+// RabbitMqConfig
+
+impl From<BrokerArgs> for RabbitMqConfig {
+    fn from(args: BrokerArgs) -> Self {
+        Self {
+            playlist_msg_exch: DEFAULT_PLAYLIST_MSG_EXCH.into(),
+            src_msg_exch: args.src_msg_exch,
+            url: args.url,
+        }
+    }
+}
+
 // Role
 
 impl From<RoleArg> for Role {
@@ -1320,6 +1517,7 @@ mod test {
         api::{
             JwtResponse, PlaylistResponse, SourceResponse, SynchronizationResponse, UserResponse,
         },
+        broker::MockBrokerClient,
         db::{MockDatabaseConnection, MockDatabasePool, MockDatabaseTransaction},
         model::{
             Album, PageRequest, Platform, PlatformPlaylist, Predicate, SourceKind,
@@ -1327,7 +1525,7 @@ mod test {
         },
     };
     use chrono::Utc;
-    use mockable::{HttpRequest, Mock, MockHttpServer, MockSystem};
+    use mockable::{HttpRequest, Mock, MockClock, MockHttpServer, MockSystem};
     use mockall::predicate::eq;
     use tempdir::TempDir;
     use uuid::Uuid;
@@ -1341,7 +1539,9 @@ mod test {
     #[derive(Default)]
     struct MockServices {
         api: Mock<MockApiClient, String>,
-        create_db_pool: Mock<MockDatabasePool, DatabaseArgs>,
+        clock: MockClock,
+        init_broker: Mock<MockBrokerClient, BrokerArgs>,
+        init_db: Mock<MockDatabasePool, DatabaseArgs>,
         jwt_decoder: MockJwtDecoder,
         start_server: Mock<MockHttpServer, u16>,
         sys: MockSystem,
@@ -1351,6 +1551,7 @@ mod test {
     impl
         Services<
             MockApiClient,
+            MockBrokerClient,
             MockHttpServer,
             MockDatabaseConnection,
             MockDatabaseTransaction,
@@ -1361,11 +1562,16 @@ mod test {
             self.api.call_with_args(base_url)
         }
 
-        async fn create_database_pool(
-            &self,
-            args: DatabaseArgs,
-        ) -> anyhow::Result<MockDatabasePool> {
-            Ok(self.create_db_pool.call_with_args(args))
+        fn clock(&self) -> &dyn Clock {
+            &self.clock
+        }
+
+        async fn init_broker(&self, args: BrokerArgs) -> anyhow::Result<MockBrokerClient> {
+            Ok(self.init_broker.call_with_args(args))
+        }
+
+        async fn init_database(&self, args: DatabaseArgs) -> anyhow::Result<MockDatabasePool> {
+            Ok(self.init_db.call_with_args(args))
         }
 
         fn jwt_decoder(&self) -> &dyn JwtDecoder {
@@ -1395,6 +1601,7 @@ mod test {
             struct Data<const LIMIT: u32> {
                 api_base_url: &'static str,
                 api_token: &'static str,
+                broker: BrokerArgs,
                 cmd: Command,
                 create_playlist_req: CreatePlaylistRequest,
                 db: DatabaseArgs,
@@ -1403,6 +1610,7 @@ mod test {
                 q: &'static str,
                 req: PageRequestArgs<LIMIT>,
                 role: Role,
+                since: i64,
                 update_playlist_req: UpdatePlaylistRequest,
                 update_track_req: UpdateTrackRequest,
                 update_usr_req: UpdateUserRequest,
@@ -1413,7 +1621,10 @@ mod test {
             #[derive(Clone, Default)]
             struct Mocks {
                 auth_via_spotify: Mock<JwtResponse>,
+                broker_publish_src_msg: Mock<()>,
                 create_playlist: Mock<PlaylistResponse>,
+                db_src_ids_by_last_sync_date: Mock<()>,
+                db_src_ids_by_sync_status: Mock<()>,
                 db_update_usr: Mock<()>,
                 db_usr_by_id: Mock<User, User>,
                 decode_jwt: Mock<Uuid>,
@@ -1422,6 +1633,7 @@ mod test {
                 delete_usr: Mock<()>,
                 open_spotify_authorize_url: Mock<()>,
                 next_http_req: Mock<()>,
+                now: Mock<()>,
                 playlist_by_id: Mock<PlaylistResponse>,
                 playlist_tracks: Mock<Page<Track>>,
                 playlists: Mock<Page<PlaylistResponse>>,
@@ -1446,6 +1658,7 @@ mod test {
             // run
 
             async fn run<const LIMIT: u32>(data: Data<LIMIT>, mocks: Mocks) -> String {
+                let now = Utc::now();
                 let usr = User {
                     creation: Utc::now(),
                     creds: Default::default(),
@@ -1459,6 +1672,36 @@ mod test {
                 let auth_via_spotify_params = AuthenticateViaSpotifyQueryParams {
                     code: "code".into(),
                     redirect_uri: redirect_uri_param.redirect_uri.clone(),
+                };
+                let src_sync_msg_1 = SourceMessage {
+                    id: Uuid::new_v4(),
+                    kind: SourceMessageKind::Synchronize,
+                };
+                let src_sync_msg_2 = SourceMessage {
+                    id: Uuid::new_v4(),
+                    kind: SourceMessageKind::Synchronize,
+                };
+                let src_sync_msg_3 = SourceMessage {
+                    id: Uuid::new_v4(),
+                    kind: SourceMessageKind::Synchronize,
+                };
+                let src_sync_msg_4 = SourceMessage {
+                    id: Uuid::new_v4(),
+                    kind: SourceMessageKind::Synchronize,
+                };
+                let page_1 = Page {
+                    first: true,
+                    items: vec![src_sync_msg_1.id, src_sync_msg_2.id],
+                    last: false,
+                    req: PageRequest::new(PAGE_LIMIT, 0),
+                    total: 0,
+                };
+                let page_2 = Page {
+                    first: false,
+                    items: vec![src_sync_msg_3.id, src_sync_msg_4.id],
+                    last: true,
+                    req: PageRequest::new(PAGE_LIMIT, PAGE_LIMIT),
+                    total: 0,
                 };
                 let api = Mock::once_with_args({
                     let data = data.clone();
@@ -1660,13 +1903,55 @@ mod test {
                         api
                     }
                 });
-                let create_db_pool = Mock::once_with_args({
+                let mut clock = MockClock::new();
+                clock
+                    .expect_utc()
+                    .times(mocks.now.times())
+                    .returning(move || now);
+                let init_broker = Mock::once_with_args({
+                    let src_sync_msg_1 = src_sync_msg_1.clone();
+                    let src_sync_msg_2 = src_sync_msg_2.clone();
+                    let src_sync_msg_3 = src_sync_msg_3.clone();
+                    let src_sync_msg_4 = src_sync_msg_4.clone();
+                    let data = data.clone();
+                    let mocks = mocks.clone();
+                    move |args| {
+                        assert_eq!(args, data.broker);
+                        let mut broker = MockBrokerClient::new();
+                        broker
+                            .expect_publish_source_message()
+                            .with(eq(src_sync_msg_1.clone()))
+                            .times(mocks.broker_publish_src_msg.times() * 4)
+                            .returning(|_| Ok(()));
+                        broker
+                            .expect_publish_source_message()
+                            .with(eq(src_sync_msg_2.clone()))
+                            .times(mocks.broker_publish_src_msg.times() * 4)
+                            .returning(|_| Ok(()));
+                        broker
+                            .expect_publish_source_message()
+                            .with(eq(src_sync_msg_3.clone()))
+                            .times(mocks.broker_publish_src_msg.times() * 4)
+                            .returning(|_| Ok(()));
+                        broker
+                            .expect_publish_source_message()
+                            .with(eq(src_sync_msg_4.clone()))
+                            .times(mocks.broker_publish_src_msg.times() * 4)
+                            .returning(|_| Ok(()));
+                        broker
+                    }
+                });
+                let init_db = Mock::once_with_args({
+                    let page_1 = page_1.clone();
+                    let page_2 = page_2.clone();
                     let data = data.clone();
                     let mocks = mocks.clone();
                     move |args: DatabaseArgs| {
                         assert_eq!(args, data.db);
                         MockDatabasePool {
                             acquire: Mock::once({
+                                let page_1 = page_1.clone();
+                                let page_2 = page_2.clone();
                                 let data = data.clone();
                                 let mocks = mocks.clone();
                                 let usr = usr.clone();
@@ -1690,6 +1975,72 @@ mod test {
                                         .with(eq(usr))
                                         .times(mocks.db_update_usr.times())
                                         .returning(|_| Ok(true));
+                                    let since = Duration::minutes(data.since);
+                                    let date = now - since;
+                                    conn.0
+                                        .expect_source_ids_by_last_synchronization_date()
+                                        .with(eq(date), eq(page_1.req))
+                                        .times(mocks.db_src_ids_by_last_sync_date.times())
+                                        .returning({
+                                            let page = page_1.clone();
+                                            move |_, _| Ok(page.clone())
+                                        });
+                                    conn.0
+                                        .expect_source_ids_by_last_synchronization_date()
+                                        .with(eq(date), eq(page_2.req))
+                                        .times(mocks.db_src_ids_by_last_sync_date.times())
+                                        .returning({
+                                            let page = page_2.clone();
+                                            move |_, _| Ok(page.clone())
+                                        });
+                                    conn.0
+                                        .expect_source_ids_by_synchronization_status()
+                                        .with(eq(SynchronizationStatus::Aborted), eq(page_1.req))
+                                        .times(mocks.db_src_ids_by_sync_status.times())
+                                        .returning({
+                                            let page = page_1.clone();
+                                            move |_, _| Ok(page.clone())
+                                        });
+                                    conn.0
+                                        .expect_source_ids_by_synchronization_status()
+                                        .with(eq(SynchronizationStatus::Aborted), eq(page_2.req))
+                                        .times(mocks.db_src_ids_by_sync_status.times())
+                                        .returning({
+                                            let page = page_2.clone();
+                                            move |_, _| Ok(page.clone())
+                                        });
+                                    conn.0
+                                        .expect_source_ids_by_synchronization_status()
+                                        .with(eq(SynchronizationStatus::Failed), eq(page_1.req))
+                                        .times(mocks.db_src_ids_by_sync_status.times())
+                                        .returning({
+                                            let page = page_1.clone();
+                                            move |_, _| Ok(page.clone())
+                                        });
+                                    conn.0
+                                        .expect_source_ids_by_synchronization_status()
+                                        .with(eq(SynchronizationStatus::Failed), eq(page_2.req))
+                                        .times(mocks.db_src_ids_by_sync_status.times())
+                                        .returning({
+                                            let page = page_2.clone();
+                                            move |_, _| Ok(page.clone())
+                                        });
+                                    conn.0
+                                        .expect_source_ids_by_synchronization_status()
+                                        .with(eq(SynchronizationStatus::Pending), eq(page_1.req))
+                                        .times(mocks.db_src_ids_by_sync_status.times())
+                                        .returning({
+                                            let page = page_1.clone();
+                                            move |_, _| Ok(page.clone())
+                                        });
+                                    conn.0
+                                        .expect_source_ids_by_synchronization_status()
+                                        .with(eq(SynchronizationStatus::Pending), eq(page_2.req))
+                                        .times(mocks.db_src_ids_by_sync_status.times())
+                                        .returning({
+                                            let page = page_2.clone();
+                                            move |_, _| Ok(page.clone())
+                                        });
                                     conn
                                 }
                             }),
@@ -1738,7 +2089,9 @@ mod test {
                     .returning(|_| Ok(()));
                 let svc = MockServices {
                     api,
-                    create_db_pool,
+                    clock,
+                    init_broker,
+                    init_db,
                     jwt_decoder,
                     start_server,
                     sys,
@@ -1746,6 +2099,7 @@ mod test {
                 let runner = CommandRunner {
                     svc,
                     _api: PhantomData,
+                    _broker: PhantomData,
                     _db: PhantomData,
                     _dbconn: PhantomData,
                     _dbtx: PhantomData,
@@ -1769,6 +2123,10 @@ mod test {
                 let data = Data {
                     api_base_url,
                     api_token: "jwt",
+                    broker: BrokerArgs {
+                        src_msg_exch: "src_msg_exch".into(),
+                        url: "url".into(),
+                    },
                     cmd: Command::Auth(AuthCommand::Spotify(AuthSpotifyCommandArgs {
                         api_base_url: ApiBaseUrlArg {
                             value: api_base_url.into(),
@@ -1796,6 +2154,7 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    since: 5,
                     update_playlist_req: UpdatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
@@ -1841,6 +2200,10 @@ mod test {
                 let data = Data {
                     api_base_url,
                     api_token,
+                    broker: BrokerArgs {
+                        src_msg_exch: "src_msg_exch".into(),
+                        url: "url".into(),
+                    },
                     cmd: Command::Me(MeCommandArgs {
                         api_base_url: ApiBaseUrlArg {
                             value: api_base_url.into(),
@@ -1870,6 +2233,7 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    since: 5,
                     update_playlist_req: UpdatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
@@ -1918,6 +2282,10 @@ mod test {
                 let data = Data {
                     api_base_url,
                     api_token: "jwt",
+                    broker: BrokerArgs {
+                        src_msg_exch: "src_msg_exch".into(),
+                        url: "url".into(),
+                    },
                     cmd: Command::Playlist(PlaylistCommand::List(PlaylistListCommandArgs {
                         all: false,
                         api_base_url: ApiBaseUrlArg {
@@ -1947,6 +2315,7 @@ mod test {
                     q,
                     req,
                     role: Role::Admin,
+                    since: 5,
                     update_playlist_req: UpdatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
@@ -1994,6 +2363,10 @@ mod test {
                 let data = Data {
                     api_base_url,
                     api_token: "jwt",
+                    broker: BrokerArgs {
+                        src_msg_exch: "src_msg_exch".into(),
+                        url: "url".into(),
+                    },
                     cmd: Command::Source(SourceCommand::List(SourceListCommandArgs {
                         all: false,
                         api_base_url: ApiBaseUrlArg {
@@ -2022,6 +2395,7 @@ mod test {
                     q: "name",
                     req,
                     role: Role::Admin,
+                    since: 5,
                     update_playlist_req: UpdatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
@@ -2081,6 +2455,10 @@ mod test {
                 let data = Data {
                     api_base_url,
                     api_token,
+                    broker: BrokerArgs {
+                        src_msg_exch: "src_msg_exch".into(),
+                        url: "url".into(),
+                    },
                     cmd: Command::Playlist(PlaylistCommand::Create(PlaylistCreateCommandArgs {
                         api_base_url: ApiBaseUrlArg {
                             value: api_base_url.into(),
@@ -2111,6 +2489,7 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    since: 5,
                     update_playlist_req: UpdatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
@@ -2150,6 +2529,10 @@ mod test {
                 let data = Data {
                     api_base_url,
                     api_token,
+                    broker: BrokerArgs {
+                        src_msg_exch: "src_msg_exch".into(),
+                        url: "url".into(),
+                    },
                     cmd: Command::Playlist(PlaylistCommand::Delete(PlaylistDeleteCommandArgs {
                         api_base_url: ApiBaseUrlArg {
                             value: api_base_url.into(),
@@ -2180,6 +2563,7 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    since: 5,
                     update_playlist_req: UpdatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
@@ -2211,6 +2595,10 @@ mod test {
                 let data = Data {
                     api_base_url,
                     api_token,
+                    broker: BrokerArgs {
+                        src_msg_exch: "src_msg_exch".into(),
+                        url: "url".into(),
+                    },
                     cmd: Command::Track(TrackCommand::Delete(TrackDeleteCommandArgs {
                         api_base_url: ApiBaseUrlArg {
                             value: api_base_url.into(),
@@ -2241,6 +2629,7 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    since: 5,
                     update_playlist_req: UpdatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
@@ -2272,6 +2661,10 @@ mod test {
                 let data = Data {
                     api_base_url,
                     api_token,
+                    broker: BrokerArgs {
+                        src_msg_exch: "src_msg_exch".into(),
+                        url: "url".into(),
+                    },
                     cmd: Command::User(UserCommand::Delete(UserDeleteCommandArgs {
                         api_base_url: ApiBaseUrlArg {
                             value: api_base_url.into(),
@@ -2302,6 +2695,7 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    since: 5,
                     update_playlist_req: UpdatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
@@ -2353,6 +2747,10 @@ mod test {
                 let data = Data {
                     api_base_url,
                     api_token,
+                    broker: BrokerArgs {
+                        src_msg_exch: "src_msg_exch".into(),
+                        url: "url".into(),
+                    },
                     cmd: Command::Playlist(PlaylistCommand::Get(PlaylistGetCommandArgs {
                         api_base_url: ApiBaseUrlArg {
                             value: api_base_url.into(),
@@ -2383,6 +2781,7 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    since: 5,
                     update_playlist_req: UpdatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
@@ -2431,6 +2830,10 @@ mod test {
                 let data = Data {
                     api_base_url,
                     api_token: "jwt",
+                    broker: BrokerArgs {
+                        src_msg_exch: "src_msg_exch".into(),
+                        url: "url".into(),
+                    },
                     cmd: Command::Playlist(PlaylistCommand::Tracks(PlaylistTracksCommandArgs {
                         api_base_url: ApiBaseUrlArg {
                             value: api_base_url.into(),
@@ -2460,6 +2863,7 @@ mod test {
                     port,
                     req,
                     role: Role::Admin,
+                    since: 5,
                     update_playlist_req: UpdatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
@@ -2507,6 +2911,10 @@ mod test {
                 let data = Data {
                     api_base_url,
                     api_token: "jwt",
+                    broker: BrokerArgs {
+                        src_msg_exch: "src_msg_exch".into(),
+                        url: "url".into(),
+                    },
                     cmd: Command::Playlist(PlaylistCommand::List(PlaylistListCommandArgs {
                         all: true,
                         api_base_url: ApiBaseUrlArg {
@@ -2536,6 +2944,7 @@ mod test {
                     port,
                     req,
                     role: Role::Admin,
+                    since: 5,
                     update_playlist_req: UpdatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
@@ -2584,6 +2993,10 @@ mod test {
                 let data = Data {
                     api_base_url,
                     api_token,
+                    broker: BrokerArgs {
+                        src_msg_exch: "src_msg_exch".into(),
+                        url: "url".into(),
+                    },
                     cmd: Command::Source(SourceCommand::Get(SourceGetCommandArgs {
                         api_base_url: ApiBaseUrlArg {
                             value: api_base_url.into(),
@@ -2614,6 +3027,7 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    since: 5,
                     update_playlist_req: UpdatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
@@ -2662,6 +3076,10 @@ mod test {
                 let data = Data {
                     api_base_url,
                     api_token: "jwt",
+                    broker: BrokerArgs {
+                        src_msg_exch: "src_msg_exch".into(),
+                        url: "url".into(),
+                    },
                     cmd: Command::Source(SourceCommand::Tracks(SourceTracksCommandArgs {
                         api_base_url: ApiBaseUrlArg {
                             value: api_base_url.into(),
@@ -2691,6 +3109,7 @@ mod test {
                     port,
                     req,
                     role: Role::Admin,
+                    since: 5,
                     update_playlist_req: UpdatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
@@ -2737,6 +3156,10 @@ mod test {
                 let data = Data {
                     api_base_url,
                     api_token: "jwt",
+                    broker: BrokerArgs {
+                        src_msg_exch: "src_msg_exch".into(),
+                        url: "url".into(),
+                    },
                     cmd: Command::Source(SourceCommand::List(SourceListCommandArgs {
                         all: true,
                         api_base_url: ApiBaseUrlArg {
@@ -2765,6 +3188,7 @@ mod test {
                     port,
                     req,
                     role: Role::Admin,
+                    since: 5,
                     update_playlist_req: UpdatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
@@ -2801,6 +3225,10 @@ mod test {
                 let data = Data {
                     api_base_url,
                     api_token,
+                    broker: BrokerArgs {
+                        src_msg_exch: "src_msg_exch".into(),
+                        url: "url".into(),
+                    },
                     cmd: Command::Playlist(PlaylistCommand::Synchronize(
                         PlaylistSynchronizeCommandArgs {
                             api_base_url: ApiBaseUrlArg {
@@ -2833,6 +3261,7 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    since: 5,
                     update_playlist_req: UpdatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
@@ -2864,6 +3293,10 @@ mod test {
                 let data = Data {
                     api_base_url,
                     api_token,
+                    broker: BrokerArgs {
+                        src_msg_exch: "src_msg_exch".into(),
+                        url: "url".into(),
+                    },
                     cmd: Command::Source(SourceCommand::Synchronize(
                         SourceSynchronizeCommandArgs {
                             api_base_url: ApiBaseUrlArg {
@@ -2896,6 +3329,7 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    since: 5,
                     update_playlist_req: UpdatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
@@ -2913,6 +3347,74 @@ mod test {
                 };
                 let mocks = Mocks {
                     start_src_sync: Mock::once(|| ()),
+                    ..Default::default()
+                };
+                let out = run(data, mocks).await;
+                assert!(out.is_empty());
+            }
+
+            #[tokio::test]
+            async fn start_source_synchronizations() {
+                let db = DatabaseArgs {
+                    host: "host".into(),
+                    name: "name".into(),
+                    password: "password".into(),
+                    port: 5432,
+                    secret: "secret".into(),
+                    user: "user".into(),
+                };
+                let id = Uuid::new_v4();
+                let since = 5;
+                let broker = BrokerArgs {
+                    src_msg_exch: "src_msg_exch".into(),
+                    url: "url".into(),
+                };
+                let data = Data {
+                    api_base_url: "http://localhost:8000",
+                    api_token: "jwt",
+                    broker: broker.clone(),
+                    cmd: Command::Admin(AdminCommand::Source(AdminSourceCommand::Synchronize(
+                        AdminSynchronizeCommandArgs {
+                            broker,
+                            db: db.clone(),
+                            since,
+                        },
+                    ))),
+                    id,
+                    create_playlist_req: CreatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearIs(1993),
+                        src: SourceKind::Spotify(SpotifySourceKind::SavedTracks),
+                    },
+                    db,
+                    q: "name",
+                    port: 8080,
+                    req: PageRequestArgs::<25> {
+                        limit: 25,
+                        offset: 0,
+                    },
+                    role: Role::Admin,
+                    since,
+                    update_playlist_req: UpdatePlaylistRequest {
+                        name: "name".into(),
+                        predicate: Predicate::YearIs(1993),
+                    },
+                    update_track_req: UpdateTrackRequest {
+                        album: Album {
+                            compil: false,
+                            name: "album".into(),
+                        },
+                        artists: Default::default(),
+                        title: "title".into(),
+                        year: 2020,
+                    },
+                    update_usr_req: UpdateUserRequest { role: Role::Admin },
+                };
+                let mocks = Mocks {
+                    broker_publish_src_msg: Mock::once(|| ()),
+                    db_src_ids_by_last_sync_date: Mock::once(|| ()),
+                    db_src_ids_by_sync_status: Mock::once(|| ()),
+                    now: Mock::once(|| ()),
                     ..Default::default()
                 };
                 let out = run(data, mocks).await;
@@ -2940,6 +3442,10 @@ mod test {
                 let data = Data {
                     api_base_url,
                     api_token,
+                    broker: BrokerArgs {
+                        src_msg_exch: "src_msg_exch".into(),
+                        url: "url".into(),
+                    },
                     cmd: Command::Track(TrackCommand::Get(TrackGetCommandArgs {
                         api_base_url: ApiBaseUrlArg {
                             value: api_base_url.into(),
@@ -2970,6 +3476,7 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    since: 5,
                     update_playlist_req: UpdatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
@@ -3017,6 +3524,10 @@ mod test {
                 let data = Data {
                     api_base_url,
                     api_token: "jwt",
+                    broker: BrokerArgs {
+                        src_msg_exch: "src_msg_exch".into(),
+                        url: "url".into(),
+                    },
                     cmd: Command::Track(TrackCommand::List(TrackListCommandArgs {
                         api_base_url: ApiBaseUrlArg {
                             value: api_base_url.into(),
@@ -3045,6 +3556,7 @@ mod test {
                     port,
                     req,
                     role: Role::Admin,
+                    since: 5,
                     update_playlist_req: UpdatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
@@ -3107,6 +3619,10 @@ mod test {
                 let data = Data {
                     api_base_url,
                     api_token: "jwt",
+                    broker: BrokerArgs {
+                        src_msg_exch: "src_msg_exch".into(),
+                        url: "url".into(),
+                    },
                     cmd: Command::Playlist(PlaylistCommand::Update(PlaylistUpdateCommandArgs {
                         api_base_url: ApiBaseUrlArg {
                             value: api_base_url.into(),
@@ -3138,6 +3654,7 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    since: 5,
                     update_playlist_req: req,
                     update_track_req: UpdateTrackRequest {
                         album: Album {
@@ -3195,6 +3712,10 @@ mod test {
                 let data = Data {
                     api_base_url,
                     api_token: "jwt",
+                    broker: BrokerArgs {
+                        src_msg_exch: "src_msg_exch".into(),
+                        url: "url".into(),
+                    },
                     cmd: Command::Track(TrackCommand::Update(TrackUpdateCommandArgs {
                         api_base_url: ApiBaseUrlArg {
                             value: api_base_url.into(),
@@ -3226,6 +3747,7 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    since: 5,
                     update_playlist_req: UpdatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
@@ -3264,6 +3786,10 @@ mod test {
                 let data = Data {
                     api_base_url: "http://localhost:8000",
                     api_token: "jwt",
+                    broker: BrokerArgs {
+                        src_msg_exch: "src_msg_exch".into(),
+                        url: "url".into(),
+                    },
                     cmd: Command::Admin(AdminCommand::User(AdminUserCommand::UpdateRole(
                         AdminUserUpdateRoleCommandArgs {
                             db: db.clone(),
@@ -3285,6 +3811,7 @@ mod test {
                         offset: 0,
                     },
                     role: Role::from(role),
+                    since: 5,
                     update_playlist_req: UpdatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
@@ -3323,6 +3850,10 @@ mod test {
                 let data = Data {
                     api_base_url,
                     api_token,
+                    broker: BrokerArgs {
+                        src_msg_exch: "src_msg_exch".into(),
+                        url: "url".into(),
+                    },
                     cmd: Command::User(UserCommand::Get(UserGetCommandArgs {
                         api_base_url: ApiBaseUrlArg {
                             value: api_base_url.into(),
@@ -3353,6 +3884,7 @@ mod test {
                         offset: 0,
                     },
                     role: Role::Admin,
+                    since: 5,
                     update_playlist_req: UpdatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
@@ -3401,6 +3933,10 @@ mod test {
                 let data = Data {
                     api_base_url,
                     api_token: "jwt",
+                    broker: BrokerArgs {
+                        src_msg_exch: "src_msg_exch".into(),
+                        url: "url".into(),
+                    },
                     cmd: Command::User(UserCommand::Playlists(UserPlaylistsCommandArgs {
                         api_base_url: ApiBaseUrlArg {
                             value: api_base_url.into(),
@@ -3430,6 +3966,7 @@ mod test {
                     port,
                     req,
                     role: Role::Admin,
+                    since: 5,
                     update_playlist_req: UpdatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
@@ -3477,6 +4014,10 @@ mod test {
                 let data = Data {
                     api_base_url,
                     api_token: "jwt",
+                    broker: BrokerArgs {
+                        src_msg_exch: "src_msg_exch".into(),
+                        url: "url".into(),
+                    },
                     cmd: Command::User(UserCommand::Sources(UserSourcesCommandArgs {
                         api_base_url: ApiBaseUrlArg {
                             value: api_base_url.into(),
@@ -3505,6 +4046,7 @@ mod test {
                     port,
                     req,
                     role: Role::Admin,
+                    since: 5,
                     update_playlist_req: UpdatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
@@ -3553,6 +4095,10 @@ mod test {
                 let data = Data {
                     api_base_url,
                     api_token: "jwt",
+                    broker: BrokerArgs {
+                        src_msg_exch: "src_msg_exch".into(),
+                        url: "url".into(),
+                    },
                     cmd: Command::User(UserCommand::SpotifyPlaylists(
                         UserSpotifyPlaylistsCommandArgs {
                             api_base_url: ApiBaseUrlArg {
@@ -3584,6 +4130,7 @@ mod test {
                     port,
                     req,
                     role: Role::Admin,
+                    since: 5,
                     update_playlist_req: UpdatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
@@ -3631,6 +4178,10 @@ mod test {
                 let data = Data {
                     api_base_url,
                     api_token: "jwt",
+                    broker: BrokerArgs {
+                        src_msg_exch: "src_msg_exch".into(),
+                        url: "url".into(),
+                    },
                     cmd: Command::User(UserCommand::List(UserListCommandArgs {
                         api_base_url: ApiBaseUrlArg {
                             value: api_base_url.into(),
@@ -3659,6 +4210,7 @@ mod test {
                     port,
                     req,
                     role: Role::Admin,
+                    since: 5,
                     update_playlist_req: UpdatePlaylistRequest {
                         name: "name".into(),
                         predicate: Predicate::YearIs(1993),
@@ -3732,6 +4284,29 @@ mod test {
                     user: args.user.clone(),
                 };
                 let cfg = PostgresConfig::from(args);
+                assert_eq!(cfg, expected);
+            }
+        }
+    }
+
+    mod rabbitmq_config {
+        use super::*;
+
+        mod from_broker_args {
+            use super::*;
+
+            #[test]
+            fn config() {
+                let args = BrokerArgs {
+                    src_msg_exch: "src".into(),
+                    url: "url".into(),
+                };
+                let expected = RabbitMqConfig {
+                    playlist_msg_exch: DEFAULT_PLAYLIST_MSG_EXCH.into(),
+                    src_msg_exch: args.src_msg_exch.clone(),
+                    url: args.url.clone(),
+                };
+                let cfg = RabbitMqConfig::from(args);
                 assert_eq!(cfg, expected);
             }
         }

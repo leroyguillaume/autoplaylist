@@ -10,6 +10,10 @@ DECLARE
     src_2 UUID := 'f1c418db-13c0-47a7-9ecb-9aa4cf4995eb';
     src_3 UUID := '12d423d1-3bc0-4eef-b0c6-6748beb7d52e';
     src_4 UUID := 'a23c9cc9-2b72-46db-9a52-922f1c09db01';
+    src_5 UUID := '2d2e5401-55e1-4084-9925-8fbea33cf9cf';
+    src_6 UUID := 'b919d322-823d-4a4e-bc3d-f7dfde83f698';
+    src_7 UUID := 'da933c0b-5bc6-4eea-a967-35e9c8636417';
+    src_8 UUID := '5b21b979-a37f-40e8-93ec-541e45c29847';
     track_1 UUID := 'd16eb9f1-cf4d-4a41-9515-e9a8125d7843';
     track_2 UUID := '9095b250-d4ab-427f-b38f-32aaf45afec5';
     track_3 UUID := 'f747ca3a-0cc7-4d9f-b38a-dc506f99f5df';
@@ -112,7 +116,7 @@ BEGIN
             '2023-01-05T01:00:00Z',
             usr_1,
             '{"spotify":"savedTracks"}',
-            '"pending"'
+            '{"succeeded":{"start":"2023-01-05T01:00:00Z","end":"2023-01-05T01:00:10Z"}}'
         ),
         (
             src_2,
@@ -126,13 +130,41 @@ BEGIN
             '2023-02-05T03:00:00Z',
             usr_1,
             '{"spotify":{"playlist":"src_3"}}',
-            '"pending"'
+            '{"succeeded":{"start":"2023-01-05T02:00:00Z","end":"2023-01-05T02:00:10Z"}}'
         ),
         (
             src_4,
             '2023-02-05T04:00:00Z',
             usr_2,
             '{"spotify":{"playlist":"src_4"}}',
+            '{"succeeded":{"start":"2023-01-05T03:00:00Z","end":"2023-01-05T03:00:10Z"}}'
+        ),
+        (
+            src_5,
+            '2023-02-05T05:00:00Z',
+            usr_2,
+            '{"spotify":{"playlist":"src_5"}}',
+            '{"succeeded":{"start":"2023-01-05T03:06:00Z","end":"2023-01-05T03:06:10Z"}}'
+        ),
+        (
+            src_6,
+            '2023-02-05T06:00:00Z',
+            usr_2,
+            '{"spotify":{"playlist":"src_6"}}',
+            '{"aborted":{"end":"2023-01-05T03:06:10Z","state":{"start":"2023-01-05T03:06:00Z","step":"finished"}}}'
+        ),
+        (
+            src_7,
+            '2023-02-05T07:00:00Z',
+            usr_2,
+            '{"spotify":{"playlist":"src_7"}}',
+            '{"failed":{"details":"error","end":"2023-01-05T03:06:10Z","state":{"start":"2023-01-05T03:06:00Z","step":"finished"}}}'
+        ),
+        (
+            src_8,
+            '2023-02-05T08:00:00Z',
+            usr_2,
+            '{"spotify":{"playlist":"src_8"}}',
             '"pending"'
         );
 

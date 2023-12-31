@@ -1,10 +1,11 @@
 [dependencies]
 anyhow = "1.0"
 async-trait = "0.1"
-autoplaylist-common = {path = "../common", features = ["api", "db"]}
+autoplaylist-common = {path = "../common", features = ["api", "broker", "db"]}
+chrono = "0.4"
 clap = {version = "4.4", features = ["derive", "env"]}
 jsonwebtoken = "9.2"
-mockable = {version = "2.4", features = ["browser", "http"]}
+mockable = {version = "2.4", features = ["browser", "clock", "http"]}
 reqwest = {version = "0.11", features = ["json"]}
 serde = "1.0"
 serde_json = "1.0"
@@ -15,7 +16,6 @@ uuid = "1.4"
 
 [dev-dependencies]
 autoplaylist-common = {path = "../common", features = ["test"]}
-chrono = "0.4"
 mockable = {version = "2.4", features = ["mock"]}
 mockall = "0.11"
 tempdir = "0.3"
