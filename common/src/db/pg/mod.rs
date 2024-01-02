@@ -1247,7 +1247,7 @@ mod test {
 
     pub async fn init(db: PgPool) -> PostgresPool {
         TracingConfig::new("autoplaylist-common", stderr).init(&DefaultEnv);
-        let secret = test_env_var(ENV_VAR_KEY_DB_SECRET, "changeit");
+        let secret: String = test_env_var(ENV_VAR_KEY_DB_SECRET, || "changeit".into());
         let db = PostgresPool::from_pool(db, &secret)
             .await
             .expect("failed to initialize database client");

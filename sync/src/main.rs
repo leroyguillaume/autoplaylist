@@ -40,7 +40,7 @@ async fn main() -> anyhow::Result<()> {
     let term = TerminationSignalListener::init()?;
     let db_cfg = PostgresConfig::from_env(&env)?;
     let db = Arc::new(PostgresPool::init(db_cfg).await?);
-    let broker_cfg = RabbitMqConfig::from_env(&env);
+    let broker_cfg = RabbitMqConfig::from_env(&env)?;
     let broker = RabbitMqClient::init(broker_cfg).await?;
     let spotify_cfg = RSpotifyConfig::from_env(&env)?;
     let spotify = RSpotifyClient::new(spotify_cfg);

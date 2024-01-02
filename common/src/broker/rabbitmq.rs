@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{num::ParseIntError, sync::Arc};
 
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -19,19 +19,37 @@ use super::{
 
 // Consts - Env var keys
 
-pub const ENV_VAR_KEY_BROKER_URL: &str = "BROKER_URL";
+pub const ENV_VAR_KEY_BROKER_HOST: &str = "BROKER_HOST";
+pub const ENV_VAR_KEY_BROKER_PASSWORD: &str = "BROKER_PASSWORD";
+pub const ENV_VAR_KEY_BROKER_PORT: &str = "BROKER_PORT";
+pub const ENV_VAR_KEY_BROKER_USER: &str = "BROKER_USER";
+pub const ENV_VAR_KEY_BROKER_VHOST: &str = "BROKER_VHOST";
 pub const ENV_VAR_KEY_PLAYLIST_MSG_EXCH: &str = "BROKER_EXCHANGE_PLAYLIST_MESSAGE";
 pub const ENV_VAR_KEY_SRC_MSG_EXCH: &str = "BROKER_EXCHANGE_SOURCE_MESSAGE";
 
 // Consts - Defaults
 
-pub const DEFAULT_BROKER_URL: &str = "amqp://localhost:5672/%2f";
+pub const DEFAULT_BROKER_HOST: &str = "localhost";
+pub const DEFAULT_BROKER_PASSWORD: &str = "guest";
+pub const DEFAULT_BROKER_PORT: u16 = 5672;
+pub const DEFAULT_BROKER_USER: &str = "guest";
+pub const DEFAULT_BROKER_VHOST: &str = "%2f";
 pub const DEFAULT_PLAYLIST_MSG_EXCH: &str = "playlist";
 pub const DEFAULT_SRC_MSG_EXCH: &str = "source";
 
 // Types
 
 pub type RabbitMqResult<T> = Result<T, RabbitMqError>;
+
+// RabbitMqConfigError
+
+#[derive(Debug, Error)]
+#[error("invalid broker port: {0}")]
+pub struct RabbitMqConfigError(
+    #[from]
+    #[source]
+    ParseIntError,
+);
 
 // RabbitMqError
 
@@ -65,25 +83,41 @@ pub struct RabbitMqInitError(
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RabbitMqConfig {
+    pub host: String,
+    pub password: String,
     pub playlist_msg_exch: String,
+    pub port: u16,
     pub src_msg_exch: String,
-    pub url: String,
+    pub user: String,
+    pub vhost: String,
 }
 
 impl RabbitMqConfig {
-    pub fn from_env(env: &dyn Env) -> Self {
+    pub fn from_env(env: &dyn Env) -> Result<Self, RabbitMqConfigError> {
         debug!("loading RabbitMQ configuration");
-        Self {
+        Ok(Self {
+            host: env
+                .string(ENV_VAR_KEY_BROKER_HOST)
+                .unwrap_or_else(|| DEFAULT_BROKER_HOST.into()),
+            password: env
+                .string(ENV_VAR_KEY_BROKER_PASSWORD)
+                .unwrap_or_else(|| DEFAULT_BROKER_PASSWORD.into()),
             playlist_msg_exch: env
                 .string(ENV_VAR_KEY_PLAYLIST_MSG_EXCH)
                 .unwrap_or_else(|| DEFAULT_PLAYLIST_MSG_EXCH.into()),
+            port: env
+                .u16(ENV_VAR_KEY_BROKER_PORT)
+                .unwrap_or(Ok(DEFAULT_BROKER_PORT))?,
             src_msg_exch: env
                 .string(ENV_VAR_KEY_SRC_MSG_EXCH)
                 .unwrap_or_else(|| DEFAULT_SRC_MSG_EXCH.into()),
-            url: env
-                .string(ENV_VAR_KEY_BROKER_URL)
-                .unwrap_or_else(|| DEFAULT_BROKER_URL.into()),
-        }
+            user: env
+                .string(ENV_VAR_KEY_BROKER_USER)
+                .unwrap_or_else(|| DEFAULT_BROKER_USER.into()),
+            vhost: env
+                .string(ENV_VAR_KEY_BROKER_VHOST)
+                .unwrap_or_else(|| DEFAULT_BROKER_VHOST.into()),
+        })
     }
 }
 
@@ -98,7 +132,11 @@ pub struct RabbitMqClient {
 impl RabbitMqClient {
     pub async fn init(cfg: RabbitMqConfig) -> Result<Self, RabbitMqInitError> {
         debug!("opening connection");
-        let conn = Connection::connect(&cfg.url, Default::default()).await?;
+        let url = format!(
+            "amqp://{}:{}@{}:{}/{}",
+            cfg.user, cfg.password, cfg.host, cfg.port, cfg.vhost,
+        );
+        let conn = Connection::connect(&url, Default::default()).await?;
         trace!("opening channel");
         let channel = conn.create_channel().await?;
         let exchs = [&cfg.playlist_msg_exch, &cfg.src_msg_exch];
@@ -401,6 +439,22 @@ mod test {
         }
     }
 
+    // test_broker_config
+
+    fn test_broker_config() -> RabbitMqConfig {
+        RabbitMqConfig {
+            host: test_env_var(ENV_VAR_KEY_BROKER_HOST, || DEFAULT_BROKER_HOST.into()),
+            password: test_env_var(ENV_VAR_KEY_BROKER_PASSWORD, || {
+                DEFAULT_BROKER_PASSWORD.into()
+            }),
+            playlist_msg_exch: "playlist".into(),
+            port: test_env_var(ENV_VAR_KEY_BROKER_PORT, || DEFAULT_BROKER_PORT),
+            src_msg_exch: "source".into(),
+            user: test_env_var(ENV_VAR_KEY_BROKER_USER, || DEFAULT_BROKER_USER.into()),
+            vhost: test_env_var(ENV_VAR_KEY_BROKER_VHOST, || DEFAULT_BROKER_VHOST.into()),
+        }
+    }
+
     // Mods
 
     mod rabbitmq_config {
@@ -413,9 +467,13 @@ mod test {
 
             #[derive(Default)]
             struct Params {
+                host: Option<String>,
+                password: Option<String>,
                 playlist_msg_exch: Option<String>,
+                port: Option<u16>,
                 src_msg_exch: Option<String>,
-                url: Option<String>,
+                user: Option<String>,
+                vhost: Option<String>,
             }
 
             // mock_optional_string
@@ -431,14 +489,21 @@ mod test {
 
             fn run(params: Params, expected: RabbitMqConfig) {
                 let mut env = MockEnv::new();
+                mock_optional_string(ENV_VAR_KEY_BROKER_HOST, params.host, &mut env);
+                mock_optional_string(ENV_VAR_KEY_BROKER_PASSWORD, params.password, &mut env);
+                mock_optional_string(ENV_VAR_KEY_BROKER_USER, params.user, &mut env);
+                mock_optional_string(ENV_VAR_KEY_BROKER_VHOST, params.vhost, &mut env);
+                env.expect_u16()
+                    .with(eq(ENV_VAR_KEY_BROKER_PORT))
+                    .times(1)
+                    .returning(move |_| params.port.map(Ok));
                 mock_optional_string(
                     ENV_VAR_KEY_PLAYLIST_MSG_EXCH,
                     params.playlist_msg_exch,
                     &mut env,
                 );
                 mock_optional_string(ENV_VAR_KEY_SRC_MSG_EXCH, params.src_msg_exch, &mut env);
-                mock_optional_string(ENV_VAR_KEY_BROKER_URL, params.url, &mut env);
-                let cfg = RabbitMqConfig::from_env(&env);
+                let cfg = RabbitMqConfig::from_env(&env).expect("failed to load configuration");
                 assert_eq!(cfg, expected);
             }
 
@@ -447,9 +512,13 @@ mod test {
             #[test]
             fn default() {
                 let expected = RabbitMqConfig {
+                    host: DEFAULT_BROKER_HOST.into(),
+                    password: DEFAULT_BROKER_PASSWORD.into(),
                     playlist_msg_exch: DEFAULT_PLAYLIST_MSG_EXCH.into(),
+                    port: DEFAULT_BROKER_PORT,
                     src_msg_exch: DEFAULT_SRC_MSG_EXCH.into(),
-                    url: DEFAULT_BROKER_URL.into(),
+                    user: DEFAULT_BROKER_USER.into(),
+                    vhost: DEFAULT_BROKER_VHOST.into(),
                 };
                 let params = Params::default();
                 run(params, expected);
@@ -458,14 +527,22 @@ mod test {
             #[test]
             fn overriden() {
                 let expected = RabbitMqConfig {
+                    host: "host".into(),
+                    password: "password".into(),
                     playlist_msg_exch: "playlist_msg_exch".into(),
+                    port: 1234,
                     src_msg_exch: "src_msg_exch".into(),
-                    url: "url".into(),
+                    user: "user".into(),
+                    vhost: "vhost".into(),
                 };
                 let params = Params {
+                    host: Some(expected.host.clone()),
+                    password: Some(expected.password.clone()),
                     playlist_msg_exch: Some(expected.playlist_msg_exch.clone()),
+                    port: Some(expected.port),
                     src_msg_exch: Some(expected.src_msg_exch.clone()),
-                    url: Some(expected.url.clone()),
+                    user: Some(expected.user.clone()),
+                    vhost: Some(expected.vhost.clone()),
                 };
                 run(params, expected);
             }
@@ -491,12 +568,7 @@ mod test {
                 };
                 let suffix = format!("_{}", Uuid::new_v4());
                 let queue = format!("test{suffix}");
-                let cfg = RabbitMqConfig {
-                    playlist_msg_exch: format!("{DEFAULT_PLAYLIST_MSG_EXCH}{suffix}"),
-                    src_msg_exch: format!("{DEFAULT_SRC_MSG_EXCH}{suffix}"),
-                    url: test_env_var(ENV_VAR_KEY_BROKER_URL, DEFAULT_BROKER_URL),
-                };
-                let client = RabbitMqClient::init(cfg)
+                let client = RabbitMqClient::init(test_broker_config())
                     .await
                     .expect("failed to initialize RabbitMQ client");
                 let (msg_tx, mut msg_rx) = mpsc::channel(1);
@@ -529,12 +601,7 @@ mod test {
                 };
                 let suffix = format!("_{}", Uuid::new_v4());
                 let queue = format!("test{suffix}");
-                let cfg = RabbitMqConfig {
-                    playlist_msg_exch: format!("{DEFAULT_PLAYLIST_MSG_EXCH}{suffix}"),
-                    src_msg_exch: format!("{DEFAULT_SRC_MSG_EXCH}{suffix}"),
-                    url: test_env_var(ENV_VAR_KEY_BROKER_URL, DEFAULT_BROKER_URL),
-                };
-                let client = RabbitMqClient::init(cfg)
+                let client = RabbitMqClient::init(test_broker_config())
                     .await
                     .expect("failed to initialize RabbitMQ client");
                 let (msg_tx, mut msg_rx) = mpsc::channel(1);
