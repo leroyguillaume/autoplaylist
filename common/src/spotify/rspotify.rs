@@ -608,14 +608,12 @@ mod test {
     fn init() -> RSpotifyClient {
         TracingConfig::new("autoplaylist-common", stderr).init(&DefaultEnv);
         let cfg = RSpotifyConfig {
-            api_base_url: test_env_var(
-                ENV_VAR_KEY_SPOTIFY_API_BASE_URL,
-                "http://localhost:8081/spotify/api",
-            ),
-            auth_base_url: test_env_var(
-                ENV_VAR_KEY_SPOTIFY_API_BASE_URL,
-                "http://localhost:8081/spotify/auth",
-            ),
+            api_base_url: test_env_var(ENV_VAR_KEY_SPOTIFY_API_BASE_URL, || {
+                "http://localhost:8081/spotify/api".into()
+            }),
+            auth_base_url: test_env_var(ENV_VAR_KEY_SPOTIFY_API_BASE_URL, || {
+                "http://localhost:8081/spotify/auth".into()
+            }),
             client_id: "client_id".into(),
             client_secret: "client_secret".into(),
         };

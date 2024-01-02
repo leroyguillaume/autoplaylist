@@ -99,9 +99,12 @@ pub fn parse_test_env_var<T: std::str::FromStr<Err = E>, E: std::error::Error, D
 // test_env_var
 
 #[cfg(any(test, feature = "test"))]
-pub fn test_env_var(key: &str, default: &'static str) -> String {
+pub fn test_env_var<T: std::str::FromStr, DEF: Fn() -> T>(key: &str, default: DEF) -> T {
     let key = format!("TEST_{key}");
-    std::env::var(key).ok().unwrap_or_else(|| default.into())
+    std::env::var(key)
+        .ok()
+        .and_then(|val| T::from_str(&val).ok())
+        .unwrap_or_else(default)
 }
 
 // Mods

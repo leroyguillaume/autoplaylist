@@ -717,10 +717,9 @@ mod test {
 
     fn init() -> DefaultApiClient {
         TracingConfig::new("autoplaylist-api-client", stderr).init(&DefaultEnv);
-        let base_url = test_env_var(
-            "AUTOPLAYLIST_API_BASE_URL",
-            "http://localhost:8081/autoplaylist",
-        );
+        let base_url = test_env_var("AUTOPLAYLIST_API_BASE_URL", || {
+            "http://localhost:8081/autoplaylist".into()
+        });
         DefaultApiClient::new(base_url)
     }
 

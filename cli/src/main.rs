@@ -16,8 +16,11 @@ use autoplaylist_common::{
     },
     broker::{
         rabbitmq::{
-            RabbitMqClient, RabbitMqConfig, DEFAULT_BROKER_URL, DEFAULT_PLAYLIST_MSG_EXCH,
-            DEFAULT_SRC_MSG_EXCH, ENV_VAR_KEY_BROKER_URL, ENV_VAR_KEY_SRC_MSG_EXCH,
+            RabbitMqClient, RabbitMqConfig, DEFAULT_BROKER_HOST, DEFAULT_BROKER_PASSWORD,
+            DEFAULT_BROKER_PORT, DEFAULT_BROKER_USER, DEFAULT_BROKER_VHOST,
+            DEFAULT_PLAYLIST_MSG_EXCH, DEFAULT_SRC_MSG_EXCH, ENV_VAR_KEY_BROKER_HOST,
+            ENV_VAR_KEY_BROKER_PASSWORD, ENV_VAR_KEY_BROKER_PORT, ENV_VAR_KEY_BROKER_USER,
+            ENV_VAR_KEY_BROKER_VHOST, ENV_VAR_KEY_SRC_MSG_EXCH,
         },
         BrokerClient, SourceMessage, SourceMessageKind,
     },
@@ -207,13 +210,45 @@ struct BrokerArgs {
     )]
     src_msg_exch: String,
     #[arg(
-        long = "broker-url",
-        env = ENV_VAR_KEY_BROKER_URL,
-        default_value = DEFAULT_BROKER_URL,
-        help = "Broker URL",
-        name = "BROKER_URL"
+        long = "broker-host",
+        env = ENV_VAR_KEY_BROKER_HOST,
+        default_value = DEFAULT_BROKER_HOST,
+        help = "Broker host",
+        name = "BROKER_HOST"
     )]
-    url: String,
+    host: String,
+    #[arg(
+        long = "broker-password",
+        env = ENV_VAR_KEY_BROKER_PASSWORD,
+        default_value = DEFAULT_BROKER_PASSWORD,
+        help = "Broker password",
+        name = "BROKER_PASSWORD"
+    )]
+    password: String,
+    #[arg(
+        long = "broker-port",
+        env = ENV_VAR_KEY_BROKER_PORT,
+        default_value_t = DEFAULT_BROKER_PORT,
+        help = "Broker port",
+        name = "BROKER_PORT"
+    )]
+    port: u16,
+    #[arg(
+        long = "broker-user",
+        env = ENV_VAR_KEY_BROKER_USER,
+        default_value = DEFAULT_BROKER_USER,
+        help = "Broker user",
+        name = "BROKER_USER"
+    )]
+    user: String,
+    #[arg(
+        long = "broker-vhost",
+        env = ENV_VAR_KEY_BROKER_VHOST,
+        default_value = DEFAULT_BROKER_VHOST,
+        help = "Broker virtual host (URL encoded)",
+        name = "BROKER_VHOST"
+    )]
+    vhost: String,
 }
 
 // Command
@@ -1484,9 +1519,13 @@ impl From<DatabaseArgs> for PostgresConfig {
 impl From<BrokerArgs> for RabbitMqConfig {
     fn from(args: BrokerArgs) -> Self {
         Self {
+            host: args.host,
+            password: args.password,
             playlist_msg_exch: DEFAULT_PLAYLIST_MSG_EXCH.into(),
+            port: args.port,
             src_msg_exch: args.src_msg_exch,
-            url: args.url,
+            user: args.user,
+            vhost: args.vhost,
         }
     }
 }
@@ -2124,8 +2163,12 @@ mod test {
                     api_base_url,
                     api_token: "jwt",
                     broker: BrokerArgs {
+                        host: "host".into(),
+                        password: "password".into(),
+                        port: 5672,
                         src_msg_exch: "src_msg_exch".into(),
-                        url: "url".into(),
+                        user: "user".into(),
+                        vhost: "vhost".into(),
                     },
                     cmd: Command::Auth(AuthCommand::Spotify(AuthSpotifyCommandArgs {
                         api_base_url: ApiBaseUrlArg {
@@ -2201,8 +2244,12 @@ mod test {
                     api_base_url,
                     api_token,
                     broker: BrokerArgs {
+                        host: "host".into(),
+                        password: "password".into(),
+                        port: 5672,
                         src_msg_exch: "src_msg_exch".into(),
-                        url: "url".into(),
+                        user: "user".into(),
+                        vhost: "vhost".into(),
                     },
                     cmd: Command::Me(MeCommandArgs {
                         api_base_url: ApiBaseUrlArg {
@@ -2283,8 +2330,12 @@ mod test {
                     api_base_url,
                     api_token: "jwt",
                     broker: BrokerArgs {
+                        host: "host".into(),
+                        password: "password".into(),
+                        port: 5672,
                         src_msg_exch: "src_msg_exch".into(),
-                        url: "url".into(),
+                        user: "user".into(),
+                        vhost: "vhost".into(),
                     },
                     cmd: Command::Playlist(PlaylistCommand::List(PlaylistListCommandArgs {
                         all: false,
@@ -2364,8 +2415,12 @@ mod test {
                     api_base_url,
                     api_token: "jwt",
                     broker: BrokerArgs {
+                        host: "host".into(),
+                        password: "password".into(),
+                        port: 5672,
                         src_msg_exch: "src_msg_exch".into(),
-                        url: "url".into(),
+                        user: "user".into(),
+                        vhost: "vhost".into(),
                     },
                     cmd: Command::Source(SourceCommand::List(SourceListCommandArgs {
                         all: false,
@@ -2456,8 +2511,12 @@ mod test {
                     api_base_url,
                     api_token,
                     broker: BrokerArgs {
+                        host: "host".into(),
+                        password: "password".into(),
+                        port: 5672,
                         src_msg_exch: "src_msg_exch".into(),
-                        url: "url".into(),
+                        user: "user".into(),
+                        vhost: "vhost".into(),
                     },
                     cmd: Command::Playlist(PlaylistCommand::Create(PlaylistCreateCommandArgs {
                         api_base_url: ApiBaseUrlArg {
@@ -2530,8 +2589,12 @@ mod test {
                     api_base_url,
                     api_token,
                     broker: BrokerArgs {
+                        host: "host".into(),
+                        password: "password".into(),
+                        port: 5672,
                         src_msg_exch: "src_msg_exch".into(),
-                        url: "url".into(),
+                        user: "user".into(),
+                        vhost: "vhost".into(),
                     },
                     cmd: Command::Playlist(PlaylistCommand::Delete(PlaylistDeleteCommandArgs {
                         api_base_url: ApiBaseUrlArg {
@@ -2596,8 +2659,12 @@ mod test {
                     api_base_url,
                     api_token,
                     broker: BrokerArgs {
+                        host: "host".into(),
+                        password: "password".into(),
+                        port: 5672,
                         src_msg_exch: "src_msg_exch".into(),
-                        url: "url".into(),
+                        user: "user".into(),
+                        vhost: "vhost".into(),
                     },
                     cmd: Command::Track(TrackCommand::Delete(TrackDeleteCommandArgs {
                         api_base_url: ApiBaseUrlArg {
@@ -2662,8 +2729,12 @@ mod test {
                     api_base_url,
                     api_token,
                     broker: BrokerArgs {
+                        host: "host".into(),
+                        password: "password".into(),
+                        port: 5672,
                         src_msg_exch: "src_msg_exch".into(),
-                        url: "url".into(),
+                        user: "user".into(),
+                        vhost: "vhost".into(),
                     },
                     cmd: Command::User(UserCommand::Delete(UserDeleteCommandArgs {
                         api_base_url: ApiBaseUrlArg {
@@ -2748,8 +2819,12 @@ mod test {
                     api_base_url,
                     api_token,
                     broker: BrokerArgs {
+                        host: "host".into(),
+                        password: "password".into(),
+                        port: 5672,
                         src_msg_exch: "src_msg_exch".into(),
-                        url: "url".into(),
+                        user: "user".into(),
+                        vhost: "vhost".into(),
                     },
                     cmd: Command::Playlist(PlaylistCommand::Get(PlaylistGetCommandArgs {
                         api_base_url: ApiBaseUrlArg {
@@ -2831,8 +2906,12 @@ mod test {
                     api_base_url,
                     api_token: "jwt",
                     broker: BrokerArgs {
+                        host: "host".into(),
+                        password: "password".into(),
+                        port: 5672,
                         src_msg_exch: "src_msg_exch".into(),
-                        url: "url".into(),
+                        user: "user".into(),
+                        vhost: "vhost".into(),
                     },
                     cmd: Command::Playlist(PlaylistCommand::Tracks(PlaylistTracksCommandArgs {
                         api_base_url: ApiBaseUrlArg {
@@ -2912,8 +2991,12 @@ mod test {
                     api_base_url,
                     api_token: "jwt",
                     broker: BrokerArgs {
+                        host: "host".into(),
+                        password: "password".into(),
+                        port: 5672,
                         src_msg_exch: "src_msg_exch".into(),
-                        url: "url".into(),
+                        user: "user".into(),
+                        vhost: "vhost".into(),
                     },
                     cmd: Command::Playlist(PlaylistCommand::List(PlaylistListCommandArgs {
                         all: true,
@@ -2994,8 +3077,12 @@ mod test {
                     api_base_url,
                     api_token,
                     broker: BrokerArgs {
+                        host: "host".into(),
+                        password: "password".into(),
+                        port: 5672,
                         src_msg_exch: "src_msg_exch".into(),
-                        url: "url".into(),
+                        user: "user".into(),
+                        vhost: "vhost".into(),
                     },
                     cmd: Command::Source(SourceCommand::Get(SourceGetCommandArgs {
                         api_base_url: ApiBaseUrlArg {
@@ -3077,8 +3164,12 @@ mod test {
                     api_base_url,
                     api_token: "jwt",
                     broker: BrokerArgs {
+                        host: "host".into(),
+                        password: "password".into(),
+                        port: 5672,
                         src_msg_exch: "src_msg_exch".into(),
-                        url: "url".into(),
+                        user: "user".into(),
+                        vhost: "vhost".into(),
                     },
                     cmd: Command::Source(SourceCommand::Tracks(SourceTracksCommandArgs {
                         api_base_url: ApiBaseUrlArg {
@@ -3157,8 +3248,12 @@ mod test {
                     api_base_url,
                     api_token: "jwt",
                     broker: BrokerArgs {
+                        host: "host".into(),
+                        password: "password".into(),
+                        port: 5672,
                         src_msg_exch: "src_msg_exch".into(),
-                        url: "url".into(),
+                        user: "user".into(),
+                        vhost: "vhost".into(),
                     },
                     cmd: Command::Source(SourceCommand::List(SourceListCommandArgs {
                         all: true,
@@ -3226,8 +3321,12 @@ mod test {
                     api_base_url,
                     api_token,
                     broker: BrokerArgs {
+                        host: "host".into(),
+                        password: "password".into(),
+                        port: 5672,
                         src_msg_exch: "src_msg_exch".into(),
-                        url: "url".into(),
+                        user: "user".into(),
+                        vhost: "vhost".into(),
                     },
                     cmd: Command::Playlist(PlaylistCommand::Synchronize(
                         PlaylistSynchronizeCommandArgs {
@@ -3294,8 +3393,12 @@ mod test {
                     api_base_url,
                     api_token,
                     broker: BrokerArgs {
+                        host: "host".into(),
+                        password: "password".into(),
+                        port: 5672,
                         src_msg_exch: "src_msg_exch".into(),
-                        url: "url".into(),
+                        user: "user".into(),
+                        vhost: "vhost".into(),
                     },
                     cmd: Command::Source(SourceCommand::Synchronize(
                         SourceSynchronizeCommandArgs {
@@ -3366,8 +3469,12 @@ mod test {
                 let id = Uuid::new_v4();
                 let since = 5;
                 let broker = BrokerArgs {
+                    host: "host".into(),
+                    password: "password".into(),
+                    port: 5672,
                     src_msg_exch: "src_msg_exch".into(),
-                    url: "url".into(),
+                    user: "user".into(),
+                    vhost: "vhost".into(),
                 };
                 let data = Data {
                     api_base_url: "http://localhost:8000",
@@ -3443,8 +3550,12 @@ mod test {
                     api_base_url,
                     api_token,
                     broker: BrokerArgs {
+                        host: "host".into(),
+                        password: "password".into(),
+                        port: 5672,
                         src_msg_exch: "src_msg_exch".into(),
-                        url: "url".into(),
+                        user: "user".into(),
+                        vhost: "vhost".into(),
                     },
                     cmd: Command::Track(TrackCommand::Get(TrackGetCommandArgs {
                         api_base_url: ApiBaseUrlArg {
@@ -3525,8 +3636,12 @@ mod test {
                     api_base_url,
                     api_token: "jwt",
                     broker: BrokerArgs {
+                        host: "host".into(),
+                        password: "password".into(),
+                        port: 5672,
                         src_msg_exch: "src_msg_exch".into(),
-                        url: "url".into(),
+                        user: "user".into(),
+                        vhost: "vhost".into(),
                     },
                     cmd: Command::Track(TrackCommand::List(TrackListCommandArgs {
                         api_base_url: ApiBaseUrlArg {
@@ -3620,8 +3735,12 @@ mod test {
                     api_base_url,
                     api_token: "jwt",
                     broker: BrokerArgs {
+                        host: "host".into(),
+                        password: "password".into(),
+                        port: 5672,
                         src_msg_exch: "src_msg_exch".into(),
-                        url: "url".into(),
+                        user: "user".into(),
+                        vhost: "vhost".into(),
                     },
                     cmd: Command::Playlist(PlaylistCommand::Update(PlaylistUpdateCommandArgs {
                         api_base_url: ApiBaseUrlArg {
@@ -3713,8 +3832,12 @@ mod test {
                     api_base_url,
                     api_token: "jwt",
                     broker: BrokerArgs {
+                        host: "host".into(),
+                        password: "password".into(),
+                        port: 5672,
                         src_msg_exch: "src_msg_exch".into(),
-                        url: "url".into(),
+                        user: "user".into(),
+                        vhost: "vhost".into(),
                     },
                     cmd: Command::Track(TrackCommand::Update(TrackUpdateCommandArgs {
                         api_base_url: ApiBaseUrlArg {
@@ -3787,8 +3910,12 @@ mod test {
                     api_base_url: "http://localhost:8000",
                     api_token: "jwt",
                     broker: BrokerArgs {
+                        host: "host".into(),
+                        password: "password".into(),
+                        port: 5672,
                         src_msg_exch: "src_msg_exch".into(),
-                        url: "url".into(),
+                        user: "user".into(),
+                        vhost: "vhost".into(),
                     },
                     cmd: Command::Admin(AdminCommand::User(AdminUserCommand::UpdateRole(
                         AdminUserUpdateRoleCommandArgs {
@@ -3851,8 +3978,12 @@ mod test {
                     api_base_url,
                     api_token,
                     broker: BrokerArgs {
+                        host: "host".into(),
+                        password: "password".into(),
+                        port: 5672,
                         src_msg_exch: "src_msg_exch".into(),
-                        url: "url".into(),
+                        user: "user".into(),
+                        vhost: "vhost".into(),
                     },
                     cmd: Command::User(UserCommand::Get(UserGetCommandArgs {
                         api_base_url: ApiBaseUrlArg {
@@ -3934,8 +4065,12 @@ mod test {
                     api_base_url,
                     api_token: "jwt",
                     broker: BrokerArgs {
+                        host: "host".into(),
+                        password: "password".into(),
+                        port: 5672,
                         src_msg_exch: "src_msg_exch".into(),
-                        url: "url".into(),
+                        user: "user".into(),
+                        vhost: "vhost".into(),
                     },
                     cmd: Command::User(UserCommand::Playlists(UserPlaylistsCommandArgs {
                         api_base_url: ApiBaseUrlArg {
@@ -4015,8 +4150,12 @@ mod test {
                     api_base_url,
                     api_token: "jwt",
                     broker: BrokerArgs {
+                        host: "host".into(),
+                        password: "password".into(),
+                        port: 5672,
                         src_msg_exch: "src_msg_exch".into(),
-                        url: "url".into(),
+                        user: "user".into(),
+                        vhost: "vhost".into(),
                     },
                     cmd: Command::User(UserCommand::Sources(UserSourcesCommandArgs {
                         api_base_url: ApiBaseUrlArg {
@@ -4096,8 +4235,12 @@ mod test {
                     api_base_url,
                     api_token: "jwt",
                     broker: BrokerArgs {
+                        host: "host".into(),
+                        password: "password".into(),
+                        port: 5672,
                         src_msg_exch: "src_msg_exch".into(),
-                        url: "url".into(),
+                        user: "user".into(),
+                        vhost: "vhost".into(),
                     },
                     cmd: Command::User(UserCommand::SpotifyPlaylists(
                         UserSpotifyPlaylistsCommandArgs {
@@ -4179,8 +4322,12 @@ mod test {
                     api_base_url,
                     api_token: "jwt",
                     broker: BrokerArgs {
+                        host: "host".into(),
+                        password: "password".into(),
+                        port: 5672,
                         src_msg_exch: "src_msg_exch".into(),
-                        url: "url".into(),
+                        user: "user".into(),
+                        vhost: "vhost".into(),
                     },
                     cmd: Command::User(UserCommand::List(UserListCommandArgs {
                         api_base_url: ApiBaseUrlArg {
@@ -4298,13 +4445,21 @@ mod test {
             #[test]
             fn config() {
                 let args = BrokerArgs {
+                    host: "host".into(),
+                    password: "password".into(),
+                    port: 5672,
                     src_msg_exch: "src".into(),
-                    url: "url".into(),
+                    user: "user".into(),
+                    vhost: "vhost".into(),
                 };
                 let expected = RabbitMqConfig {
+                    host: args.host.clone(),
+                    password: args.password.clone(),
                     playlist_msg_exch: DEFAULT_PLAYLIST_MSG_EXCH.into(),
+                    port: args.port,
                     src_msg_exch: args.src_msg_exch.clone(),
-                    url: args.url.clone(),
+                    user: args.user.clone(),
+                    vhost: args.vhost.clone(),
                 };
                 let cfg = RabbitMqConfig::from(args);
                 assert_eq!(cfg, expected);

@@ -62,7 +62,7 @@ async fn main() -> anyhow::Result<()> {
     TracingConfig::new("autoplaylist-api", stdout).init(&env);
     let term = TerminationSignalListener::init()?;
     let db_cfg = PostgresConfig::from_env(&env)?;
-    let broker_cfg = RabbitMqConfig::from_env(&env);
+    let broker_cfg = RabbitMqConfig::from_env(&env)?;
     let spotify_cfg = RSpotifyConfig::from_env(&env)?;
     let jwt_cfg = JwtConfig::from_env(&env)?;
     let jwt_prov = DefaultJwtProvider::new(jwt_cfg);
