@@ -270,7 +270,7 @@ export async function authenticateViaSpotify(code: string): Promise<Jwt> {
         }${API_PATH_AUTH}${API_PATH_SPOTIFY}${API_PATH_TOKEN}?${params.toString()}`,
         {
           method: "GET",
-          mode: "cors",
+          mode: fetchMode(cfg.apiUrl),
         },
       );
     })
@@ -522,7 +522,7 @@ async function byId<T>(path: string, id: string): Promise<T> {
       return await fetch(`${cfg.apiUrl}${path}/${id}`, {
         headers: { Authorization: `Bearer ${token}` },
         method: "GET",
-        mode: "cors",
+        mode: fetchMode(cfg.apiUrl),
       });
     })
     .then(parseJsonResponse<T>);
@@ -537,7 +537,7 @@ async function command(path: string): Promise<void> {
       return await fetch(`${cfg.apiUrl}${path}`, {
         headers: { Authorization: `Bearer ${token}` },
         method: "PUT",
-        mode: "cors",
+        mode: fetchMode(cfg.apiUrl),
       });
     })
     .catch(async (err) => {
@@ -560,7 +560,7 @@ async function create<T>(path: string, creation: any): Promise<T> {
           "Content-Type": "application/json",
         },
         method: "POST",
-        mode: "cors",
+        mode: fetchMode(cfg.apiUrl),
       });
     })
     .catch(async (err) => {
@@ -579,7 +579,7 @@ async function deleteById(path: string, id: string): Promise<void> {
       return await fetch(`${cfg.apiUrl}${path}/${id}`, {
         headers: { Authorization: `Bearer ${token}` },
         method: "DELETE",
-        mode: "cors",
+        mode: fetchMode(cfg.apiUrl),
       });
     })
     .catch(async (err) => {
@@ -587,6 +587,16 @@ async function deleteById(path: string, id: string): Promise<void> {
       return await Promise.reject(AppError.Unexpected);
     })
     .then(mapError);
+}
+
+// fetchMode
+
+function fetchMode(apiUrl: string): RequestMode {
+  if (apiUrl.startsWith(window.location.origin)) {
+    return "same-origin";
+  } else {
+    return "cors";
+  }
 }
 
 // list
@@ -607,7 +617,7 @@ async function list<T>(
       return await fetch(`${cfg.apiUrl}${path}?${params.toString()}`, {
         headers: { Authorization: `Bearer ${token}` },
         method: "GET",
-        mode: "cors",
+        mode: fetchMode(cfg.apiUrl),
       });
     })
     .then(parseJsonResponse<Page<T>>);
@@ -647,7 +657,7 @@ async function update<T>(path: string, id: string, body: any): Promise<T> {
           "Content-Type": "application/json",
         },
         method: "PUT",
-        mode: "cors",
+        mode: fetchMode(cfg.apiUrl),
         body: JSON.stringify(body),
       });
     })
