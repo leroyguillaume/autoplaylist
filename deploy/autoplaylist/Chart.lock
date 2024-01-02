@@ -1,0 +1,12 @@
+dependencies:
+- name: postgresql
+  repository: https://charts.bitnami.com/bitnami
+  version: 13.2.27
+- name: rabbitmq
+  repository: https://charts.bitnami.com/bitnami
+  version: 12.6.1
+- name: autoplaylist-api
+  repository: file://../autoplaylist-api
+  version: 0.1.0
+digest: sha256:0eb78d4f8419e6f3daea521944eba91c557bf4210d1ddea1eaef73795e5e8f59
+generated: "2024-01-02T21:44:51.808623+01:00"

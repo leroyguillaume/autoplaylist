@@ -1,0 +1,37 @@
+# Default values for autoplaylist.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+autoplaylist-api:
+  enabled: true
+
+externalSecrets:
+  store:
+    create: false
+    name: ''
+  secrets: {}
+
+postgresql:
+  enabled: true
+  image:
+    tag: '15'
+  auth:
+    username: autoplaylist
+    database: autoplaylist
+
+rabbitmq:
+  enabled: true
+  image:
+    tag: '3.10'
+  serviceAccount:
+    create: false
+  auth:
+    username: autoplaylist
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ''
+  token:
+    create: false
+    name: ''
