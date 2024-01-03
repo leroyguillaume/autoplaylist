@@ -509,7 +509,7 @@ pub struct PostgresConfig {
 impl PostgresConfig {
     pub fn from_env(env: &dyn Env) -> Result<Self, PostgresConfigError> {
         debug!("loading PostgreSQL configuration");
-        Ok(Self {
+        let cfg = Self {
             host: env
                 .string(ENV_VAR_KEY_DB_HOST)
                 .unwrap_or_else(|| DEFAULT_DB_HOST.into()),
@@ -528,7 +528,15 @@ impl PostgresConfig {
             user: env
                 .string(ENV_VAR_KEY_DB_USER)
                 .unwrap_or_else(|| DEFAULT_DB_USER.into()),
-        })
+        };
+        debug!(
+            pg.cfg.host = cfg.host,
+            pg.cfg.name = cfg.name,
+            pg.cfg.port = cfg.port,
+            pg.cfg.user = cfg.user,
+            "PostgreSQL configuration loaded"
+        );
+        Ok(cfg)
     }
 }
 
