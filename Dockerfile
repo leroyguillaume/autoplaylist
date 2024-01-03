@@ -15,18 +15,20 @@ COPY Cargo.* .
 
 RUN cargo build --release
 
-# api
+# runtime
 
-FROM alpine AS api
-
-ENV SERVER_ADDR 0.0.0.0:8000
+FROM alpine AS rust-runtime
 
 RUN <<EOF
-apk add --no-cache curl
 adduser -D app
+apk add --no-cache bind-tools
 EOF
 
 USER app
+
+# api
+
+FROM rust-runtime AS api
 
 COPY --chown=app:app --from=rust-build /opt/autoplaylist/target/release/autoplaylist-api /usr/local/bin/autoplaylist-api
 
@@ -36,11 +38,7 @@ EXPOSE 8000
 
 # cli
 
-FROM alpine AS cli
-
-RUN adduser -D app
-
-USER app
+FROM rust-runtime AS cli
 
 COPY --chown=app:app --from=rust-build /opt/autoplaylist/target/release/autoplaylist /usr/local/bin/autoplaylist
 
@@ -48,11 +46,7 @@ ENTRYPOINT [ "/usr/local/bin/autoplaylist" ]
 
 # sync
 
-FROM alpine AS sync
-
-RUN adduser -D app
-
-USER app
+FROM rust-runtime AS sync
 
 COPY --chown=app:app --from=rust-build /opt/autoplaylist/target/release/autoplaylist-sync /usr/local/bin/autoplaylist-sync
 

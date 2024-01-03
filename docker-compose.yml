@@ -3,6 +3,7 @@ version: '3'
 services:
   api:
     profiles: [main]
+    depends_on: [broker, db]
     build:
       context: .
       target: api
@@ -34,6 +35,7 @@ services:
 
   sync:
     profiles: [main]
+    depends_on: [broker, db]
     build:
       context: .
       target: sync
