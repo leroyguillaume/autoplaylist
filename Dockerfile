@@ -19,10 +19,7 @@ RUN cargo build --release
 
 FROM alpine AS rust-runtime
 
-RUN <<EOF
-adduser -D app
-apk add --no-cache bind-tools
-EOF
+RUN adduser -D app
 
 USER app
 

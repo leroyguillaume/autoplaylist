@@ -14,6 +14,8 @@ on:
     - common/**
     - sync/**
     - webapp/**
+    - .dockerignore
+    - Dockerfile
     - Cargo.lock
     - Cargo.toml
   push:
