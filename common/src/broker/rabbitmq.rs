@@ -95,7 +95,7 @@ pub struct RabbitMqConfig {
 impl RabbitMqConfig {
     pub fn from_env(env: &dyn Env) -> Result<Self, RabbitMqConfigError> {
         debug!("loading RabbitMQ configuration");
-        Ok(Self {
+        let cfg = Self {
             host: env
                 .string(ENV_VAR_KEY_BROKER_HOST)
                 .unwrap_or_else(|| DEFAULT_BROKER_HOST.into()),
@@ -117,7 +117,17 @@ impl RabbitMqConfig {
             vhost: env
                 .string(ENV_VAR_KEY_BROKER_VHOST)
                 .unwrap_or_else(|| DEFAULT_BROKER_VHOST.into()),
-        })
+        };
+        debug!(
+            rabbitmq.cfg.host = cfg.host,
+            rabbitmq.cfg.port = cfg.port,
+            rabbitmq.cfg.playlist_msg_exch = cfg.playlist_msg_exch,
+            rabbitmq.cfg.src_msg_exch = cfg.src_msg_exch,
+            rabbitmq.cfg.user = cfg.user,
+            rabbitmq.cfg.vhost = cfg.vhost,
+            "RabbitMQ configuration loaded"
+        );
+        Ok(cfg)
     }
 }
 

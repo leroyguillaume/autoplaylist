@@ -43,14 +43,16 @@ pub struct JwtConfig {
 impl JwtConfig {
     pub fn from_env(env: &dyn Env) -> Result<Self, JwtConfigError> {
         debug!("loading JWT configuration");
-        Ok(Self {
+        let cfg = Self {
             secret: env
                 .string(ENV_VAR_KEY_JWT_SECRET)
                 .ok_or(JwtConfigError::MissingEnvVar(ENV_VAR_KEY_JWT_SECRET))?,
             validity: env
                 .i64(ENV_VAR_KEY_JWT_VALIDITY)
                 .unwrap_or(Ok(DEFAULT_JWT_VALIDITY))?,
-        })
+        };
+        debug!(jwt.cfg.validity = cfg.validity, "JWT configuration loaded");
+        Ok(cfg)
     }
 }
 

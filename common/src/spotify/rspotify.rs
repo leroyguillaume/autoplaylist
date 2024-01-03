@@ -106,12 +106,18 @@ impl RSpotifyConfig {
         let client_secret = env
             .string(ENV_VAR_KEY_SPOTIFY_CLIENT_SECRET)
             .ok_or(RSpotifyConfigError(ENV_VAR_KEY_SPOTIFY_CLIENT_SECRET))?;
-        Ok(Self {
+        let cfg = Self {
             api_base_url,
             auth_base_url,
             client_id,
             client_secret,
-        })
+        };
+        debug!(
+            spotify.cfg.api_base_url = cfg.api_base_url,
+            spotify.cfg.auth_base_url = cfg.auth_base_url,
+            "Spotify configuration loaded"
+        );
+        Ok(cfg)
     }
 }
 
